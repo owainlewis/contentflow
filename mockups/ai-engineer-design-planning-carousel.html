@@ -7,14 +7,15 @@
     <style>
       :root {
         color-scheme: dark;
-        --page: #161616;
-        --panel: #222220;
-        --paper: #d9d9d6;
-        --ink: #11110f;
-        --muted: #66645e;
-        --rule: #aaa79f;
-        --accent: #b88d4f;
-        --button: #f2f1ed;
+        --page: #080b0e;
+        --panel: #0d1115;
+        --paper: #11161c;
+        --ink: #eef2f5;
+        --muted: #aeb8c1;
+        --rule: #27313a;
+        --accent: #9db9ce;
+        --accent-soft: #c6cda0;
+        --button: #f1f4f6;
         --slide-ratio: 4 / 5;
         font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
       }
@@ -26,9 +27,9 @@
       body {
         min-height: 100vh;
         margin: 0;
-        color: #f3f2ee;
+        color: var(--button);
         background:
-          radial-gradient(circle at 50% -20%, #3a3934 0, transparent 44rem),
+          radial-gradient(circle at 50% -20%, #17232d 0, transparent 44rem),
           var(--page);
       }
 
@@ -60,7 +61,7 @@
       .stage-header p,
       .stage-header span {
         margin: 0;
-        color: #aaa8a1;
+        color: #8c98a3;
         font-size: 12px;
         font-weight: 650;
         letter-spacing: 0.12em;
@@ -75,7 +76,8 @@
         margin-inline: auto;
         color: var(--ink);
         background: var(--paper);
-        box-shadow: 0 36px 90px rgb(0 0 0 / 40%);
+        border: 1px solid var(--rule);
+        box-shadow: 0 36px 90px rgb(0 0 0 / 55%);
       }
 
       .slide {
@@ -85,7 +87,7 @@
         grid-template-rows: auto 1fr auto;
         padding: 5.1% 5.6% 4.8%;
         background:
-          linear-gradient(135deg, rgb(255 255 255 / 15%), transparent 50%),
+          linear-gradient(135deg, rgb(157 185 206 / 3%), transparent 50%),
           var(--paper);
       }
 
@@ -97,7 +99,7 @@
         gap: 16px;
         padding-bottom: 2.8%;
         border-bottom: 1px solid var(--rule);
-        color: #25241f;
+        color: #dfe5e9;
         font-size: clamp(7px, 1.05vw, 12px);
         font-weight: 650;
         letter-spacing: 0.14em;
@@ -116,7 +118,7 @@
         align-items: center;
         justify-content: space-between;
         gap: 16px;
-        color: #36342f;
+        color: #8f9aa4;
         font-size: clamp(7px, 1vw, 11px);
         font-weight: 680;
         letter-spacing: 0.12em;
@@ -139,9 +141,10 @@
         max-width: 11.8ch;
         margin-bottom: 6%;
         font-size: clamp(34px, 6.25vw, 72px);
-        font-weight: 800;
-        letter-spacing: -0.065em;
-        line-height: 0.93;
+        font-family: Georgia, "Times New Roman", serif;
+        font-weight: 500;
+        letter-spacing: -0.055em;
+        line-height: 0.94;
       }
 
       h1 { font-size: clamp(39px, 7vw, 80px); }
@@ -155,6 +158,7 @@
         color: var(--accent);
         font-size: clamp(9px, 1.25vw, 14px);
         font-weight: 800;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
         letter-spacing: 0.13em;
         text-transform: uppercase;
       }
@@ -162,7 +166,7 @@
       .subtitle {
         max-width: 31ch;
         margin: 0;
-        color: #383630;
+        color: #c4cdd4;
         font-size: clamp(15px, 2.25vw, 26px);
         font-weight: 540;
         line-height: 1.35;
@@ -171,8 +175,13 @@
       .cover .slide-content { justify-content: flex-start; padding-top: 11%; }
 
       .cover-note {
-        margin-top: 3%;
-        color: #55524b;
+        width: fit-content;
+        margin-top: 6%;
+        padding: 2.2% 3%;
+        border: 1px solid #2b3944;
+        border-radius: clamp(5px, 0.8vw, 9px);
+        color: #c8d3dc;
+        background: #182129;
         font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
         font-size: clamp(8px, 1.15vw, 13px);
         font-weight: 700;
@@ -183,31 +192,24 @@
       .body-copy {
         max-width: 40ch;
         margin: 0;
-        color: #34322d;
+        color: #c2cbd2;
         font-size: clamp(13px, 2vw, 22px);
         line-height: 1.45;
       }
 
       .body-copy + .body-copy { margin-top: 4%; }
 
-      .tool-list,
       .question-grid,
       .decision-grid,
       .task-card,
       .workflow { margin-top: 1%; }
 
-      .tool-list {
-        display: grid;
-        grid-template-columns: 1fr 1fr;
-        gap: clamp(8px, 1.5vw, 16px);
-      }
-
-      .tool-list span,
       .decision-grid > div {
         padding: 7% 8%;
-        border: 1px solid #aaa79f;
-        border-radius: 999px;
-        color: #46443e;
+        border: 1px solid var(--rule);
+        border-radius: clamp(7px, 1vw, 12px);
+        color: #c2cbd2;
+        background: #0d1217;
         font-size: clamp(10px, 1.55vw, 18px);
         font-weight: 650;
         text-align: center;
@@ -227,7 +229,7 @@
         flex-direction: column;
         justify-content: space-between;
         padding: 14% 11%;
-        border: 1px solid #a7a49c;
+        border: 1px solid var(--rule);
         border-radius: clamp(6px, 1vw, 12px);
       }
 
@@ -242,41 +244,38 @@
         line-height: 1.15;
       }
 
-      .automation-row {
-        display: grid;
-        grid-template-columns: repeat(3, 1fr);
-        gap: 2%;
-        margin-top: 2%;
+      .phase.agent-owned {
+        color: #0a0e11;
+        background: var(--accent);
+        border-color: var(--accent);
       }
 
-      .automation-card {
-        min-height: clamp(110px, 19vw, 210px);
-        display: flex;
-        flex-direction: column;
-        justify-content: space-between;
-        padding: 10%;
-        border: 1px solid #aaa79f;
-        border-radius: clamp(8px, 1.2vw, 14px);
-      }
+      .phase.agent-owned strong { color: #24323c; }
 
-      .automation-card strong {
-        font-size: clamp(14px, 2.2vw, 25px);
-        line-height: 1;
+      .phase.shared {
+        color: var(--accent-soft);
+        background: #171a14;
+        border-color: #7c8265;
       }
-
-      .automation-card span {
-        color: #57544d;
-        font-size: clamp(8px, 1.25vw, 14px);
-        line-height: 1.25;
-      }
-
-      .automation-card.agent { color: #eee8de; background: #26251f; border-color: #26251f; }
-      .automation-card.agent span { color: #c7c1b6; }
 
       .decision-grid {
         display: grid;
         grid-template-columns: repeat(3, 1fr);
         gap: 2%;
+      }
+
+      .decision-grid.two-jobs { grid-template-columns: 1fr 1fr; }
+
+      .decision-grid.two-jobs > div { min-height: clamp(165px, 29vw, 320px); }
+
+      .decision-grid ul {
+        display: grid;
+        gap: 0.35em;
+        margin: 0;
+        padding-left: 1.1em;
+        color: #aeb8c1;
+        font-size: clamp(9px, 1.45vw, 17px);
+        line-height: 1.35;
       }
 
       .decision-grid > div {
@@ -291,7 +290,7 @@
       .decision-grid strong {
         display: block;
         margin-bottom: 7%;
-        color: var(--ink);
+        color: var(--button);
         font-size: clamp(14px, 2.2vw, 25px);
         line-height: 1;
       }
@@ -304,6 +303,13 @@
         gap: 2%;
       }
 
+      .question-grid.requirements-grid {
+        grid-template-columns: 1fr 1fr;
+        gap: 3%;
+      }
+
+      .requirements-grid .question { min-height: clamp(92px, 15vw, 170px); }
+
       .question {
         min-height: clamp(118px, 20vw, 220px);
         display: flex;
@@ -311,7 +317,10 @@
         justify-content: space-between;
         padding: 10%;
         border-top: clamp(3px, 0.6vw, 7px) solid var(--accent);
-        background: rgb(255 255 255 / 23%);
+        border-right: 1px solid var(--rule);
+        border-bottom: 1px solid var(--rule);
+        border-left: 1px solid var(--rule);
+        background: #0d1217;
       }
 
       .question span {
@@ -340,7 +349,7 @@
         align-items: center;
         gap: 8%;
         padding: 7% 0;
-        border-bottom: 1px solid #aaa79f;
+        border-bottom: 1px solid var(--rule);
         font-size: clamp(12px, 1.8vw, 21px);
         font-weight: 680;
       }
@@ -356,9 +365,9 @@
 
       .task-card {
         padding: 5%;
-        border: 1px solid #99968e;
+        border: 1px solid var(--rule);
         border-radius: clamp(9px, 1.3vw, 15px);
-        background: rgb(255 255 255 / 21%);
+        background: #0d1217;
       }
 
       .task-card h3 {
@@ -378,8 +387,8 @@
 
       .task-card li {
         padding-top: 4%;
-        border-top: 1px solid #aaa79f;
-        color: #45423c;
+        border-top: 1px solid var(--rule);
+        color: #b9c3ca;
         font-size: clamp(9px, 1.45vw, 17px);
         font-weight: 630;
         line-height: 1.3;
@@ -391,13 +400,16 @@
         gap: 1.5%;
       }
 
+      .workflow.five { grid-template-columns: repeat(5, 1fr); }
+
       .workflow-step {
         min-height: clamp(98px, 17vw, 190px);
         display: flex;
         flex-direction: column;
         justify-content: space-between;
         padding: 13% 10%;
-        border: 1px solid #aaa79f;
+        border: 1px solid var(--rule);
+        background: #0d1217;
       }
 
       .workflow-step span {
@@ -410,12 +422,20 @@
       .workflow-step strong {
         font-size: clamp(10px, 1.55vw, 18px);
         line-height: 1.12;
+        overflow-wrap: anywhere;
+      }
+
+      .workflow-step small {
+        color: #87949f;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: clamp(7px, 1vw, 11px);
+        line-height: 1.3;
       }
 
       .closing-note {
         max-width: 25ch;
         margin: 5% 0 0;
-        color: #46433d;
+        color: #aeb8c1;
         font-size: clamp(12px, 1.8vw, 21px);
         line-height: 1.38;
       }
@@ -430,18 +450,18 @@
       .control-button {
         min-width: 42px;
         min-height: 42px;
-        border: 1px solid #484741;
+        border: 1px solid var(--rule);
         border-radius: 999px;
-        color: #f3f2ee;
-        background: #252522;
+        color: var(--button);
+        background: var(--panel);
         cursor: pointer;
       }
 
-      .control-button:hover { background: #33322e; }
-      .control-button:focus-visible { outline: 3px solid #d8aa66; outline-offset: 3px; }
+      .control-button:hover { background: #172029; }
+      .control-button:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
 
       .progress {
-        color: #aaa8a1;
+        color: #8c98a3;
         font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
         font-size: 13px;
       }
@@ -456,7 +476,9 @@
       .sidebar h2 {
         max-width: none;
         margin: 0 0 6px;
-        color: #f3f2ee;
+        color: var(--button);
+        font-family: Georgia, "Times New Roman", serif;
+        font-weight: 500;
         font-size: 24px;
         letter-spacing: -0.035em;
         line-height: 1.1;
@@ -464,7 +486,7 @@
 
       .sidebar > p {
         margin: 0 0 22px;
-        color: #aaa8a1;
+        color: #8c98a3;
         font-size: 14px;
         line-height: 1.5;
       }
@@ -480,15 +502,15 @@
         padding: 12px;
         border: 1px solid transparent;
         border-radius: 10px;
-        color: #c7c5bf;
+        color: #aeb8c1;
         background: transparent;
         cursor: pointer;
         text-align: left;
       }
 
-      .thumbnail:hover { background: #23231f; }
-      .thumbnail:focus-visible { outline: 3px solid #d8aa66; outline-offset: 2px; }
-      .thumbnail.is-active { color: #fff; background: #2b2b27; border-color: #4e4c46; }
+      .thumbnail:hover { background: #0d1217; }
+      .thumbnail:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+      .thumbnail.is-active { color: #fff; background: #111820; border-color: var(--rule); }
 
       .thumbnail-number {
         display: grid;
@@ -496,8 +518,8 @@
         width: 32px;
         aspect-ratio: 1;
         border-radius: 7px;
-        color: #171612;
-        background: #b88d4f;
+        color: #0a0e11;
+        background: var(--accent);
         font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
         font-size: 12px;
         font-weight: 800;
@@ -546,23 +568,27 @@
           <article class="slide cover is-active" aria-label="Slide 1 of 9">
             <header class="slide-chrome"><span>Owain Lewis</span><span>AI Engineering</span></header>
             <div class="slide-content">
-              <p class="eyebrow">The work has changed</p>
-              <h1>Coding is no longer the <span class="accent">hard part</span></h1>
-              <p class="subtitle">The two skills AI engineers need most are design and planning.</p>
-              <p class="cover-note">A practical workflow for agentic development</p>
+              <p class="eyebrow">A repeatable workflow</p>
+              <h1>My planning system for <span class="accent">Claude Code and Codex</span></h1>
+              <p class="subtitle">How I design and plan a feature before agents write the code.</p>
+              <p class="cover-note">Design → Review → Plan → Build</p>
             </div>
-            <footer class="slide-footer"><span>Design before you delegate</span><span class="footer-arrow">→</span></footer>
+            <footer class="slide-footer"><span>A practical AI engineering workflow</span><span class="footer-arrow">→</span></footer>
           </article>
 
           <article class="slide" aria-label="Slide 2 of 9" hidden>
             <header class="slide-chrome"><span>Owain Lewis</span><span>AI Engineering</span></header>
             <div class="slide-content">
-              <h2 class="wide-title">Better tools will not fix a <span class="accent">weak idea</span></h2>
-              <p class="body-copy">Most advice focuses on model choices, agent setups, and prompt tricks.</p>
-              <p class="body-copy">Those things can help. But they cannot rescue work that was poorly defined from the start.</p>
-              <div class="tool-list" aria-label="Common areas of focus">
-                <span>Model choice</span><span>Agent setup</span><span>Prompt tricks</span><span>Tool config</span>
+              <p class="eyebrow">The software workflow</p>
+              <h2 class="wide-title compact-title">Software still has <span class="accent">five stages</span></h2>
+              <div class="phase-list" aria-label="Five stages of software delivery">
+                <div class="phase"><strong>01</strong><span>Design</span></div>
+                <div class="phase"><strong>02</strong><span>Plan</span></div>
+                <div class="phase agent-owned"><strong>03</strong><span>Build</span></div>
+                <div class="phase shared"><strong>04</strong><span>Verify</span></div>
+                <div class="phase agent-owned"><strong>05</strong><span>Deploy</span></div>
               </div>
+              <p class="closing-note">Build and deploy are heavily automated. Verification depends on the risk.</p>
             </div>
             <footer class="slide-footer"><span>02 / 09</span><span class="footer-arrow">→</span></footer>
           </article>
@@ -570,14 +596,12 @@
           <article class="slide" aria-label="Slide 3 of 9" hidden>
             <header class="slide-chrome"><span>Owain Lewis</span><span>AI Engineering</span></header>
             <div class="slide-content">
-              <p class="eyebrow">The software workflow</p>
-              <h2 class="wide-title compact-title">Every feature moves through <span class="accent">five stages</span></h2>
-              <div class="phase-list" aria-label="Five stages of software delivery">
-                <div class="phase"><strong>01</strong><span>Design</span></div>
-                <div class="phase"><strong>02</strong><span>Plan</span></div>
-                <div class="phase"><strong>03</strong><span>Build</span></div>
-                <div class="phase"><strong>04</strong><span>Verify</span></div>
-                <div class="phase"><strong>05</strong><span>Deploy</span></div>
+              <h2 class="wide-title compact-title">Agents can build the <span class="accent">wrong feature</span> very quickly</h2>
+              <p class="body-copy">A faster coding agent makes the decisions before coding more important.</p>
+              <div class="decision-grid">
+                <div><strong>Design</strong><span>Choose the problem, outcome, and technical approach.</span></div>
+                <div><strong>Plan</strong><span>Let an agent split an approved design into bounded tasks.</span></div>
+                <div><strong>Verify</strong><span>You set the standard. Tests and reviews collect the evidence.</span></div>
               </div>
             </div>
             <footer class="slide-footer"><span>03 / 09</span><span class="footer-arrow">→</span></footer>
@@ -586,11 +610,17 @@
           <article class="slide" aria-label="Slide 4 of 9" hidden>
             <header class="slide-chrome"><span>Owain Lewis</span><span>AI Engineering</span></header>
             <div class="slide-content">
-              <h2 class="wide-title compact-title">Agents can handle much of the <span class="accent">middle</span></h2>
-              <div class="automation-row">
-                <div class="automation-card agent"><strong>Build</strong><span>An agent can turn a clear task into code and open a pull request.</span></div>
-                <div class="automation-card"><strong>Verify</strong><span>Tests and reviews can be automated. Human checks depend on risk.</span></div>
-                <div class="automation-card agent"><strong>Deploy</strong><span>Merge the change and let the delivery system ship it.</span></div>
+              <p class="eyebrow">Keep these separate</p>
+              <h2 class="wide-title compact-title">Design is <span class="accent">two different jobs</span></h2>
+              <div class="decision-grid two-jobs">
+                <div>
+                  <strong>Requirements</strong>
+                  <ul><li>What are we building?</li><li>Why does it matter?</li><li>Who is it for?</li><li>How will we know it worked?</li></ul>
+                </div>
+                <div>
+                  <strong>Technical design</strong>
+                  <ul><li>How will we build it?</li><li>Which stack and data model?</li><li>What can fail?</li><li>How will we run it?</li></ul>
+                </div>
               </div>
             </div>
             <footer class="slide-footer"><span>04 / 09</span><span class="footer-arrow">→</span></footer>
@@ -599,12 +629,15 @@
           <article class="slide" aria-label="Slide 5 of 9" hidden>
             <header class="slide-chrome"><span>Owain Lewis</span><span>AI Engineering</span></header>
             <div class="slide-content">
-              <h2 class="wide-title compact-title">Your job moves to the <span class="accent">decisions</span></h2>
-              <div class="decision-grid">
-                <div><strong>Design</strong><span>Choose what to build and how it should work.</span></div>
-                <div><strong>Plan</strong><span>Break the design into clear, bounded tasks.</span></div>
-                <div><strong>Verify</strong><span>Check the result with care that matches the risk.</span></div>
+              <p class="eyebrow">Requirements</p>
+              <h2 class="wide-title compact-title">These are <span class="accent">product decisions</span></h2>
+              <div class="question-grid requirements-grid">
+                <div class="question"><span>01</span><strong>What are we building?</strong></div>
+                <div class="question"><span>02</span><strong>Why does it matter?</strong></div>
+                <div class="question"><span>03</span><strong>Who is it for?</strong></div>
+                <div class="question"><span>04</span><strong>How will we know it worked?</strong></div>
               </div>
+              <p class="closing-note">An agent can help you write these down. It cannot choose them for you.</p>
             </div>
             <footer class="slide-footer"><span>05 / 09</span><span class="footer-arrow">→</span></footer>
           </article>
@@ -612,13 +645,12 @@
           <article class="slide" aria-label="Slide 6 of 9" hidden>
             <header class="slide-chrome"><span>Owain Lewis</span><span>AI Engineering</span></header>
             <div class="slide-content">
-              <p class="eyebrow">Start with requirements</p>
-              <h2 class="wide-title compact-title">Good design answers <span class="accent">three questions</span></h2>
-              <div class="question-grid">
-                <div class="question"><span>01</span><strong>What are we building?</strong></div>
-                <div class="question"><span>02</span><strong>Why does it matter?</strong></div>
-                <div class="question"><span>03</span><strong>Who is it for?</strong></div>
-              </div>
+              <p class="eyebrow">Technical design</p>
+              <h2 class="wide-title compact-title">Use the agent to find the <span class="accent">missing details</span></h2>
+              <ul class="technical-list">
+                <li>Interfaces</li><li>Data</li><li>Edge cases</li><li>Security</li><li>Limits</li><li>Operations</li><li>Monitoring</li><li>Failure paths</li>
+              </ul>
+              <p class="closing-note">Ask the agent to surface options and risks. You choose the trade-offs.</p>
             </div>
             <footer class="slide-footer"><span>06 / 09</span><span class="footer-arrow">→</span></footer>
           </article>
@@ -626,11 +658,15 @@
           <article class="slide" aria-label="Slide 7 of 9" hidden>
             <header class="slide-chrome"><span>Owain Lewis</span><span>AI Engineering</span></header>
             <div class="slide-content">
-              <h2 class="wide-title compact-title">Then make the <span class="accent">hard choices</span></h2>
-              <ul class="technical-list">
-                <li>Interfaces</li><li>Data</li><li>Edge cases</li><li>Security</li><li>Limits</li><li>Operations</li><li>Monitoring</li><li>Failure paths</li>
-              </ul>
-              <p class="closing-note">An agent can help you find options. You still need to judge the trade-offs.</p>
+              <p class="eyebrow">Four skills</p>
+              <h2 class="wide-title compact-title">Run them in <span class="accent">this order</span></h2>
+              <div class="workflow" aria-label="Four skill workflow">
+                <div class="workflow-step"><span>01</span><strong>$design</strong><small>→ design doc</small></div>
+                <div class="workflow-step"><span>02</span><strong>$architecture-review</strong><small>→ verdict</small></div>
+                <div class="workflow-step"><span>03</span><strong>$html-doc</strong><small>→ readable doc</small></div>
+                <div class="workflow-step"><span>04</span><strong>$plan</strong><small>→ tasks</small></div>
+              </div>
+              <p class="closing-note">Review the design before you turn it into implementation tasks.</p>
             </div>
             <footer class="slide-footer"><span>07 / 09</span><span class="footer-arrow">→</span></footer>
           </article>
@@ -638,8 +674,8 @@
           <article class="slide" aria-label="Slide 8 of 9" hidden>
             <header class="slide-chrome"><span>Owain Lewis</span><span>AI Engineering</span></header>
             <div class="slide-content">
-              <h2 class="wide-title compact-title">Planning makes a design <span class="accent">executable</span></h2>
-              <p class="body-copy">Large designs carry too much context for one reliable implementation pass. Split them into small tasks.</p>
+              <h2 class="wide-title compact-title">A task is a <span class="accent">small specification</span></h2>
+              <p class="body-copy">It should be small enough for one agent and complete enough to finish without guessing.</p>
               <div class="task-card">
                 <h3>Each task should state:</h3>
                 <ul>
@@ -658,17 +694,18 @@
           <article class="slide" aria-label="Slide 9 of 9" hidden>
             <header class="slide-chrome"><span>Owain Lewis</span><span>AI Engineering</span></header>
             <div class="slide-content">
-              <p class="eyebrow">A simple working loop</p>
-              <h2 class="wide-title compact-title">Spend your best thinking on the <span class="accent">design</span></h2>
-              <div class="workflow" aria-label="Four step design workflow">
-                <div class="workflow-step"><span>01</span><strong>Write the design</strong></div>
-                <div class="workflow-step"><span>02</span><strong>Review the architecture</strong></div>
-                <div class="workflow-step"><span>03</span><strong>Make it easy to read</strong></div>
-                <div class="workflow-step"><span>04</span><strong>Break it into tasks</strong></div>
+              <p class="eyebrow">The complete loop</p>
+              <h2 class="wide-title compact-title">Use the same process for <span class="accent">every feature</span></h2>
+              <div class="workflow five" aria-label="Five step delivery workflow">
+                <div class="workflow-step"><span>01</span><strong>Design</strong></div>
+                <div class="workflow-step"><span>02</span><strong>Review</strong></div>
+                <div class="workflow-step"><span>03</span><strong>Revise</strong></div>
+                <div class="workflow-step"><span>04</span><strong>Plan</strong></div>
+                <div class="workflow-step"><span>05</span><strong>Build</strong></div>
               </div>
-              <p class="closing-note">Use agents for the mechanical work. Keep humans responsible for the important choices.</p>
+              <p class="closing-note">You decide the problem and constraints. Agents handle the repeatable work.</p>
             </div>
-            <footer class="slide-footer"><span>Save this workflow</span><span>09 / 09</span></footer>
+            <footer class="slide-footer"><span>My planning system for Claude Code and Codex</span><span>09 / 09</span></footer>
           </article>
         </div>
 
@@ -695,15 +732,15 @@
       const progress = document.querySelector("#progress");
       const thumbnailList = document.querySelector("#thumbnail-list");
       const slideTitles = [
-        "Coding is no longer the hard part",
-        "Better tools will not fix a weak idea",
-        "Every feature moves through five stages",
-        "Agents can handle much of the middle",
-        "Your job moves to the decisions",
-        "Good design answers three questions",
-        "Then make the hard choices",
-        "Planning makes a design executable",
-        "Spend your best thinking on the design",
+        "My planning system for Claude Code and Codex",
+        "Software still has five stages",
+        "Agents can build the wrong feature very quickly",
+        "Design is two different jobs",
+        "Requirements are product decisions",
+        "Use the agent to find the missing details",
+        "Run four skills in this order",
+        "A task is a small specification",
+        "Use the same process for every feature",
       ];
       let activeIndex = 0;
 

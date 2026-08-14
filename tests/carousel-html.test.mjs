@@ -10,12 +10,24 @@ test("carousel presents the transcript as one nine-slide argument", async () => 
   const slides = html.match(/<article class="slide(?: [^"]*)?" aria-label="Slide \d of 9"/g) ?? [];
 
   assert.equal(slides.length, 9);
-  assert.match(html, /Coding is no longer the <span class="accent">hard part<\/span>/);
-  assert.match(html, /Better tools will not fix a/);
-  assert.match(html, /Every feature moves through/);
-  assert.match(html, /Good design answers/);
-  assert.match(html, /Planning makes a design/);
-  assert.match(html, /Spend your best thinking on the/);
+  assert.match(html, /My planning system for <span class="accent">Claude Code and Codex<\/span>/);
+  assert.match(html, /Software still has/);
+  assert.match(html, /Agents can build the/);
+  assert.match(html, /<strong>Requirements<\/strong>/);
+  assert.match(html, /<strong>Technical design<\/strong>/);
+  assert.match(html, /You set the standard\. Tests and reviews collect the evidence\./);
+  assert.match(html, /A task is a/);
+  assert.doesNotMatch(html, /Coding is no longer the hard part/);
+});
+
+test("carousel uses the reference document's dark editorial system", async () => {
+  const html = await readFile(carouselUrl, "utf8");
+
+  assert.match(html, /--paper: #11161c/);
+  assert.match(html, /--accent: #9db9ce/);
+  assert.match(html, /font-family: Georgia, "Times New Roman", serif/);
+  assert.match(html, /class="phase agent-owned"/);
+  assert.match(html, /class="phase shared"/);
 });
 
 test("carousel includes responsive, keyboard, and accessible navigation", async () => {
@@ -40,7 +52,7 @@ test("carousel controls and arrow keys move through the deck", async () => {
 
   document.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowLeft" }));
   assert.equal(document.querySelector(".slide.is-active").getAttribute("aria-label"), "Slide 1 of 9");
-  assert.equal(document.querySelector('.thumbnail[aria-current="true"]').getAttribute("aria-label"), "Show slide 1: Coding is no longer the hard part");
+  assert.equal(document.querySelector('.thumbnail[aria-current="true"]').getAttribute("aria-label"), "Show slide 1: My planning system for Claude Code and Codex");
 });
 
 test("carousel copy follows the plain-language constraints", async () => {
