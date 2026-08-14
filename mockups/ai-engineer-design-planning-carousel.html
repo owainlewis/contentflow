@@ -7,12 +7,12 @@
     <style>
       :root {
         color-scheme: dark;
-        --page: #080b0e;
-        --panel: #0d1115;
-        --paper: #11161c;
+        --page: #03080f;
+        --panel: #07111c;
+        --paper: #0a1623;
         --ink: #eef2f5;
         --muted: #aeb8c1;
-        --rule: #27313a;
+        --rule: #203548;
         --accent: #9db9ce;
         --accent-soft: #c6cda0;
         --button: #f1f4f6;
@@ -29,8 +29,8 @@
         margin: 0;
         color: var(--button);
         background:
-          radial-gradient(circle at 50% -20%, #17232d 0, transparent 44rem),
-          var(--page);
+          radial-gradient(circle at 50% -20%, #173653 0, #091725 27rem, transparent 52rem),
+          linear-gradient(145deg, #02070d 0%, var(--page) 48%, #061321 100%);
       }
 
       button { font: inherit; }
@@ -77,7 +77,9 @@
         color: var(--ink);
         background: var(--paper);
         border: 1px solid var(--rule);
-        box-shadow: 0 36px 90px rgb(0 0 0 / 55%);
+        box-shadow:
+          0 42px 110px rgb(0 3 9 / 75%),
+          inset 0 1px rgb(157 185 206 / 8%);
       }
 
       .slide {
@@ -87,7 +89,8 @@
         grid-template-rows: auto 1fr auto;
         padding: 5.1% 5.6% 4.8%;
         background:
-          linear-gradient(135deg, rgb(157 185 206 / 3%), transparent 50%),
+          radial-gradient(circle at 88% 0%, rgb(40 83 116 / 30%), transparent 42%),
+          linear-gradient(145deg, rgb(157 185 206 / 5%), transparent 52%),
           var(--paper);
       }
 
@@ -181,7 +184,7 @@
         border: 1px solid #2b3944;
         border-radius: clamp(5px, 0.8vw, 9px);
         color: #c8d3dc;
-        background: #182129;
+        background: #0d2030;
         font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
         font-size: clamp(8px, 1.15vw, 13px);
         font-weight: 700;
@@ -209,7 +212,8 @@
         border: 1px solid var(--rule);
         border-radius: clamp(7px, 1vw, 12px);
         color: #c2cbd2;
-        background: #0d1217;
+        background: #07111b;
+        box-shadow: inset 0 1px rgb(157 185 206 / 4%);
         font-size: clamp(10px, 1.55vw, 18px);
         font-weight: 650;
         text-align: center;
@@ -254,7 +258,7 @@
 
       .phase.shared {
         color: var(--accent-soft);
-        background: #171a14;
+        background: #121a18;
         border-color: #7c8265;
       }
 
@@ -320,7 +324,7 @@
         border-right: 1px solid var(--rule);
         border-bottom: 1px solid var(--rule);
         border-left: 1px solid var(--rule);
-        background: #0d1217;
+        background: #07111b;
       }
 
       .question span {
@@ -367,7 +371,7 @@
         padding: 5%;
         border: 1px solid var(--rule);
         border-radius: clamp(9px, 1.3vw, 15px);
-        background: #0d1217;
+        background: #07111b;
       }
 
       .task-card h3 {
@@ -409,7 +413,7 @@
         justify-content: space-between;
         padding: 13% 10%;
         border: 1px solid var(--rule);
-        background: #0d1217;
+        background: #07111b;
       }
 
       .workflow-step span {
@@ -457,7 +461,7 @@
         cursor: pointer;
       }
 
-      .control-button:hover { background: #172029; }
+      .control-button:hover { background: #0d2030; }
       .control-button:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
 
       .progress {
@@ -508,9 +512,9 @@
         text-align: left;
       }
 
-      .thumbnail:hover { background: #0d1217; }
+      .thumbnail:hover { background: #07111b; }
       .thumbnail:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
-      .thumbnail.is-active { color: #fff; background: #111820; border-color: var(--rule); }
+      .thumbnail.is-active { color: #fff; background: #0b1c2a; border-color: var(--rule); }
 
       .thumbnail-number {
         display: grid;
