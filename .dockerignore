@@ -1,0 +1,10 @@
+.git
+.codex
+.openai
+node_modules
+bin
+apps/api/web/dist
+coverage
+outputs
+work
+.env*
