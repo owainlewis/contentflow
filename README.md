@@ -4,6 +4,12 @@ ContentFlow is a focused UI prototype for writing, organising, and repurposing c
 
 The current version is intentionally front-end only. Content lives in local React state and resets when the page reloads.
 
+## MVP direction
+
+The approved MVP will run as one Go container on Cloud Run. It will serve a static TypeScript web app and the HTTP API from one origin. Firestore will store structured content, while Cloud Storage will store thumbnails and finished short-form video. Content remains available for 56 days, after which managed physical deletion follows asynchronously.
+
+See the [MVP design](docs/mvp/design.md) for the domain model, interfaces, lifecycle, security boundaries, and acceptance criteria.
+
 ## What is included
 
 - Searchable content library with type and status filters
