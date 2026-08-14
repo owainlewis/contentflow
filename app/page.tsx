@@ -78,13 +78,13 @@ type ContentItem = {
 };
 
 const typeMeta: Record<ContentType, { label: string; shortLabel: string; icon: LucideIcon; color: string }> = {
-  youtube: { label: "YouTube", shortLabel: "YouTube", icon: Video, color: "var(--accent)" },
-  linkedin: { label: "LinkedIn", shortLabel: "LinkedIn", icon: Network, color: "var(--accent)" },
-  x: { label: "X", shortLabel: "X", icon: X, color: "var(--accent)" },
-  instagram: { label: "Instagram", shortLabel: "Instagram", icon: Camera, color: "var(--accent)" },
-  tiktok: { label: "TikTok", shortLabel: "TikTok", icon: Music2, color: "var(--accent)" },
-  email: { label: "Email", shortLabel: "Email", icon: Mail, color: "var(--accent)" },
-  substack: { label: "Substack", shortLabel: "Substack", icon: FileText, color: "var(--accent)" },
+  youtube: { label: "YouTube", shortLabel: "YouTube", icon: Video, color: "var(--platform-icon)" },
+  linkedin: { label: "LinkedIn", shortLabel: "LinkedIn", icon: Network, color: "var(--platform-icon)" },
+  x: { label: "X", shortLabel: "X", icon: X, color: "var(--platform-icon)" },
+  instagram: { label: "Instagram", shortLabel: "Instagram", icon: Camera, color: "var(--platform-icon)" },
+  tiktok: { label: "TikTok", shortLabel: "TikTok", icon: Music2, color: "var(--platform-icon)" },
+  email: { label: "Email", shortLabel: "Email", icon: Mail, color: "var(--platform-icon)" },
+  substack: { label: "Substack", shortLabel: "Substack", icon: FileText, color: "var(--platform-icon)" },
 };
 
 const createDescriptions: Record<ContentType, string> = {
