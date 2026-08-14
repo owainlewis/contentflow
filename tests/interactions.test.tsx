@@ -8,6 +8,20 @@ import Home from "../app/page";
 afterEach(cleanup);
 
 describe("ContentFlow interactions", () => {
+  it("exposes the selected library item", async () => {
+    const user = userEvent.setup();
+    render(<Home />);
+
+    const youtube = screen.getByRole("button", { name: /Build an AI content system that actually saves time/ });
+    const linkedIn = screen.getByRole("button", { name: /You don’t need more content ideas/ });
+    expect(youtube.getAttribute("aria-current")).toBe("true");
+    expect(linkedIn.getAttribute("aria-current")).toBeNull();
+
+    await user.click(linkedIn);
+    expect(youtube.getAttribute("aria-current")).toBeNull();
+    expect(linkedIn.getAttribute("aria-current")).toBe("true");
+  });
+
   it("searches the library and filters by status", async () => {
     const user = userEvent.setup();
     render(<Home />);

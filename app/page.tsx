@@ -74,12 +74,12 @@ type ContentItem = {
 };
 
 const typeMeta: Record<ContentType, { label: string; shortLabel: string; icon: LucideIcon; color: string }> = {
-  youtube: { label: "YouTube", shortLabel: "YouTube", icon: Video, color: "#ff6b6b" },
-  linkedin: { label: "LinkedIn", shortLabel: "LinkedIn", icon: Network, color: "#66a3ff" },
-  x: { label: "X", shortLabel: "X", icon: X, color: "#d2d7df" },
-  reel: { label: "Short-form reels", shortLabel: "Reels", icon: Film, color: "#d998ff" },
-  email: { label: "Email", shortLabel: "Email", icon: Mail, color: "#ffa86b" },
-  substack: { label: "Substack", shortLabel: "Substack", icon: FileText, color: "#ff8a54" },
+  youtube: { label: "YouTube", shortLabel: "YouTube", icon: Video, color: "#9eaaa0" },
+  linkedin: { label: "LinkedIn", shortLabel: "LinkedIn", icon: Network, color: "#9eaaa0" },
+  x: { label: "X", shortLabel: "X", icon: X, color: "#9eaaa0" },
+  reel: { label: "Short-form reels", shortLabel: "Reels", icon: Film, color: "#9eaaa0" },
+  email: { label: "Email", shortLabel: "Email", icon: Mail, color: "#9eaaa0" },
+  substack: { label: "Substack", shortLabel: "Substack", icon: FileText, color: "#9eaaa0" },
 };
 
 const createDescriptions: Record<ContentType, string> = {
@@ -795,6 +795,7 @@ export default function Home() {
           {filteredItems.map((item) => (
             <button
               className={`content-card ${selected.id === item.id ? "selected" : ""}`}
+              aria-current={selected.id === item.id ? "true" : undefined}
               key={item.id}
               onClick={() => { setSelectedId(item.id); setLibraryOpen(false); }}
             >
