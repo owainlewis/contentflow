@@ -162,6 +162,7 @@ describe("ContentFlow interactions", () => {
     expect(screen.getByRole("heading", { name: "LinkedIn" })).toBeTruthy();
     await user.click(screen.getByRole("button", { name: /You don’t need more content ideas/ }));
     await user.click(screen.getByRole("button", { name: "Repurpose" }));
+    expect(screen.queryByText("Source content")).toBeNull();
 
     for (const output of ["X", "Email", "Instagram"]) {
       const button = screen.getByRole("button", { name: output });
@@ -176,7 +177,9 @@ describe("ContentFlow interactions", () => {
     expect((screen.getByLabelText("YouTube topic") as HTMLTextAreaElement).value).toMatch(/You don’t need more content ideas/);
     expect(screen.getByRole("heading", { name: "All content" })).toBeTruthy();
     expect(screen.getByText("3 sections")).toBeTruthy();
+    expect((screen.getByLabelText("Intro script") as HTMLTextAreaElement).value).toBe("Open with the strongest claim or practical result.");
     expect((screen.getByLabelText("Main section script") as HTMLTextAreaElement).value).toMatch(/better way to reuse the good ones/i);
+    expect(screen.queryByText(/Draft repurposed from/)).toBeNull();
   });
 
   it("mocks YouTube video replacement and removal", async () => {

@@ -4,15 +4,15 @@
 
 ## 1. Executive summary
 
-ContentFlow is currently a browser-only UI prototype. It demonstrates the writing experience, but content disappears on reload and agents cannot work with it through a stable interface. The MVP will turn the prototype into a personal, short-lived content workspace with a Go API and CLI, a TypeScript web app, file attachments, and explicit links between source and repurposed content.
+ContentFlow is currently a browser-only UI prototype. It demonstrates the writing experience, but content disappears on reload and agents cannot work with it through a stable interface. The MVP will turn the prototype into a personal, short-lived content workspace with a Go API and CLI, a TypeScript web app, and file attachments.
 
-The application will run on Google Cloud. Cloud Run will host the application, Firestore will store structured content, and Cloud Storage will store image, finished video, and PDF bytes. Content and assets stop being available 56 days after creation, while managed physical deletion follows asynchronously. This avoids an always-on database while keeping data durable during its useful life. The main downside is that Firestore has weaker relational constraints than PostgreSQL, so the Go service must enforce type, relationship, and ordering rules.
+The application will run on Google Cloud. Cloud Run will host the application, Firestore will store structured content, and Cloud Storage will store image, finished video, and PDF bytes. Content and assets stop being available 56 days after creation, while managed physical deletion follows asynchronously. This avoids an always-on database while keeping data durable during its useful life. The main downside is that Firestore has weaker constraints than PostgreSQL, so the Go service must enforce type and ordering rules.
 
 ## 2. Context and scope
 
 The existing app stores example items in React state. It supports searching, status filters, format-specific editors, YouTube script blocks, attachment placeholders, and a simulated repurposing flow. It has no durable database, authentication, upload storage, API, CLI, conflict handling, or automatic expiry.
 
-The MVP is a single-owner application. It must let the owner create, edit, search, organise, and relate content across seven formats. It must also let trusted agents do the same work through an API or CLI. Content is working material, not a permanent archive. Every content item and uploaded asset remains available for no more than eight weeks from its creation. The API then hides it immediately and Google Cloud removes its stored data asynchronously.
+The MVP is a single-owner application. It must let the owner create, edit, search, and organise content across seven formats. It must also let trusted agents do the same work through an API or CLI. Content is working material, not a permanent archive. Every content item and uploaded asset remains available for no more than eight weeks from its creation. The API then hides it immediately and Google Cloud removes its stored data asynchronously.
 
 AI generation stays outside the core application for the MVP. An agent may generate content, but it writes the result through the same public contract as the web app.
 
@@ -40,7 +40,7 @@ The owner creates a YouTube item in the web app. The browser sends a discriminat
 
 The owner uploads a thumbnail directly to Cloud Storage using a short-lived signed upload URL issued by the API. After upload, the browser confirms the asset with the API. The API verifies the stored object and attaches its asset record to the YouTube item.
 
-Later, an agent reads the YouTube item through the CLI, writes 20 X drafts in one atomic batch, and links every draft to the YouTube source as `repurposed_from`. Each derived item receives its own creation and expiry time. The web app shows those drafts in the same library as manually created content.
+Later, an agent reads the YouTube item through the CLI and writes 20 standalone X drafts in one atomic batch. Each draft receives its own creation and expiry time. The MVP does not persist where a repurposed draft came from. The web app shows those drafts in the same library as manually created content.
 
 At the 56-day deadline, the API stops returning the content or issuing download URLs. Firestore TTL later removes expired structured records. A Cloud Storage lifecycle rule makes uploaded objects eligible for deletion after 56 days. These managed deletion operations are asynchronous. Expiry is automatic and is not an archive or recovery mechanism.
 
@@ -56,7 +56,7 @@ A small head bootstrap script reads `contentflow-theme` before styles paint and 
 
 #### Go API
 
-The Go service owns authentication, authorization, request validation, Firestore transactions, asset metadata, source relationships, idempotency, optimistic concurrency, rate limits, expiry cleanup, and health endpoints. It exposes REST JSON under `/api/v1` and publishes an OpenAPI document. It does not generate social copy or call an AI model in the MVP. Cloud Scheduler calls an authenticated internal cleanup endpoint hourly to release expired upload reservations and reconcile storage usage.
+The Go service owns authentication, authorization, request validation, Firestore transactions, asset metadata, idempotency, optimistic concurrency, rate limits, expiry cleanup, and health endpoints. It exposes REST JSON under `/api/v1` and publishes an OpenAPI document. It does not generate social copy or call an AI model in the MVP. Cloud Scheduler calls an authenticated internal cleanup endpoint hourly to release expired upload reservations and reconcile storage usage.
 
 Use `net/http` with Chi, the official Firestore Go client, and the official Cloud Storage Go client. Keep business rules in Go services rather than HTTP handlers or storage adapters. Cloud Run uses a dedicated service account with only the Firestore, object, and URL-signing permissions required by the service.
 
@@ -64,11 +64,11 @@ Use `net/http` with Chi, the official Firestore Go client, and the official Clou
 
 The `flow` CLI is a thin client for the HTTP API. It owns argument parsing, local token configuration, JSON or human-readable output, and useful exit codes. It does not bypass the API or access Firestore directly.
 
-The first commands are `flow content list`, `show`, `create`, `update`, `archive`, `restore`, `batch-create`, and `link`. Every command supports `--json`. Permanent deletion and token management require an owner browser session and are not CLI commands in the MVP.
+The first commands are `flow content list`, `show`, `create`, `update`, `archive`, `restore`, and `batch-create`. Every command supports `--json`. Permanent deletion and token management require an owner browser session and are not CLI commands in the MVP.
 
 #### Firestore
 
-Firestore owns content identity, structured type-specific data, ordered YouTube sections, relationships, sessions, API token hashes, idempotency receipts, and asset metadata. It does not store image, video, or PDF bytes. Records use explicit fields and typed maps rather than an opaque serialized JSON string.
+Firestore owns content identity, structured type-specific data, ordered YouTube sections, sessions, API token hashes, idempotency receipts, and asset metadata. It does not store image, video, or PDF bytes. Records use explicit fields and typed maps rather than an opaque serialized JSON string.
 
 Every expiring collection has a timestamp covered by a Firestore TTL policy. Most use `expires_at`; asset metadata uses the later `purge_after` field so usage counters can be reconciled first. The service excludes logically expired items in reads so an item disappears at its deadline even if physical TTL deletion runs later.
 
@@ -109,14 +109,13 @@ Local development uses the Firestore emulator and a persistent filesystem implem
 - `INV-5`: YouTube sections have stable ULIDs and a unique, contiguous order within their parent item.
 - `INV-6`: An asset may be read or attached only by the workspace that owns it.
 - `INV-7`: Raw API tokens and OAuth secrets are never stored in Firestore or logs.
-- `INV-8`: A derived content relationship cannot point to the same item at both ends.
-- `INV-9`: Reusing an operation or idempotency key with the same request returns the original response, while reusing it with a different request returns `409`.
-- `INV-10`: Clients cannot extend, remove, or supply the canonical content expiry time.
-- `INV-11`: API reads never return an item whose `expires_at` is at or before the server time.
-- `INV-12`: Firestore documents remain below the 1 MiB platform limit.
-- `INV-13`: Reserved plus verified live asset bytes never exceed 25 GiB, and no upload URL is issued before its bytes are reserved.
-- `INV-14`: A signed download URL never remains valid beyond the asset's logical `expires_at`.
-- `INV-15`: Every attachment matches its content type and role; Instagram contains either one video or a uniquely ordered, contiguous image sequence, never both.
+- `INV-8`: Reusing an operation or idempotency key with the same request returns the original response, while reusing it with a different request returns `409`.
+- `INV-9`: Clients cannot extend, remove, or supply the canonical content expiry time.
+- `INV-10`: API reads never return an item whose `expires_at` is at or before the server time.
+- `INV-11`: Firestore documents remain below the 1 MiB platform limit.
+- `INV-12`: Reserved plus verified live asset bytes never exceed 25 GiB, and no upload URL is issued before its bytes are reserved.
+- `INV-13`: A signed download URL never remains valid beyond the asset's logical `expires_at`.
+- `INV-14`: Every attachment matches its content type and role; Instagram contains either one video or a uniquely ordered, contiguous image sequence, never both.
 
 ### Requirements
 
@@ -130,7 +129,6 @@ Local development uses the Firestore emulator and a persistent filesystem implem
 - Substack stores a working title, headline, subheadline, and plain-text body.
 - Instagram stores a working title, plain-text script, and either one finished Reel or one or more ordered images exported from Canva.
 - TikTok stores a working title, plain-text script, and an optional finished video.
-- The owner can link content items as repurposed content while both records exist.
 - The API supports atomic batch creation for agent-generated drafts.
 - Content created through the web, API, or CLI expires under the same rule.
 - The UI displays the expiry date and warns during the final seven days.
@@ -155,8 +153,6 @@ Local development uses the Firestore emulator and a persistent filesystem implem
 - `tiktok`: script
 
 `content_items/{content_id}/sections/{section_id}` stores a YouTube section's `position`, `title`, `body`, `workspace_id`, and `expires_at`. Other content types cannot create section documents.
-
-`content_relations/{relation_id}` stores `workspace_id`, `source_content_id`, `derived_content_id`, type, and `expires_at`. The expiry is the earlier expiry of the two linked items.
 
 `assets/{asset_id}` stores ownership, content ID, asset kind (`image`, `video`, or `pdf`), role, optional position, object key, original filename, expected byte size, verified byte size, media type, checksum, lifecycle state, reservation expiry, logical `expires_at`, and TTL `purge_after`. It contains no file bytes. Pending asset records reserve their expected bytes before an upload URL is issued.
 
@@ -193,7 +189,6 @@ PUT    /api/v1/content/{id}
 POST   /api/v1/content/{id}/archive
 POST   /api/v1/content/{id}/restore
 DELETE /api/v1/content/{id}
-POST   /api/v1/content/{id}/relations
 POST   /api/v1/assets/uploads
 POST   /api/v1/assets/{id}/complete
 POST   /api/v1/content/{id}/assets
@@ -232,7 +227,7 @@ The API response adds server-owned `id`, `revision`, `created_at`, `updated_at`,
 
 The browser permits one replacement request per item in flight. Edits made during a save are coalesced into the next full document. A retry after a timeout reuses the same operation ID. The service returns the stored response when the operation ID and request hash match. A stale revision returns `409` with the current revision and document.
 
-Batch creation accepts one idempotency key and up to 50 items. The service validates the entire request before starting a Firestore transaction. It creates every content item, relationship, and completed idempotency receipt atomically. A validation or transaction failure creates none of them.
+Batch creation accepts one idempotency key and up to 50 standalone items. The service validates the entire request before starting a Firestore transaction. It creates every content item and the completed idempotency receipt atomically. A validation or transaction failure creates none of them.
 
 An asset upload starts by recording expected size, media type, and SHA-256 checksum. Before issuing a URL, a Firestore transaction reserves the expected bytes against the workspace's 25 GiB limit. The API rejects the request if the reservation would exceed the limit. It then returns a 15-minute signed Cloud Storage upload request under the `pending/` prefix. Completion reads object metadata, verifies the exact reserved size, checksum, media type, signature, and ownership, then moves the object to its final key and converts reserved bytes to verified live bytes in one metadata transaction. It never trusts completion metadata from the client.
 
@@ -242,7 +237,7 @@ The API returns `400` for invalid input, `401` for missing identity, `403` for i
 
 ### Naming and identity
 
-The API creates monotonic ULIDs for content, sections, assets, tokens, and relations. IDs never change when a title or filename changes. Working titles need not be unique. Firestore document names use these IDs. Object keys are generated from workspace, content, and asset IDs. Original filenames are display metadata only.
+The API creates monotonic ULIDs for content, sections, assets, and tokens. IDs never change when a title or filename changes. Working titles need not be unique. Firestore document names use these IDs. Object keys are generated from workspace, content, and asset IDs. Original filenames are display metadata only.
 
 ## 7. Failure behavior and lifecycle
 
@@ -252,9 +247,9 @@ Firestore transactions may retry when documents change concurrently. The service
 
 Upload targets expire after 15 minutes. Pending uploads that are not verified expire after 24 hours. The hourly cleanup call releases their byte reservations and deletes their pending objects. The one-day pending-object lifecycle rule is the fallback if cleanup fails. If a counter update cannot be completed, the reservation remains counted and blocks capacity rather than allowing the quota to be exceeded.
 
-Archive and restore are revision-aware operations that do not alter `expires_at`. Manual deletion immediately removes the content document, its section and relation documents, asset metadata, and attached objects. If object deletion fails, the object remains inaccessible through the API and the 56-day bucket lifecycle rule still bounds its lifetime.
+Archive and restore are revision-aware operations that do not alter `expires_at`. Manual deletion immediately removes the content document, its section documents, asset metadata, and attached objects. If object deletion fails, the object remains inaccessible through the API and the 56-day bucket lifecycle rule still bounds its lifetime.
 
-At `expires_at`, the API stops returning the record and refuses to issue new asset URLs. Previously issued URLs cannot live past that timestamp. Firestore TTL performs physical deletion asynchronously, so correctness does not depend on the cleanup time. Subcollections are not deleted automatically with a parent document, so section documents carry their own matching `expires_at`. Relations and asset metadata also carry TTL fields. Asset metadata uses a later `purge_after` TTL so the hourly cleanup can first decrement usage and delete the object. If managed cleanup is delayed, expired data remains inaccessible.
+At `expires_at`, the API stops returning the record and refuses to issue new asset URLs. Previously issued URLs cannot live past that timestamp. Firestore TTL performs physical deletion asynchronously, so correctness does not depend on the cleanup time. Subcollections are not deleted automatically with a parent document, so section documents carry their own matching `expires_at`. Asset metadata also carries TTL fields. Asset metadata uses a later `purge_after` TTL so the hourly cleanup can first decrement usage and delete the object. If managed cleanup is delayed, expired data remains inaccessible.
 
 The API fails readiness when required configuration is invalid or Firestore cannot be reached. A transient Firestore or Cloud Storage failure returns `503` for affected operations and is safe to retry with the same operation ID. Shutdown stops new requests and gives active work 10 seconds to finish.
 
@@ -281,14 +276,14 @@ Local development binds the API to the private Compose network. The same-origin 
 - `AC-3`: The owner can reorder, add, edit, and remove YouTube sections without changing section IDs or producing duplicate positions.
 - `AC-4`: The owner can upload every allowed image, finished video, Instagram image sequence, or LinkedIn PDF, reload the item, preserve image order, and retrieve each asset only while authenticated to the owning workspace.
 - `AC-5`: Search and filters return the same content through the web app, API, and CLI.
-- `AC-6`: An agent can create 20 derived drafts in one batch, link them to one source, and safely retry the request without duplicates.
+- `AC-6`: An agent can create 20 standalone drafts in one batch and safely retry the request without duplicates.
 - `AC-7`: A stale browser or agent update receives the current server document and does not overwrite it. Retrying a committed operation after a lost response returns the original result.
-- `AC-8`: The CLI supports JSON output for list, show, create, update, archive, restore, batch-create, and link commands.
+- `AC-8`: The CLI supports JSON output for list, show, create, update, archive, restore, and batch-create commands.
 - `AC-9`: Light and dark themes initialize before first paint, persist on the device, and meet WCAG AA at 390 by 844 and 1440 by 1000 viewports.
 - `AC-10`: Local setup starts the web app, private API, Firestore emulator, and persistent local asset storage with one documented command.
 - `AC-11`: Cloud mode deploys to Cloud Run and uses Firestore, Cloud Storage, and Google OAuth from configured Google Cloud resources.
 - `AC-12`: Revoking an API token prevents its next authenticated request.
-- `AC-13`: A content item is hidden from all API reads at its `expires_at`. Its parent, section, relation, and asset metadata documents become eligible for asynchronous managed TTL deletion without orphaned readable data.
+- `AC-13`: A content item is hidden from all API reads at its `expires_at`. Its parent, section, and asset metadata documents become eligible for asynchronous managed TTL deletion without orphaned readable data.
 - `AC-14`: A Cloud Storage lifecycle rule makes uploaded objects eligible for asynchronous deletion at 56 days, and no application path or previously issued signed URL can retrieve an expired asset.
 - `AC-15`: Clients cannot set or extend `expires_at`, and archive or restore does not postpone deletion.
 - `AC-16`: A maximum-sized valid content item remains below Firestore's 1 MiB document limit.
@@ -296,11 +291,11 @@ Local development binds the API to the private Compose network. The same-origin 
 
 ## 10. Test approach
 
-Unit tests validate every type-specific payload, title normalization, status transition, scope check, expiry calculation, signed URL lifetime, and size limit. Firestore emulator tests prove `INV-1` through `INV-5`, `INV-8` through `INV-15`, and `AC-2`, `AC-3`, `AC-6`, `AC-7`, `AC-13`, `AC-15`, `AC-16`, and `AC-17`. Concurrent tests send the same idempotency key before and after commit with matching and different bodies, and race asset reservations against the remaining quota.
+Unit tests validate every type-specific payload, title normalization, status transition, scope check, expiry calculation, signed URL lifetime, and size limit. Firestore emulator tests prove `INV-1` through `INV-5`, `INV-8` through `INV-14`, and `AC-2`, `AC-3`, `AC-6`, `AC-7`, `AC-13`, `AC-15`, `AC-16`, and `AC-17`. Concurrent tests send the same idempotency key before and after commit with matching and different bodies, and race asset reservations against the remaining quota.
 
-HTTP integration tests prove authentication, CSRF, local proxy rejection, token revocation, error contracts, idempotency, expiry filtering, and workspace isolation for `INV-3`, `INV-6`, `INV-7`, `INV-9`, `INV-11`, `AC-4`, `AC-10`, `AC-12`, and `AC-13`.
+HTTP integration tests prove authentication, CSRF, local proxy rejection, token revocation, error contracts, idempotency, expiry filtering, and workspace isolation for `INV-3`, `INV-6`, `INV-7`, `INV-8`, `INV-10`, `AC-4`, `AC-10`, `AC-12`, and `AC-13`.
 
-Storage contract tests run against the filesystem adapter and a Google Cloud test bucket. They cover pre-upload quota reservation, concurrent reservation attempts, signed upload constraints, verification, allowed asset combinations, Instagram image ordering, abandoned reservation cleanup, ownership, download URL expiry, manual deletion, and lifecycle configuration for `INV-15`, `AC-4`, `AC-14`, and `AC-17`.
+Storage contract tests run against the filesystem adapter and a Google Cloud test bucket. They cover pre-upload quota reservation, concurrent reservation attempts, signed upload constraints, verification, allowed asset combinations, Instagram image ordering, abandoned reservation cleanup, ownership, download URL expiry, manual deletion, and lifecycle configuration for `INV-14`, `AC-4`, `AC-14`, and `AC-17`.
 
 CLI tests run commands against a real test API and assert human and JSON output for `AC-5` and `AC-8`. Browser tests cover each editor, autosave retry, external conflicts, asset uploads, expiry warnings, search, theme persistence, keyboard access, and desktop and mobile layouts for `AC-1`, `AC-3`, `AC-4`, `AC-5`, `AC-7`, and `AC-9`.
 
@@ -308,10 +303,10 @@ A deployment smoke test checks Cloud Run readiness, Google sign-in, Firestore ac
 
 ## 11. Risks and tradeoffs
 
-- Firestore cannot enforce every relationship and discriminator invariant. The Go service uses transactions and central validation, and emulator tests exercise every invalid combination.
+- Firestore cannot enforce every discriminator invariant. The Go service uses transactions and central validation, and emulator tests exercise every invalid combination.
 - YouTube sections require extra reads because they live in a subcollection. The API hides this storage layout and fetches sections concurrently.
 - Firestore TTL deletion is not immediate. API reads always filter by `expires_at`, so expired content becomes inaccessible at the correct time even when physical deletion is delayed.
-- Firestore TTL does not delete subcollections. Every section and relation has its own TTL field and matching policy.
+- Firestore TTL does not delete subcollections. Every section has its own TTL field and matching policy.
 - Cloud Storage and Firestore cleanup are independent and asynchronous. API authorization and signed URL lifetimes use the content and asset expiry timestamps, so a delayed object deletion cannot make an expired asset readable.
 - Fixed expiry can remove useful material. The MVP deliberately accepts this because ContentFlow is a disposable working queue rather than an archive.
 - Direct video uploads can consume storage quickly. Size limits, a 25 GiB live-asset budget, monitoring, and 56-day lifecycle rules keep usage bounded.

@@ -485,17 +485,16 @@ export default function Home() {
       ? selected.blocks?.map((block) => block.text).filter(Boolean).join("\n\n") ?? ""
       : selected.body;
     const drafts = selectedOutputs.map<ContentItem>((type) => {
-      const lead = `Draft repurposed from “${sourceTitle}”.`;
       const blocks: ScriptBlock[] | undefined = type === "youtube"
         ? [
-            { id: uniqueId("intro"), label: "Intro", text: lead },
+            { id: uniqueId("intro"), label: "Intro", text: "Open with the strongest claim or practical result." },
             { id: uniqueId("main"), label: "Main section", text: sourceText },
             { id: uniqueId("outro"), label: "Outro", text: "Bring the lesson together and give the viewer a clear next step." },
           ]
         : undefined;
       const body = type === "youtube"
         ? ""
-        : `${lead}\n\n${sourceText}\n\nShape this idea for ${typeMeta[type].label}.`;
+        : `${sourceText}\n\nShape this idea for ${typeMeta[type].label}.`;
       return {
         id: uniqueId(`${type}-repurposed`),
         type,
@@ -509,13 +508,13 @@ export default function Home() {
           ? {
               topic: sourceTitle,
               icp: "",
-              angle: `Adapt the core lesson from ${sourceTitle} into a clear, practical walkthrough.`,
+              angle: "Turn the core lesson into a clear, practical walkthrough.",
               cta: "",
               description: "",
             }
           : undefined,
         subject: type === "email" ? sourceTitle : undefined,
-        subheadline: type === "substack" ? `A practical guide based on ${sourceTitle}` : undefined,
+        subheadline: type === "substack" ? `A practical guide to ${sourceTitle}` : undefined,
       };
     });
     if (drafts.length) {
@@ -1141,13 +1140,8 @@ export default function Home() {
           <section ref={repurposeModalRef} className="modal-card repurpose-modal" role="dialog" aria-modal="true" aria-labelledby="repurpose-title">
             <div className="repurpose-glow" />
             <div className="modal-header">
-              <div><p className="eyebrow"><Sparkles size={13} /> Repurpose</p><h2 id="repurpose-title">Turn one idea into more</h2><p>Choose the formats you want to create from this source.</p></div>
+              <div><p className="eyebrow"><Sparkles size={13} /> Repurpose</p><h2 id="repurpose-title">Turn one idea into more</h2><p>Choose the formats you want to create.</p></div>
               <button className="icon-button" onClick={() => setRepurposeOpen(false)} aria-label="Close"><X size={19} /></button>
-            </div>
-            <div className="source-card">
-              <span style={{ color: typeMeta[selected.type].color }}><TypeIcon type={selected.type} size={18} /></span>
-              <div><small>Source content</small><strong>{displayTitle(selected)}</strong></div>
-              <Check size={16} />
             </div>
             <p className="output-label">Create drafts for</p>
             <div className="output-list">

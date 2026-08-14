@@ -589,12 +589,6 @@ button, select { cursor: pointer; }
 
 .repurpose-modal { width: min(520px, 100%); }
 .repurpose-glow { display: none; }
-.source-card { position: relative; display: grid; grid-template-columns: 34px 1fr auto; align-items: center; gap: 10px; margin: 0 23px; padding: 12px 13px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); }
-.source-card > span { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 7px; background: var(--surface-strong); }
-.source-card small, .source-card strong { display: block; }
-.source-card small { margin-bottom: 4px; color: var(--text-muted); font-size: var(--font-label); }
-.source-card strong { overflow: hidden; color: var(--text-strong); font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
-.source-card > svg { color: var(--text-muted); }
 .output-label { margin: 23px 23px 11px; color: var(--text-muted); font-size: var(--font-label); font-weight: 700; text-transform: uppercase; letter-spacing: .07em; }
 .output-list { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; padding: 0 23px 22px; }
 .output-list button { height: 51px; display: grid; grid-template-columns: 27px 1fr 18px; align-items: center; gap: 9px; padding: 0 12px; border: 1px solid var(--line); border-radius: 6px; color: var(--text-soft); background: var(--control); text-align: left; }
@@ -660,7 +654,6 @@ button, select { cursor: pointer; }
   .modal-backdrop { padding: 12px; align-items: end; }
   .modal-card { max-height: calc(100vh - 24px); overflow: auto; border-radius: 15px 15px 10px 10px; }
   .modal-header { padding: 22px 19px 17px; }
-  .source-card { margin-left: 18px; margin-right: 18px; }
   .output-list { padding-left: 18px; padding-right: 18px; }
   .output-label { margin-left: 18px; }
   .modal-footer { align-items: stretch; flex-direction: column; padding: 13px 18px 18px; }

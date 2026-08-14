@@ -19,7 +19,7 @@ See the [MVP design](docs/mvp/design.md) for the domain model, interfaces, lifec
 - Format-specific fields for email, Substack, LinkedIn, X, Instagram, and TikTok
 - Session-only mock uploads for images, finished videos, and PDFs
 - New-content flow for all seven formats
-- Repurposing flow that creates draft content from a source
+- Repurposing flow that creates standalone drafts without source links
 - Responsive desktop and mobile layouts
 
 ## Run locally
