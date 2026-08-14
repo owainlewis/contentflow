@@ -1,6 +1,6 @@
 # ContentFlow
 
-ContentFlow is a focused UI prototype for writing, organising, and repurposing creator content. It supports YouTube scripts, LinkedIn posts, X posts, short-form reels, emails, and Substack drafts.
+ContentFlow is a focused UI prototype for writing, organising, and repurposing creator content. It supports YouTube scripts, LinkedIn posts, X posts, Instagram and TikTok scripts, emails, and Substack drafts.
 
 The current version is intentionally front-end only. Content lives in local React state and resets when the page reloads.
 
@@ -13,12 +13,12 @@ See the [MVP design](docs/mvp/design.md) for the domain model, interfaces, lifec
 ## What is included
 
 - Searchable content library with type and status filters
-- Plain-text editing for email, Substack, X, reels, and LinkedIn
+- Plain-text editing for email, Substack, X, Instagram, TikTok, and LinkedIn
 - Collapsible YouTube brief for topic, audience, angle, CTA, publishing details, and thumbnail
 - Structured YouTube script blocks with inline section names
-- Format-specific fields for email, Substack, LinkedIn, X, and reels
+- Format-specific fields for email, Substack, LinkedIn, X, Instagram, and TikTok
 - UI-only image and video attachment controls
-- New-content flow for all six formats
+- New-content flow for all seven formats
 - Repurposing flow that creates draft content from a source
 - Responsive desktop and mobile layouts
 

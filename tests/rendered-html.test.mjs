@@ -38,7 +38,7 @@ test("ships the final product surface without starter artifacts", async () => {
     readFile(new URL("../package.json", import.meta.url), "utf8"),
   ]);
 
-  for (const label of ["YouTube", "LinkedIn", "Short-form reels", "Email", "Substack"]) {
+  for (const label of ["YouTube", "LinkedIn", "Instagram", "TikTok", "Email", "Substack"]) {
     assert.match(page, new RegExp(label));
   }
   assert.match(page, /function createRepurposedDrafts/);

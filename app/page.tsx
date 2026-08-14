@@ -3,12 +3,12 @@
 import {
   ArrowLeft,
   CalendarDays,
+  Camera,
   Check,
   ChevronDown,
   Clock3,
   FileText,
   FileVideo,
-  Film,
   ImagePlus,
   Inbox,
   Lightbulb,
@@ -16,7 +16,9 @@ import {
   Menu,
   MoreHorizontal,
   MousePointerClick,
+  Music2,
   Network,
+  Moon,
   PanelLeftClose,
   Paperclip,
   Plus,
@@ -24,6 +26,7 @@ import {
   Settings,
   Sparkles,
   SquarePen,
+  Sun,
   Target,
   Trash2,
   Upload,
@@ -35,8 +38,9 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
-type ContentType = "youtube" | "linkedin" | "x" | "reel" | "email" | "substack";
+type ContentType = "youtube" | "linkedin" | "x" | "instagram" | "tiktok" | "email" | "substack";
 type ContentStatus = "Idea" | "Draft" | "Ready" | "Published";
+type Theme = "light" | "dark";
 
 type ScriptBlock = {
   id: string;
@@ -74,19 +78,21 @@ type ContentItem = {
 };
 
 const typeMeta: Record<ContentType, { label: string; shortLabel: string; icon: LucideIcon; color: string }> = {
-  youtube: { label: "YouTube", shortLabel: "YouTube", icon: Video, color: "#9eaaa0" },
-  linkedin: { label: "LinkedIn", shortLabel: "LinkedIn", icon: Network, color: "#9eaaa0" },
-  x: { label: "X", shortLabel: "X", icon: X, color: "#9eaaa0" },
-  reel: { label: "Short-form reels", shortLabel: "Reels", icon: Film, color: "#9eaaa0" },
-  email: { label: "Email", shortLabel: "Email", icon: Mail, color: "#9eaaa0" },
-  substack: { label: "Substack", shortLabel: "Substack", icon: FileText, color: "#9eaaa0" },
+  youtube: { label: "YouTube", shortLabel: "YouTube", icon: Video, color: "var(--accent)" },
+  linkedin: { label: "LinkedIn", shortLabel: "LinkedIn", icon: Network, color: "var(--accent)" },
+  x: { label: "X", shortLabel: "X", icon: X, color: "var(--accent)" },
+  instagram: { label: "Instagram", shortLabel: "Instagram", icon: Camera, color: "var(--accent)" },
+  tiktok: { label: "TikTok", shortLabel: "TikTok", icon: Music2, color: "var(--accent)" },
+  email: { label: "Email", shortLabel: "Email", icon: Mail, color: "var(--accent)" },
+  substack: { label: "Substack", shortLabel: "Substack", icon: FileText, color: "var(--accent)" },
 };
 
 const createDescriptions: Record<ContentType, string> = {
   youtube: "Video brief and script blocks",
   linkedin: "One focused post",
   x: "One short-form post",
-  reel: "Script and video asset",
+  instagram: "Script and video asset",
+  tiktok: "Script and video asset",
   email: "Subject line and email body",
   substack: "Headline, sub-headline, and article",
 };
@@ -162,7 +168,7 @@ const initialItems: ContentItem[] = [
   {
     id: "ss-1",
     type: "substack",
-    title: "One idea, six useful pieces of content",
+    title: "One idea, seven useful pieces of content",
     body: "The goal of a content system is not to publish everywhere. It is to make the best use of every idea worth sharing.\n\nHere is the workflow I use to turn one long-form source into a small, coherent body of work.",
     status: "Idea",
     updated: "2 days ago",
@@ -170,14 +176,23 @@ const initialItems: ContentItem[] = [
     subheadline: "A practical workflow for getting more value from every strong idea",
   },
   {
-    id: "re-1",
-    type: "reel",
+    id: "ig-1",
+    type: "instagram",
     title: "Stop starting from scratch",
     body: "Hook: If content creation feels exhausting, you’re probably starting from scratch too often.\n\nBeat 1: Pick one strong source idea.\nBeat 2: Pull out the sharpest lesson.\nBeat 3: Rebuild it for one platform.\n\nCTA: Save this and use it for your next post.",
     status: "Published",
     updated: "4 days ago",
     words: 76,
     attachment: { kind: "video", name: "stop-starting-from-scratch-v2.mp4" },
+  },
+  {
+    id: "tt-1",
+    type: "tiktok",
+    title: "The three-step content system",
+    body: "Hook: You do not need another list of content ideas.\n\nShow the workflow: one source, one clear lesson, then one version for each platform.\n\nCTA: Try it with your next video.",
+    status: "Draft",
+    updated: "5 days ago",
+    words: 42,
   },
   {
     id: "li-2",
@@ -211,7 +226,8 @@ function displayTitle(item: ContentItem) {
   if (item.type === "substack") return item.title || "Untitled Substack post";
   if (item.type === "linkedin") return firstLine(item.body, "Untitled LinkedIn post");
   if (item.type === "x") return firstLine(item.body, "Untitled X post");
-  return firstLine(item.body, "Untitled reel");
+  if (item.type === "instagram") return firstLine(item.body, "Untitled Instagram script");
+  return firstLine(item.body, "Untitled TikTok script");
 }
 
 function uniqueId(prefix: string) {
@@ -235,9 +251,10 @@ export default function Home() {
   const [libraryOpen, setLibraryOpen] = useState(false);
   const [savePulse, setSavePulse] = useState(false);
   const [isCompact, setIsCompact] = useState(false);
+  const [theme, setTheme] = useState<Theme>("dark");
   const createModalRef = useRef<HTMLElement>(null);
   const repurposeModalRef = useRef<HTMLElement>(null);
-  const reelVideoInputRef = useRef<HTMLInputElement>(null);
+  const shortFormVideoInputRef = useRef<HTMLInputElement>(null);
 
   const selected = items.find((item) => item.id === selectedId) ?? items[0];
 
@@ -286,6 +303,21 @@ export default function Home() {
     return () => media.removeEventListener("change", sync);
   }, []);
 
+  useEffect(() => {
+    const syncTheme = window.setTimeout(() => {
+      setTheme(document.documentElement.dataset.theme === "light" ? "light" : "dark");
+    }, 0);
+    return () => window.clearTimeout(syncTheme);
+  }, []);
+
+  function toggleTheme() {
+    const current = document.documentElement.dataset.theme === "light" ? "light" : "dark";
+    const next = current === "dark" ? "light" : "dark";
+    document.documentElement.dataset.theme = next;
+    window.localStorage.setItem("contentflow-theme", next);
+    setTheme(next);
+  }
+
   const filteredItems = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
     return items.filter((item) => {
@@ -309,7 +341,7 @@ export default function Home() {
   const counts = useMemo(() => {
     return items.reduce<Record<ContentType, number>>(
       (all, item) => ({ ...all, [item.type]: all[item.type] + 1 }),
-      { youtube: 0, linkedin: 0, x: 0, reel: 0, email: 0, substack: 0 },
+      { youtube: 0, linkedin: 0, x: 0, instagram: 0, tiktok: 0, email: 0, substack: 0 },
     );
   }, [items]);
 
@@ -425,7 +457,7 @@ export default function Home() {
   }
 
   function openRepurpose() {
-    const preferredOutputs: ContentType[] = ["linkedin", "x", "email", "reel", "substack", "youtube"];
+    const preferredOutputs: ContentType[] = ["linkedin", "x", "email", "instagram", "tiktok", "substack", "youtube"];
     setSelectedOutputs(preferredOutputs.filter((type) => type !== selected.type).slice(0, 3));
     setRepurposeOpen(true);
   }
@@ -486,7 +518,11 @@ export default function Home() {
       );
     }
 
-    const heading = selected.type === "linkedin" ? "LinkedIn post" : selected.type === "x" ? "X post" : "Short-form reel";
+    const heading = selected.type === "linkedin"
+      ? "LinkedIn post"
+      : selected.type === "x"
+        ? "X post"
+        : `${typeMeta[selected.type].label} script`;
     return (
       <div className="document-title-copy compact">
         <p className="eyebrow">{typeMeta[selected.type].label}</p>
@@ -652,30 +688,32 @@ export default function Home() {
   }
 
   function renderPlainEditor() {
+    const isShortFormVideo = selected.type === "instagram" || selected.type === "tiktok";
     const editorLabel = selected.type === "email"
       ? "Email"
       : selected.type === "substack"
         ? "Article body"
-        : selected.type === "reel"
-          ? "Reel script"
+        : isShortFormVideo
+          ? `${typeMeta[selected.type].label} script`
           : `${typeMeta[selected.type].label} post`;
     const videoInputId = `video-${selected.id}`;
 
     return (
       <div className="plain-editor-wrap">
-        {selected.type === "reel" && (
-          <section className="media-panel" aria-label="Reel video attachment">
+        {isShortFormVideo && (
+          <section className="media-panel" aria-label={`${typeMeta[selected.type].label} video attachment`}>
             <div className="media-panel-copy">
               <span className="media-panel-icon"><FileVideo size={19} /></span>
-              <div><strong>Video asset</strong><small>Keep the finished reel with its script.</small></div>
+              <div><strong>Video asset</strong><small>Keep the finished {typeMeta[selected.type].label} video with its script.</small></div>
             </div>
             <input
-              ref={reelVideoInputRef}
+              key={videoInputId}
+              ref={shortFormVideoInputRef}
               className="visually-hidden"
               id={videoInputId}
               type="file"
               accept="video/*"
-              aria-label="Choose reel video"
+              aria-label={`Choose ${typeMeta[selected.type].label} video`}
               onChange={(event) => captureAttachment(event.target.files?.[0], "video")}
             />
             <label className="media-upload-button" htmlFor={videoInputId}>
@@ -686,9 +724,9 @@ export default function Home() {
                 <FileVideo size={15} />
                 <span>{selected.attachment.name}</span>
                 <button
-                  aria-label="Remove reel video"
+                  aria-label={`Remove ${typeMeta[selected.type].label} video`}
                   onClick={() => {
-                    if (reelVideoInputRef.current) reelVideoInputRef.current.value = "";
+                    if (shortFormVideoInputRef.current) shortFormVideoInputRef.current.value = "";
                     updateSelected({ attachment: undefined });
                   }}
                 >
@@ -703,7 +741,13 @@ export default function Home() {
           className="plain-editor"
           aria-label={editorLabel}
           value={selected.body}
-          placeholder={selected.type === "email" ? "Write the email…" : selected.type === "substack" ? "Start the article…" : "Write the post…"}
+          placeholder={selected.type === "email"
+            ? "Write the email…"
+            : selected.type === "substack"
+              ? "Start the article…"
+              : isShortFormVideo
+                ? "Write the script…"
+                : "Write the post…"}
           onChange={(event) => updateSelected({ body: event.target.value, words: wordCount(event.target.value) })}
         />
       </div>
@@ -748,6 +792,14 @@ export default function Home() {
         </div>
 
         <div className="sidebar-bottom">
+          <button
+            className="nav-item theme-toggle"
+            onClick={toggleTheme}
+            aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}
+          >
+            {theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}
+            <span>{theme === "dark" ? "Light mode" : "Dark mode"}</span>
+          </button>
           <button className="nav-item"><Settings size={18} /> <span>Settings</span></button>
           <div className="profile-row">
             <div className="avatar">OL</div>
@@ -826,6 +878,13 @@ export default function Home() {
           <button className="icon-button" onClick={() => setLibraryOpen(true)} aria-label="Open content library"><Menu size={20} /></button>
           <div className="brand-mark"><Zap size={15} fill="currentColor" /></div>
           <strong>ContentFlow</strong>
+          <button
+            className="icon-button mobile-theme-toggle"
+            onClick={toggleTheme}
+            aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}
+          >
+            {theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}
+          </button>
           <button className="icon-button" onClick={() => setCreateOpen(true)} aria-label="Create content"><Plus size={20} /></button>
         </header>
 
