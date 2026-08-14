@@ -65,6 +65,11 @@ type Attachment = {
   size: number;
 };
 
+type ThumbnailPreview = {
+  dataUrl?: string;
+  requestId: string;
+};
+
 type ContentItem = {
   id: string;
   type: ContentType;
@@ -282,6 +287,7 @@ export default function Home() {
   const [savePulse, setSavePulse] = useState(false);
   const [isCompact, setIsCompact] = useState(false);
   const [theme, setTheme] = useState<Theme>("dark");
+  const [thumbnailPreviews, setThumbnailPreviews] = useState<Record<string, ThumbnailPreview>>({});
   const createModalRef = useRef<HTMLElement>(null);
   const repurposeModalRef = useRef<HTMLElement>(null);
 
@@ -406,6 +412,29 @@ export default function Home() {
     updateSelected({ attachments: (selected.attachments ?? []).filter((attachment) => attachment.id !== attachmentId) });
   }
 
+  function replaceThumbnailPreview(file: File) {
+    const contentId = selected.id;
+    const requestId = uniqueId("thumbnail-read");
+    const reader = new FileReader();
+    setThumbnailPreviews((current) => ({ ...current, [contentId]: { requestId } }));
+    reader.addEventListener("load", () => {
+      if (typeof reader.result !== "string") return;
+      setThumbnailPreviews((current) => {
+        if (current[contentId]?.requestId !== requestId) return current;
+        return { ...current, [contentId]: { requestId, dataUrl: reader.result as string } };
+      });
+    }, { once: true });
+    reader.readAsDataURL(file);
+  }
+
+  function clearThumbnailPreview(contentId: string) {
+    setThumbnailPreviews((current) => {
+      const nextPreviews = { ...current };
+      delete nextPreviews[contentId];
+      return nextPreviews;
+    });
+  }
+
   function updateBlock(blockId: string, text: string) {
     const blocks = selected.blocks?.map((block) => (block.id === blockId ? { ...block, text } : block)) ?? [];
     const words = blocks.reduce((total, block) => total + wordCount(block.text), 0);
@@ -507,6 +536,7 @@ export default function Home() {
 
   function deleteSelected() {
     if (items.length === 1) return;
+    clearThumbnailPreview(selected.id);
     const remaining = items.filter((item) => item.id !== selected.id);
     setItems(remaining);
     setSelectedId(remaining[0].id);
@@ -679,7 +709,7 @@ export default function Home() {
             ))}
           </div>
         )}
-        <p className="prototype-note"><Paperclip size={12} /> Mock upload. Only file details are held in this browser session.</p>
+        <p className="prototype-note"><Paperclip size={12} /> Mock upload. Files are not persisted and reset on reload.</p>
       </section>
     );
   }
@@ -690,6 +720,7 @@ export default function Home() {
     const completed = [youtube.topic, youtube.icp, youtube.angle, youtube.cta, youtubeTitle, youtube.description, youtube.thumbnailName]
       .filter((value) => value?.trim()).length;
     const thumbnailInputId = `thumbnail-${selected.id}`;
+    const thumbnailPreview = thumbnailPreviews[selected.id]?.dataUrl;
 
     return (
       <div className="youtube-editor">
@@ -777,40 +808,68 @@ export default function Home() {
                   />
                 </label>
               </div>
-              <div className="thumbnail-field">
-                <span className="attachment-label">Thumbnail</span>
-                <input
-                  className="visually-hidden"
-                  id={thumbnailInputId}
-                  type="file"
-                  accept="image/*"
-                  aria-label="Choose YouTube thumbnail"
-                  onChange={(event) => {
-                    const file = event.target.files?.[0];
-                    if (file) {
-                      updateSelected({ youtube: { ...youtube, thumbnailName: file.name, thumbnailSize: file.size } });
-                      event.currentTarget.value = "";
-                    }
-                  }}
-                />
-                <label className={`attachment-dropzone thumbnail-dropzone ${youtube.thumbnailName ? "has-file" : ""}`} htmlFor={thumbnailInputId}>
-                  <span className="attachment-visual"><ImagePlus size={22} /></span>
-                  {youtube.thumbnailName ? (
-                    <><strong>{youtube.thumbnailName}</strong><small>Image · {formatFileSize(youtube.thumbnailSize ?? 0)}</small></>
-                  ) : (
-                    <><strong>Add thumbnail</strong><small>PNG, JPG, or WebP</small></>
-                  )}
-                </label>
-                {youtube.thumbnailName && (
-                  <button
-                    className="thumbnail-remove"
-                    aria-label="Remove YouTube thumbnail"
-                    onClick={() => updateSelected({ youtube: { ...youtube, thumbnailName: undefined, thumbnailSize: undefined } })}
+              <section className="youtube-preview-field" aria-label="YouTube video preview">
+                <span className="attachment-label">Video preview</span>
+                <div className="youtube-preview-card">
+                  <input
+                    className="visually-hidden"
+                    id={thumbnailInputId}
+                    type="file"
+                    accept="image/*"
+                    aria-label="Choose YouTube thumbnail"
+                    onChange={(event) => {
+                      const file = event.target.files?.[0];
+                      if (file) {
+                        updateSelected({ youtube: { ...youtube, thumbnailName: file.name, thumbnailSize: file.size } });
+                        replaceThumbnailPreview(file);
+                        event.currentTarget.value = "";
+                      }
+                    }}
+                  />
+                  <label
+                    className={`youtube-preview-thumbnail ${thumbnailPreview ? "has-preview" : ""}`}
+                    htmlFor={thumbnailInputId}
+                    style={thumbnailPreview ? { backgroundImage: `url("${thumbnailPreview}")` } : undefined}
                   >
-                    <X size={13} /> Remove
-                  </button>
-                )}
-              </div>
+                    {!thumbnailPreview && (
+                      <span className="youtube-thumbnail-placeholder" aria-hidden="true">
+                        <small>Content system</small>
+                        <strong>One idea.<br />Every format.</strong>
+                        <span>CF</span>
+                      </span>
+                    )}
+                    <span className="youtube-thumbnail-action">
+                      <Upload size={14} /> {youtube.thumbnailName ? "Replace thumbnail" : "Add thumbnail"}
+                    </span>
+                  </label>
+                  <div className="youtube-preview-details">
+                    <span className="youtube-channel-avatar">O</span>
+                    <div>
+                      <h3 aria-label="YouTube preview title">{youtubeTitle || "Your video title will appear here"}</h3>
+                      <small>Owain Lewis <span>·</span> Draft</small>
+                    </div>
+                    <MoreHorizontal size={17} />
+                  </div>
+                </div>
+                <div className="youtube-preview-file">
+                  <span>
+                    {youtube.thumbnailName
+                      ? `${youtube.thumbnailName} · Image · ${formatFileSize(youtube.thumbnailSize ?? 0)}`
+                      : "16:9 thumbnail · PNG, JPG, or WebP"}
+                  </span>
+                  {youtube.thumbnailName && (
+                    <button
+                      aria-label="Remove YouTube thumbnail"
+                      onClick={() => {
+                        clearThumbnailPreview(selected.id);
+                        updateSelected({ youtube: { ...youtube, thumbnailName: undefined, thumbnailSize: undefined } });
+                      }}
+                    >
+                      <X size={13} /> Remove
+                    </button>
+                  )}
+                </div>
+              </section>
             </div>
           </div>
         </details>

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it } from "vitest";
 import Home from "../app/page";
@@ -102,15 +102,30 @@ describe("ContentFlow interactions", () => {
     expect(topic.value).toBe("Agent-first content systems");
     expect(angle.value).toBe("Treat content as a graph, not a folder.");
 
+    const title = screen.getByLabelText("YouTube title") as HTMLInputElement;
+    await user.clear(title);
+    await user.type(title, "One idea, every format");
+    expect(screen.getByLabelText("YouTube preview title").textContent).toBe("One idea, every format");
+
     const thumbnail = screen.getByLabelText("Choose YouTube thumbnail") as HTMLInputElement;
+    const thumbnailPreview = document.querySelector(".youtube-preview-thumbnail") as HTMLElement;
     const thumbnailFile = new File(["image"], "agent-content-system.png", { type: "image/png" });
     await user.upload(thumbnail, thumbnailFile);
-    expect(screen.getByText("agent-content-system.png")).toBeTruthy();
-    expect(screen.getByText("Image · 5 B")).toBeTruthy();
+    expect(screen.getByText(/agent-content-system\.png/)).toBeTruthy();
+    expect(screen.getByText(/Image · 5 B/)).toBeTruthy();
+    await waitFor(() => expect(thumbnailPreview.style.backgroundImage).toContain("data:image/png;base64,aW1hZ2U="));
+
+    const replacementFile = new File(["new image"], "agent-content-system-v2.png", { type: "image/png" });
+    await user.upload(thumbnail, replacementFile);
+    expect(screen.getByText(/agent-content-system-v2\.png/)).toBeTruthy();
+    await waitFor(() => expect(thumbnailPreview.style.backgroundImage).toContain("data:image/png;base64,bmV3IGltYWdl"));
+
     await user.click(screen.getByRole("button", { name: "Remove YouTube thumbnail" }));
-    expect(screen.queryByText("agent-content-system.png")).toBeNull();
+    expect(screen.queryByText(/agent-content-system-v2\.png/)).toBeNull();
+    expect(thumbnailPreview.style.backgroundImage).toBe("");
     await user.upload(thumbnail, thumbnailFile);
-    expect(screen.getByText("agent-content-system.png")).toBeTruthy();
+    expect(screen.getByText(/agent-content-system\.png/)).toBeTruthy();
+    await waitFor(() => expect(thumbnailPreview.style.backgroundImage).toContain("data:image/png;base64,aW1hZ2U="));
 
     const brief = screen.getByText("Video brief").closest("details") as HTMLDetailsElement;
     expect(brief.open).toBe(true);
