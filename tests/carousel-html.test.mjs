@@ -23,10 +23,10 @@ test("carousel presents the transcript as one nine-slide argument", async () => 
 test("carousel uses the reference document's dark editorial system", async () => {
   const html = await readFile(carouselUrl, "utf8");
 
-  assert.match(html, /--page: #03080f/);
-  assert.match(html, /--paper: #0a1623/);
+  assert.match(html, /--page: #010409/);
+  assert.match(html, /--paper: #06101a/);
   assert.match(html, /--accent: #9db9ce/);
-  assert.match(html, /radial-gradient\(circle at 88% 0%, rgb\(40 83 116 \/ 30%\)/);
+  assert.match(html, /radial-gradient\(circle at 88% 0%, rgb\(30 66 93 \/ 14%\)/);
   assert.match(html, /font-family: Georgia, "Times New Roman", serif/);
   assert.match(html, /class="phase agent-owned"/);
   assert.match(html, /class="phase shared"/);

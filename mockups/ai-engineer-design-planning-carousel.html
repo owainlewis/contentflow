@@ -7,12 +7,12 @@
     <style>
       :root {
         color-scheme: dark;
-        --page: #03080f;
-        --panel: #07111c;
-        --paper: #0a1623;
+        --page: #010409;
+        --panel: #030912;
+        --paper: #06101a;
         --ink: #eef2f5;
         --muted: #aeb8c1;
-        --rule: #203548;
+        --rule: #172b3a;
         --accent: #9db9ce;
         --accent-soft: #c6cda0;
         --button: #f1f4f6;
@@ -29,8 +29,8 @@
         margin: 0;
         color: var(--button);
         background:
-          radial-gradient(circle at 50% -20%, #173653 0, #091725 27rem, transparent 52rem),
-          linear-gradient(145deg, #02070d 0%, var(--page) 48%, #061321 100%);
+          radial-gradient(circle at 50% -25%, #0d2538 0, #04101a 26rem, transparent 50rem),
+          linear-gradient(145deg, #000307 0%, var(--page) 54%, #020a12 100%);
       }
 
       button { font: inherit; }
@@ -78,8 +78,8 @@
         background: var(--paper);
         border: 1px solid var(--rule);
         box-shadow:
-          0 42px 110px rgb(0 3 9 / 75%),
-          inset 0 1px rgb(157 185 206 / 8%);
+          0 44px 120px rgb(0 2 6 / 85%),
+          inset 0 1px rgb(157 185 206 / 5%);
       }
 
       .slide {
@@ -89,8 +89,8 @@
         grid-template-rows: auto 1fr auto;
         padding: 5.1% 5.6% 4.8%;
         background:
-          radial-gradient(circle at 88% 0%, rgb(40 83 116 / 30%), transparent 42%),
-          linear-gradient(145deg, rgb(157 185 206 / 5%), transparent 52%),
+          radial-gradient(circle at 88% 0%, rgb(30 66 93 / 14%), transparent 42%),
+          linear-gradient(145deg, rgb(157 185 206 / 3%), transparent 52%),
           var(--paper);
       }
 
@@ -184,7 +184,7 @@
         border: 1px solid #2b3944;
         border-radius: clamp(5px, 0.8vw, 9px);
         color: #c8d3dc;
-        background: #0d2030;
+        background: #081622;
         font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
         font-size: clamp(8px, 1.15vw, 13px);
         font-weight: 700;
@@ -212,8 +212,8 @@
         border: 1px solid var(--rule);
         border-radius: clamp(7px, 1vw, 12px);
         color: #c2cbd2;
-        background: #07111b;
-        box-shadow: inset 0 1px rgb(157 185 206 / 4%);
+        background: #030b13;
+        box-shadow: inset 0 1px rgb(157 185 206 / 3%);
         font-size: clamp(10px, 1.55vw, 18px);
         font-weight: 650;
         text-align: center;
@@ -324,7 +324,7 @@
         border-right: 1px solid var(--rule);
         border-bottom: 1px solid var(--rule);
         border-left: 1px solid var(--rule);
-        background: #07111b;
+        background: #030b13;
       }
 
       .question span {
@@ -371,7 +371,7 @@
         padding: 5%;
         border: 1px solid var(--rule);
         border-radius: clamp(9px, 1.3vw, 15px);
-        background: #07111b;
+        background: #030b13;
       }
 
       .task-card h3 {
@@ -413,7 +413,7 @@
         justify-content: space-between;
         padding: 13% 10%;
         border: 1px solid var(--rule);
-        background: #07111b;
+        background: #030b13;
       }
 
       .workflow-step span {
@@ -461,7 +461,7 @@
         cursor: pointer;
       }
 
-      .control-button:hover { background: #0d2030; }
+      .control-button:hover { background: #081622; }
       .control-button:focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
 
       .progress {
@@ -512,9 +512,9 @@
         text-align: left;
       }
 
-      .thumbnail:hover { background: #07111b; }
+      .thumbnail:hover { background: #030b13; }
       .thumbnail:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
-      .thumbnail.is-active { color: #fff; background: #0b1c2a; border-color: var(--rule); }
+      .thumbnail.is-active { color: #fff; background: #071522; border-color: var(--rule); }
 
       .thumbnail-number {
         display: grid;
