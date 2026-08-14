@@ -6,7 +6,7 @@
 
 ContentFlow is currently a browser-only UI prototype. It demonstrates the writing experience, but content disappears on reload and agents cannot work with it through a stable interface. The MVP will turn the prototype into a personal, short-lived content workspace with a Go API and CLI, a TypeScript web app, file attachments, and explicit links between source and repurposed content.
 
-The application will run on Google Cloud. Cloud Run will host the application, Firestore will store structured content, and Cloud Storage will store image and video bytes. Content and assets stop being available 56 days after creation, while managed physical deletion follows asynchronously. This avoids an always-on database while keeping data durable during its useful life. The main downside is that Firestore has weaker relational constraints than PostgreSQL, so the Go service must enforce type, relationship, and ordering rules.
+The application will run on Google Cloud. Cloud Run will host the application, Firestore will store structured content, and Cloud Storage will store image, finished video, and PDF bytes. Content and assets stop being available 56 days after creation, while managed physical deletion follows asynchronously. This avoids an always-on database while keeping data durable during its useful life. The main downside is that Firestore has weaker relational constraints than PostgreSQL, so the Go service must enforce type, relationship, and ordering rules.
 
 ## 2. Context and scope
 
@@ -30,7 +30,7 @@ flowchart LR
     Browser["TypeScript web app"] --> App
 ```
 
-One Cloud Run service hosts the TypeScript web app and Go HTTP API behind one public origin. The TypeScript app is compiled to static assets and embedded in the Go binary. The web app owns presentation, local editing state, theme preference, and accessibility. The Go service owns identity, authorization, validation, persistence, uploads, concurrency, and the OpenAPI contract. Firestore owns structured records. Cloud Storage owns uploaded image and video bytes. Google OAuth establishes the owner's browser identity. API tokens establish CLI and agent identity.
+One Cloud Run service hosts the TypeScript web app and Go HTTP API behind one public origin. The TypeScript app is compiled to static assets and embedded in the Go binary. The web app owns presentation, local editing state, theme preference, and accessibility. The Go service owns identity, authorization, validation, persistence, uploads, concurrency, and the OpenAPI contract. Firestore owns structured records. Cloud Storage owns uploaded image, finished video, and PDF bytes. Google OAuth establishes the owner's browser identity. API tokens establish CLI and agent identity.
 
 ## 4. Proposed design
 
@@ -68,13 +68,13 @@ The first commands are `flow content list`, `show`, `create`, `update`, `archive
 
 #### Firestore
 
-Firestore owns content identity, structured type-specific data, ordered YouTube sections, relationships, sessions, API token hashes, idempotency receipts, and asset metadata. It does not store image or video bytes. Records use explicit fields and typed maps rather than an opaque serialized JSON string.
+Firestore owns content identity, structured type-specific data, ordered YouTube sections, relationships, sessions, API token hashes, idempotency receipts, and asset metadata. It does not store image, video, or PDF bytes. Records use explicit fields and typed maps rather than an opaque serialized JSON string.
 
 Every expiring collection has a timestamp covered by a Firestore TTL policy. Most use `expires_at`; asset metadata uses the later `purge_after` field so usage counters can be reconciled first. The service excludes logically expired items in reads so an item disappears at its deadline even if physical TTL deletion runs later.
 
 #### Cloud Storage
 
-Cloud Storage owns image and video bytes. The API generates object keys and never trusts a user filename as a path. An asset belongs to one content item and cannot be shared in the MVP. Bucket lifecycle management makes objects eligible for asynchronous deletion 56 days after their creation. A separate rule deletes objects under the `pending/` prefix after one day. Bucket soft delete is disabled because this application treats expired content as disposable and does not promise recovery.
+Cloud Storage owns image, finished video, and PDF bytes. The API generates object keys and never trusts a user filename as a path. An asset belongs to one content item and cannot be shared in the MVP. Bucket lifecycle management makes objects eligible for asynchronous deletion 56 days after their creation. A separate rule deletes objects under the `pending/` prefix after one day. Bucket soft delete is disabled because this application treats expired content as disposable and does not promise recovery.
 
 Local development uses the Firestore emulator and a persistent filesystem implementation of the asset interface. The same API and expiry rules apply, with a local cleanup process replacing managed TTL and bucket lifecycle behavior.
 
@@ -116,17 +116,20 @@ Local development uses the Firestore emulator and a persistent filesystem implem
 - `INV-12`: Firestore documents remain below the 1 MiB platform limit.
 - `INV-13`: Reserved plus verified live asset bytes never exceed 25 GiB, and no upload URL is issued before its bytes are reserved.
 - `INV-14`: A signed download URL never remains valid beyond the asset's logical `expires_at`.
+- `INV-15`: Every attachment matches its content type and role; Instagram contains either one video or a uniquely ordered, contiguous image sequence, never both.
 
 ### Requirements
 
 - The owner can create, read, update, search, filter, archive, restore, and delete content during its 56-day lifetime.
 - Supported types are YouTube, LinkedIn, X, Instagram, TikTok, email, and Substack.
 - Every item has a working title for the library. Type-specific publishing fields remain in the typed payload.
-- YouTube stores topic, ideal customer profile, angle, call to action, publishing title, description, thumbnail, and ordered script sections.
-- LinkedIn and X store a working title and plain-text body.
+- YouTube stores topic, ideal customer profile, angle, call to action, publishing title, description, thumbnail image, optional finished video, and ordered script sections.
+- LinkedIn stores a working title, plain-text body, and either an optional image or a Canva carousel PDF.
+- X stores a working title, plain-text body, and an optional image.
 - Email stores a working title, subject, and plain-text body.
 - Substack stores a working title, headline, subheadline, and plain-text body.
-- Instagram and TikTok each store a working title, plain-text script, and optional video asset.
+- Instagram stores a working title, plain-text script, and either one finished Reel or one or more ordered images exported from Canva.
+- TikTok stores a working title, plain-text script, and an optional finished video.
 - The owner can link content items as repurposed content while both records exist.
 - The API supports atomic batch creation for agent-generated drafts.
 - Content created through the web, API, or CLI expires under the same rule.
@@ -155,7 +158,7 @@ Local development uses the Firestore emulator and a persistent filesystem implem
 
 `content_relations/{relation_id}` stores `workspace_id`, `source_content_id`, `derived_content_id`, type, and `expires_at`. The expiry is the earlier expiry of the two linked items.
 
-`assets/{asset_id}` stores ownership, content ID, object key, original filename, expected byte size, verified byte size, media type, checksum, role, lifecycle state, reservation expiry, logical `expires_at`, and TTL `purge_after`. It contains no file bytes. Pending asset records reserve their expected bytes before an upload URL is issued.
+`assets/{asset_id}` stores ownership, content ID, asset kind (`image`, `video`, or `pdf`), role, optional position, object key, original filename, expected byte size, verified byte size, media type, checksum, lifecycle state, reservation expiry, logical `expires_at`, and TTL `purge_after`. It contains no file bytes. Pending asset records reserve their expected bytes before an upload URL is issued.
 
 `workspace_usage/{workspace_id}` stores reserved and verified live asset bytes. The API updates these counters in the same transaction that creates a reservation, completes an upload, deletes an asset, or releases an expired reservation. A stale counter may block uploads but must never allow the 25 GiB limit to be exceeded.
 
@@ -233,7 +236,7 @@ Batch creation accepts one idempotency key and up to 50 items. The service valid
 
 An asset upload starts by recording expected size, media type, and SHA-256 checksum. Before issuing a URL, a Firestore transaction reserves the expected bytes against the workspace's 25 GiB limit. The API rejects the request if the reservation would exceed the limit. It then returns a 15-minute signed Cloud Storage upload request under the `pending/` prefix. Completion reads object metadata, verifies the exact reserved size, checksum, media type, signature, and ownership, then moves the object to its final key and converts reserved bytes to verified live bytes in one metadata transaction. It never trusts completion metadata from the client.
 
-YouTube accepts one image with the `thumbnail` role. Instagram and TikTok each accept one video with the `video` role. The API rejects cross-workspace, already-attached, wrong-role, wrong-type, and pending assets. An authenticated download endpoint authorizes ownership before returning a signed URL whose expiry is the earlier of 15 minutes or the asset's logical `expires_at`.
+YouTube accepts one image with the `thumbnail` role and one finished video with the `video` role. Instagram accepts either one video with the `video` role or ordered images with the `carousel_slide` role. TikTok accepts one video with the `video` role. LinkedIn accepts either one image with the `image` role or one PDF with the `carousel` role. X accepts one image with the `image` role. The API rejects cross-workspace, already-attached, wrong-role, wrong-type, invalid position, and pending assets. An authenticated download endpoint authorizes ownership before returning a signed URL whose expiry is the earlier of 15 minutes or the asset's logical `expires_at`.
 
 The API returns `400` for invalid input, `401` for missing identity, `403` for insufficient scope, `404` for a missing, expired, or out-of-workspace record, `409` for a stale revision or conflicting idempotency key, `413` for a payload over the limit, and `429` for rate limiting.
 
@@ -265,9 +268,9 @@ Direct uploads use an exact-origin Cloud Storage CORS policy. Signed requests ar
 
 API tokens contain at least 32 random bytes. The service displays a token once, stores only its SHA-256 hash and short prefix, and supports `content:read`, `content:write`, and `assets:write` scopes. Bearer tokens cannot create or revoke tokens or change owner identity. Logs redact authorization headers, cookies, content bodies, upload URLs, and OAuth parameters.
 
-Plain text is untrusted input. The web app renders it as text, not HTML. The API limits JSON requests to 1 MiB, an individual text field to 500 KiB, images to 10 MiB, videos to 500 MiB, batches to 50 items, and API clients to 120 requests per minute.
+Plain text is untrusted input. The web app renders it as text, not HTML. The API limits JSON requests to 1 MiB, an individual text field to 500 KiB, images to 10 MiB, PDFs to 100 MiB, short-form videos to 500 MiB, finished YouTube videos to 5 GiB, batches to 50 items, and API clients to 120 requests per minute.
 
-The initial operating budget is 100 MiB of Firestore data and 25 GiB of reserved plus verified Cloud Storage objects. The API reserves expected bytes before upload and rejects a reservation that would exceed 25 GiB. Cloud Monitoring alerts at 50, 80, and 100 percent of that asset budget. The expected working set is below 10 GiB when the application stores scripts, thumbnails, and finished short-form videos but not raw footage or YouTube masters.
+The initial operating budget is 100 MiB of Firestore data and 25 GiB of reserved plus verified Cloud Storage objects. The API reserves expected bytes before upload and rejects a reservation that would exceed 25 GiB. Cloud Monitoring alerts at 50, 80, and 100 percent of that asset budget. Finished YouTube uploads may consume most of this allowance, so the UI shows current usage before a large upload begins.
 
 Local development binds the API to the private Compose network. The same-origin web proxy authenticates to it with a generated local secret. Production refuses to start if local proxy authentication is enabled. The CLI reaches the API through the web origin and uses a scoped API token.
 
@@ -276,7 +279,7 @@ Local development binds the API to the private Compose network. The same-origin 
 - `AC-1`: After signing in, the owner can create and edit every supported content type and the data remains after browser and Cloud Run instance restarts.
 - `AC-2`: The API rejects a payload whose discriminator and detail shape do not match, preserving `INV-2`.
 - `AC-3`: The owner can reorder, add, edit, and remove YouTube sections without changing section IDs or producing duplicate positions.
-- `AC-4`: The owner can upload a YouTube thumbnail or an Instagram or TikTok video, reload the item, and retrieve the attached asset only while authenticated to the owning workspace.
+- `AC-4`: The owner can upload every allowed image, finished video, Instagram image sequence, or LinkedIn PDF, reload the item, preserve image order, and retrieve each asset only while authenticated to the owning workspace.
 - `AC-5`: Search and filters return the same content through the web app, API, and CLI.
 - `AC-6`: An agent can create 20 derived drafts in one batch, link them to one source, and safely retry the request without duplicates.
 - `AC-7`: A stale browser or agent update receives the current server document and does not overwrite it. Retrying a committed operation after a lost response returns the original result.
@@ -293,11 +296,11 @@ Local development binds the API to the private Compose network. The same-origin 
 
 ## 10. Test approach
 
-Unit tests validate every type-specific payload, title normalization, status transition, scope check, expiry calculation, signed URL lifetime, and size limit. Firestore emulator tests prove `INV-1` through `INV-5`, `INV-8` through `INV-14`, and `AC-2`, `AC-3`, `AC-6`, `AC-7`, `AC-13`, `AC-15`, `AC-16`, and `AC-17`. Concurrent tests send the same idempotency key before and after commit with matching and different bodies, and race asset reservations against the remaining quota.
+Unit tests validate every type-specific payload, title normalization, status transition, scope check, expiry calculation, signed URL lifetime, and size limit. Firestore emulator tests prove `INV-1` through `INV-5`, `INV-8` through `INV-15`, and `AC-2`, `AC-3`, `AC-6`, `AC-7`, `AC-13`, `AC-15`, `AC-16`, and `AC-17`. Concurrent tests send the same idempotency key before and after commit with matching and different bodies, and race asset reservations against the remaining quota.
 
 HTTP integration tests prove authentication, CSRF, local proxy rejection, token revocation, error contracts, idempotency, expiry filtering, and workspace isolation for `INV-3`, `INV-6`, `INV-7`, `INV-9`, `INV-11`, `AC-4`, `AC-10`, `AC-12`, and `AC-13`.
 
-Storage contract tests run against the filesystem adapter and a Google Cloud test bucket. They cover pre-upload quota reservation, concurrent reservation attempts, signed upload constraints, verification, abandoned reservation cleanup, ownership, download URL expiry, manual deletion, and lifecycle configuration for `AC-4`, `AC-14`, and `AC-17`.
+Storage contract tests run against the filesystem adapter and a Google Cloud test bucket. They cover pre-upload quota reservation, concurrent reservation attempts, signed upload constraints, verification, allowed asset combinations, Instagram image ordering, abandoned reservation cleanup, ownership, download URL expiry, manual deletion, and lifecycle configuration for `INV-15`, `AC-4`, `AC-14`, and `AC-17`.
 
 CLI tests run commands against a real test API and assert human and JSON output for `AC-5` and `AC-8`. Browser tests cover each editor, autosave retry, external conflicts, asset uploads, expiry warnings, search, theme persistence, keyboard access, and desktop and mobile layouts for `AC-1`, `AC-3`, `AC-4`, `AC-5`, `AC-7`, and `AC-9`.
 
@@ -323,7 +326,7 @@ A deployment smoke test checks Cloud Run readiness, Google sign-in, Firestore ac
 - Built-in AI model calls, prompt management, or automatic generation
 - Direct publishing to YouTube, LinkedIn, X, Substack, email platforms, or social networks
 - Permanent archives, retention exceptions, legal holds, backups, or recovery after expiry
-- Raw footage or full-resolution YouTube master storage
+- Raw footage or project-file storage
 - Team workspaces, invitations, roles, comments, and approvals
 - Rich text, collaborative cursors, and real-time co-editing
 - Full-text body search or analytics ingestion

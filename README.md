@@ -6,7 +6,7 @@ The current version is intentionally front-end only. Content lives in local Reac
 
 ## MVP direction
 
-The approved MVP will run as one Go container on Cloud Run. It will serve a static TypeScript web app and the HTTP API from one origin. Firestore will store structured content, while Cloud Storage will store thumbnails and finished short-form video. Content remains available for 56 days, after which managed physical deletion follows asynchronously.
+The approved MVP will run as one Go container on Cloud Run. It will serve a static TypeScript web app and the HTTP API from one origin. Firestore will store structured content, while Cloud Storage will store images, finished videos, and PDFs. Content remains available for 56 days, after which managed physical deletion follows asynchronously.
 
 See the [MVP design](docs/mvp/design.md) for the domain model, interfaces, lifecycle, security boundaries, and acceptance criteria.
 
@@ -17,7 +17,7 @@ See the [MVP design](docs/mvp/design.md) for the domain model, interfaces, lifec
 - Collapsible YouTube brief for topic, audience, angle, CTA, publishing details, and thumbnail
 - Structured YouTube script blocks with inline section names
 - Format-specific fields for email, Substack, LinkedIn, X, Instagram, and TikTok
-- UI-only image and video attachment controls
+- Session-only mock uploads for images, finished videos, and PDFs
 - New-content flow for all seven formats
 - Repurposing flow that creates draft content from a source
 - Responsive desktop and mobile layouts
