@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it } from "vitest";
 import Home from "../app/page";
@@ -38,11 +38,11 @@ describe("ContentFlow interactions", () => {
   });
 
   it.each([
-    ["YouTube", "Video brief and script blocks", "youtube"],
-    ["LinkedIn", "One focused post", "linkedin"],
-    ["X", "One short-form post", "x"],
-    ["Instagram", "Script and video asset", "instagram"],
-    ["TikTok", "Script and video asset", "tiktok"],
+    ["YouTube", "Video brief, script, and assets", "youtube"],
+    ["LinkedIn", "Post with an image or PDF", "linkedin"],
+    ["X", "Post with an optional image", "x"],
+    ["Instagram", "Image, Reel, or carousel", "instagram"],
+    ["TikTok", "Script and finished video", "tiktok"],
     ["Email", "Subject line and email body", "email"],
     ["Substack", "Headline, sub-headline, and article", "substack"],
   ])("creates a %s draft with the correct editor", async (label, description, type) => {
@@ -60,6 +60,7 @@ describe("ContentFlow interactions", () => {
       expect(screen.getByLabelText("YouTube title")).toBeTruthy();
       expect(screen.getByLabelText("YouTube description")).toBeTruthy();
       expect(screen.getByLabelText("Choose YouTube thumbnail")).toBeTruthy();
+      expect(screen.getByLabelText("Choose YouTube video")).toBeTruthy();
       expect(screen.getByLabelText("Intro script")).toBeTruthy();
       expect(screen.getByText("3 sections")).toBeTruthy();
     } else if (type === "email") {
@@ -69,9 +70,20 @@ describe("ContentFlow interactions", () => {
       expect(screen.getByLabelText("Substack headline")).toBeTruthy();
       expect(screen.getByLabelText("Substack sub-headline")).toBeTruthy();
       expect(screen.getByLabelText("Article body")).toBeTruthy();
-    } else if (type === "instagram" || type === "tiktok") {
+    } else if (type === "instagram") {
       expect(screen.getByLabelText(`${label} script`)).toBeTruthy();
-      expect(screen.getByLabelText(`Choose ${label} video`)).toBeTruthy();
+      expect(screen.getByLabelText("Choose Instagram images")).toBeTruthy();
+      expect(screen.getByLabelText("Choose Instagram video")).toBeTruthy();
+    } else if (type === "tiktok") {
+      expect(screen.getByLabelText("TikTok script")).toBeTruthy();
+      expect(screen.getByLabelText("Choose TikTok video")).toBeTruthy();
+    } else if (type === "linkedin") {
+      expect(screen.getByLabelText("LinkedIn post")).toBeTruthy();
+      expect(screen.getByLabelText("Choose LinkedIn image")).toBeTruthy();
+      expect(screen.getByLabelText("Choose LinkedIn PDF")).toBeTruthy();
+    } else if (type === "x") {
+      expect(screen.getByLabelText("X post")).toBeTruthy();
+      expect(screen.getByLabelText("Choose X image")).toBeTruthy();
     } else {
       expect(screen.getByLabelText(`${label} post`)).toBeTruthy();
     }
@@ -90,9 +102,30 @@ describe("ContentFlow interactions", () => {
     expect(topic.value).toBe("Agent-first content systems");
     expect(angle.value).toBe("Treat content as a graph, not a folder.");
 
+    const title = screen.getByLabelText("YouTube title") as HTMLInputElement;
+    await user.clear(title);
+    await user.type(title, "One idea, every format");
+    expect(screen.getByLabelText("YouTube preview title").textContent).toBe("One idea, every format");
+
     const thumbnail = screen.getByLabelText("Choose YouTube thumbnail") as HTMLInputElement;
-    await user.upload(thumbnail, new File(["image"], "agent-content-system.png", { type: "image/png" }));
-    expect(screen.getByText("agent-content-system.png")).toBeTruthy();
+    const thumbnailPreview = document.querySelector(".youtube-preview-thumbnail") as HTMLElement;
+    const thumbnailFile = new File(["image"], "agent-content-system.png", { type: "image/png" });
+    await user.upload(thumbnail, thumbnailFile);
+    expect(screen.getByText(/agent-content-system\.png/)).toBeTruthy();
+    expect(screen.getByText(/Image · 5 B/)).toBeTruthy();
+    await waitFor(() => expect(thumbnailPreview.style.backgroundImage).toContain("data:image/png;base64,aW1hZ2U="));
+
+    const replacementFile = new File(["new image"], "agent-content-system-v2.png", { type: "image/png" });
+    await user.upload(thumbnail, replacementFile);
+    expect(screen.getByText(/agent-content-system-v2\.png/)).toBeTruthy();
+    await waitFor(() => expect(thumbnailPreview.style.backgroundImage).toContain("data:image/png;base64,bmV3IGltYWdl"));
+
+    await user.click(screen.getByRole("button", { name: "Remove YouTube thumbnail" }));
+    expect(screen.queryByText(/agent-content-system-v2\.png/)).toBeNull();
+    expect(thumbnailPreview.style.backgroundImage).toBe("");
+    await user.upload(thumbnail, thumbnailFile);
+    expect(screen.getByText(/agent-content-system\.png/)).toBeTruthy();
+    await waitFor(() => expect(thumbnailPreview.style.backgroundImage).toContain("data:image/png;base64,aW1hZ2U="));
 
     const brief = screen.getByText("Video brief").closest("details") as HTMLDetailsElement;
     expect(brief.open).toBe(true);
@@ -129,6 +162,7 @@ describe("ContentFlow interactions", () => {
     expect(screen.getByRole("heading", { name: "LinkedIn" })).toBeTruthy();
     await user.click(screen.getByRole("button", { name: /You don’t need more content ideas/ }));
     await user.click(screen.getByRole("button", { name: "Repurpose" }));
+    expect(screen.queryByText("Source content")).toBeNull();
 
     for (const output of ["X", "Email", "Instagram"]) {
       const button = screen.getByRole("button", { name: output });
@@ -143,32 +177,82 @@ describe("ContentFlow interactions", () => {
     expect((screen.getByLabelText("YouTube topic") as HTMLTextAreaElement).value).toMatch(/You don’t need more content ideas/);
     expect(screen.getByRole("heading", { name: "All content" })).toBeTruthy();
     expect(screen.getByText("3 sections")).toBeTruthy();
+    expect((screen.getByLabelText("Intro script") as HTMLTextAreaElement).value).toBe("Open with the strongest claim or practical result.");
     expect((screen.getByLabelText("Main section script") as HTMLTextAreaElement).value).toMatch(/better way to reuse the good ones/i);
+    expect(screen.queryByText(/Draft repurposed from/)).toBeNull();
   });
 
-  it("captures and removes an Instagram video attachment", async () => {
+  it("mocks YouTube video replacement and removal", async () => {
+    const user = userEvent.setup();
+    render(<Home />);
+
+    expect(screen.getByText("content-system-final-v4.mp4")).toBeTruthy();
+    const videoInput = screen.getByLabelText("Choose YouTube video") as HTMLInputElement;
+    await user.upload(videoInput, new File(["video"], "youtube-final.mp4", { type: "video/mp4" }));
+    expect(screen.getByText("youtube-final.mp4")).toBeTruthy();
+    expect(screen.queryByText("content-system-final-v4.mp4")).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "Remove youtube-final.mp4" }));
+    expect(screen.queryByText("youtube-final.mp4")).toBeNull();
+    expect(videoInput.value).toBe("");
+  });
+
+  it("mocks Instagram image carousels and Reel replacement", async () => {
     const user = userEvent.setup();
     render(<Home />);
 
     await user.click(screen.getByRole("button", { name: /Hook: If content creation feels exhausting/ }));
     expect(screen.getByText("stop-starting-from-scratch-v2.mp4")).toBeTruthy();
 
-    const videoInput = screen.getByLabelText("Choose Instagram video") as HTMLInputElement;
-    const video = new File(["video"], "content-system-instagram.mp4", { type: "video/mp4" });
-    await user.upload(videoInput, video);
-    expect(screen.getByText("content-system-instagram.mp4")).toBeTruthy();
-    await user.click(screen.getByRole("button", { name: "Remove Instagram video" }));
-    expect(screen.queryByText("content-system-instagram.mp4")).toBeNull();
-    expect(videoInput.value).toBe("");
+    const imageInput = screen.getByLabelText("Choose Instagram images") as HTMLInputElement;
+    await user.upload(imageInput, [
+      new File(["slide one"], "carousel-01.png", { type: "image/png" }),
+      new File(["slide two"], "carousel-02.png", { type: "image/png" }),
+    ]);
+    expect(screen.getByText("Carousel · 2 slides")).toBeTruthy();
+    expect(screen.getByText("carousel-01.png")).toBeTruthy();
+    expect(screen.getByText("carousel-02.png")).toBeTruthy();
+    expect(screen.queryByText("stop-starting-from-scratch-v2.mp4")).toBeNull();
 
-    await user.upload(videoInput, video);
-    expect(screen.getByText("content-system-instagram.mp4")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Remove carousel-01.png" }));
+    expect(screen.queryByText("Carousel · 2 slides")).toBeNull();
+    expect(screen.getByText("carousel-02.png")).toBeTruthy();
+
+    const reelInput = screen.getByLabelText("Choose Instagram video") as HTMLInputElement;
+    await user.upload(reelInput, new File(["video"], "content-system-reel.mp4", { type: "video/mp4" }));
+    expect(screen.getByText("content-system-reel.mp4")).toBeTruthy();
+    expect(screen.queryByText("carousel-02.png")).toBeNull();
+  });
+
+  it("mocks LinkedIn PDF and image uploads plus X and TikTok assets", async () => {
+    const user = userEvent.setup();
+    render(<Home />);
+
+    await user.click(screen.getByRole("button", { name: /You don’t need more content ideas/ }));
+    expect(screen.getByText("content-system-carousel.pdf")).toBeTruthy();
+    await user.upload(
+      screen.getByLabelText("Choose LinkedIn PDF"),
+      new File(["pdf"], "canva-carousel.pdf", { type: "application/pdf" }),
+    );
+    expect(screen.getByText("canva-carousel.pdf")).toBeTruthy();
+    await user.upload(
+      screen.getByLabelText("Choose LinkedIn image"),
+      new File(["image"], "linkedin-post.png", { type: "image/png" }),
+    );
+    expect(screen.getByText("linkedin-post.png")).toBeTruthy();
+    expect(screen.queryByText("canva-carousel.pdf")).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: /A simple content system:/ }));
+    await user.upload(
+      screen.getByLabelText("Choose X image"),
+      new File(["image"], "x-post.png", { type: "image/png" }),
+    );
+    expect(screen.getByText("x-post.png")).toBeTruthy();
 
     await user.click(screen.getByRole("button", { name: /You do not need another list of content ideas/ }));
     const tikTokInput = screen.getByLabelText("Choose TikTok video") as HTMLInputElement;
-    expect(tikTokInput.value).toBe("");
-    await user.upload(tikTokInput, video);
-    expect(screen.getByText("content-system-instagram.mp4")).toBeTruthy();
+    await user.upload(tikTokInput, new File(["video"], "tiktok-final.mp4", { type: "video/mp4" }));
+    expect(screen.getByText("tiktok-final.mp4")).toBeTruthy();
   });
 
   it("switches between persistent light and dark themes", async () => {

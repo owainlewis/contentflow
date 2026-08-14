@@ -55,11 +55,19 @@ type YouTubeBrief = {
   cta: string;
   description: string;
   thumbnailName?: string;
+  thumbnailSize?: number;
 };
 
 type Attachment = {
-  kind: "image" | "video";
+  id: string;
+  kind: "image" | "video" | "pdf";
   name: string;
+  size: number;
+};
+
+type ThumbnailPreview = {
+  dataUrl?: string;
+  requestId: string;
 };
 
 type ContentItem = {
@@ -74,25 +82,25 @@ type ContentItem = {
   youtube?: YouTubeBrief;
   subject?: string;
   subheadline?: string;
-  attachment?: Attachment;
+  attachments?: Attachment[];
 };
 
 const typeMeta: Record<ContentType, { label: string; shortLabel: string; icon: LucideIcon; color: string }> = {
-  youtube: { label: "YouTube", shortLabel: "YouTube", icon: Video, color: "var(--accent)" },
-  linkedin: { label: "LinkedIn", shortLabel: "LinkedIn", icon: Network, color: "var(--accent)" },
-  x: { label: "X", shortLabel: "X", icon: X, color: "var(--accent)" },
-  instagram: { label: "Instagram", shortLabel: "Instagram", icon: Camera, color: "var(--accent)" },
-  tiktok: { label: "TikTok", shortLabel: "TikTok", icon: Music2, color: "var(--accent)" },
-  email: { label: "Email", shortLabel: "Email", icon: Mail, color: "var(--accent)" },
-  substack: { label: "Substack", shortLabel: "Substack", icon: FileText, color: "var(--accent)" },
+  youtube: { label: "YouTube", shortLabel: "YouTube", icon: Video, color: "var(--platform-icon)" },
+  linkedin: { label: "LinkedIn", shortLabel: "LinkedIn", icon: Network, color: "var(--platform-icon)" },
+  x: { label: "X", shortLabel: "X", icon: X, color: "var(--platform-icon)" },
+  instagram: { label: "Instagram", shortLabel: "Instagram", icon: Camera, color: "var(--platform-icon)" },
+  tiktok: { label: "TikTok", shortLabel: "TikTok", icon: Music2, color: "var(--platform-icon)" },
+  email: { label: "Email", shortLabel: "Email", icon: Mail, color: "var(--platform-icon)" },
+  substack: { label: "Substack", shortLabel: "Substack", icon: FileText, color: "var(--platform-icon)" },
 };
 
 const createDescriptions: Record<ContentType, string> = {
-  youtube: "Video brief and script blocks",
-  linkedin: "One focused post",
-  x: "One short-form post",
-  instagram: "Script and video asset",
-  tiktok: "Script and video asset",
+  youtube: "Video brief, script, and assets",
+  linkedin: "Post with an image or PDF",
+  x: "Post with an optional image",
+  instagram: "Image, Reel, or carousel",
+  tiktok: "Script and finished video",
   email: "Subject line and email body",
   substack: "Headline, sub-headline, and article",
 };
@@ -106,6 +114,9 @@ const initialItems: ContentItem[] = [
     status: "Draft",
     updated: "12 min ago",
     words: 1264,
+    attachments: [
+      { id: "yt-video-1", kind: "video", name: "content-system-final-v4.mp4", size: 2_147_483_648 },
+    ],
     youtube: {
       topic: "A practical content system for creators using AI",
       icp: "Solo creators and technical educators publishing every week",
@@ -113,6 +124,7 @@ const initialItems: ContentItem[] = [
       cta: "Download the ContentFlow starter workflow",
       description: "A practical walkthrough of a simple source, shape, and distribute system for turning one strong idea into a useful body of content.",
       thumbnailName: "content-system-thumbnail-v3.png",
+      thumbnailSize: 2_621_440,
     },
     blocks: [
       {
@@ -145,6 +157,9 @@ const initialItems: ContentItem[] = [
     status: "Ready",
     updated: "1 hr ago",
     words: 94,
+    attachments: [
+      { id: "li-pdf-1", kind: "pdf", name: "content-system-carousel.pdf", size: 4_823_040 },
+    ],
   },
   {
     id: "x-1",
@@ -183,7 +198,9 @@ const initialItems: ContentItem[] = [
     status: "Published",
     updated: "4 days ago",
     words: 76,
-    attachment: { kind: "video", name: "stop-starting-from-scratch-v2.mp4" },
+    attachments: [
+      { id: "ig-video-1", kind: "video", name: "stop-starting-from-scratch-v2.mp4", size: 86_212_608 },
+    ],
   },
   {
     id: "tt-1",
@@ -234,6 +251,24 @@ function uniqueId(prefix: string) {
   return `${prefix}-${crypto.randomUUID()}`;
 }
 
+function formatFileSize(bytes: number) {
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ["KB", "MB", "GB"];
+  let value = bytes / 1024;
+  let unit = units[0];
+  for (let index = 1; index < units.length && value >= 1024; index += 1) {
+    value /= 1024;
+    unit = units[index];
+  }
+  return `${value >= 10 ? value.toFixed(0) : value.toFixed(1)} ${unit}`;
+}
+
+function AttachmentIcon({ kind, size = 16 }: { kind: Attachment["kind"]; size?: number }) {
+  if (kind === "image") return <ImagePlus size={size} />;
+  if (kind === "pdf") return <FileText size={size} />;
+  return <FileVideo size={size} />;
+}
+
 function TypeIcon({ type, size = 16 }: { type: ContentType; size?: number }) {
   const Icon = typeMeta[type].icon;
   return <Icon size={size} strokeWidth={1.9} />;
@@ -252,9 +287,9 @@ export default function Home() {
   const [savePulse, setSavePulse] = useState(false);
   const [isCompact, setIsCompact] = useState(false);
   const [theme, setTheme] = useState<Theme>("dark");
+  const [thumbnailPreviews, setThumbnailPreviews] = useState<Record<string, ThumbnailPreview>>({});
   const createModalRef = useRef<HTMLElement>(null);
   const repurposeModalRef = useRef<HTMLElement>(null);
-  const shortFormVideoInputRef = useRef<HTMLInputElement>(null);
 
   const selected = items.find((item) => item.id === selectedId) ?? items[0];
 
@@ -353,14 +388,51 @@ export default function Home() {
     window.setTimeout(() => setSavePulse(false), 900);
   }
 
-  function updateYouTubeBrief(field: keyof YouTubeBrief, value: string) {
+  function updateYouTubeBrief<Field extends keyof YouTubeBrief>(field: Field, value: YouTubeBrief[Field]) {
     const youtube = selected.youtube ?? { topic: "", icp: "", angle: "", cta: "", description: "" };
     updateSelected({ youtube: { ...youtube, [field]: value } });
   }
 
-  function captureAttachment(file: File | undefined, kind: Attachment["kind"]) {
-    if (!file) return;
-    updateSelected({ attachment: { kind, name: file.name } });
+  function captureAttachments(files: FileList | null, kind: Attachment["kind"], append = false) {
+    const captured = Array.from(files ?? []).map<Attachment>((file) => ({
+      id: uniqueId("asset"),
+      kind,
+      name: file.name,
+      size: file.size,
+    }));
+    if (!captured.length) return;
+
+    const existing = append
+      ? (selected.attachments ?? []).filter((attachment) => attachment.kind === kind)
+      : [];
+    updateSelected({ attachments: [...existing, ...captured] });
+  }
+
+  function removeAttachment(attachmentId: string) {
+    updateSelected({ attachments: (selected.attachments ?? []).filter((attachment) => attachment.id !== attachmentId) });
+  }
+
+  function replaceThumbnailPreview(file: File) {
+    const contentId = selected.id;
+    const requestId = uniqueId("thumbnail-read");
+    const reader = new FileReader();
+    setThumbnailPreviews((current) => ({ ...current, [contentId]: { requestId } }));
+    reader.addEventListener("load", () => {
+      if (typeof reader.result !== "string") return;
+      setThumbnailPreviews((current) => {
+        if (current[contentId]?.requestId !== requestId) return current;
+        return { ...current, [contentId]: { requestId, dataUrl: reader.result as string } };
+      });
+    }, { once: true });
+    reader.readAsDataURL(file);
+  }
+
+  function clearThumbnailPreview(contentId: string) {
+    setThumbnailPreviews((current) => {
+      const nextPreviews = { ...current };
+      delete nextPreviews[contentId];
+      return nextPreviews;
+    });
   }
 
   function updateBlock(blockId: string, text: string) {
@@ -413,17 +485,16 @@ export default function Home() {
       ? selected.blocks?.map((block) => block.text).filter(Boolean).join("\n\n") ?? ""
       : selected.body;
     const drafts = selectedOutputs.map<ContentItem>((type) => {
-      const lead = `Draft repurposed from “${sourceTitle}”.`;
       const blocks: ScriptBlock[] | undefined = type === "youtube"
         ? [
-            { id: uniqueId("intro"), label: "Intro", text: lead },
+            { id: uniqueId("intro"), label: "Intro", text: "Open with the strongest claim or practical result." },
             { id: uniqueId("main"), label: "Main section", text: sourceText },
             { id: uniqueId("outro"), label: "Outro", text: "Bring the lesson together and give the viewer a clear next step." },
           ]
         : undefined;
       const body = type === "youtube"
         ? ""
-        : `${lead}\n\n${sourceText}\n\nShape this idea for ${typeMeta[type].label}.`;
+        : `${sourceText}\n\nShape this idea for ${typeMeta[type].label}.`;
       return {
         id: uniqueId(`${type}-repurposed`),
         type,
@@ -437,13 +508,13 @@ export default function Home() {
           ? {
               topic: sourceTitle,
               icp: "",
-              angle: `Adapt the core lesson from ${sourceTitle} into a clear, practical walkthrough.`,
+              angle: "Turn the core lesson into a clear, practical walkthrough.",
               cta: "",
               description: "",
             }
           : undefined,
         subject: type === "email" ? sourceTitle : undefined,
-        subheadline: type === "substack" ? `A practical guide based on ${sourceTitle}` : undefined,
+        subheadline: type === "substack" ? `A practical guide to ${sourceTitle}` : undefined,
       };
     });
     if (drafts.length) {
@@ -464,6 +535,7 @@ export default function Home() {
 
   function deleteSelected() {
     if (items.length === 1) return;
+    clearThumbnailPreview(selected.id);
     const remaining = items.filter((item) => item.id !== selected.id);
     setItems(remaining);
     setSelectedId(remaining[0].id);
@@ -531,12 +603,123 @@ export default function Home() {
     );
   }
 
+  function renderAssetPanel() {
+    type AssetAction = {
+      kind: Attachment["kind"];
+      label: string;
+      accept: string;
+      ariaLabel: string;
+      multiple?: boolean;
+    };
+
+    let title = "";
+    let description = "";
+    let actions: AssetAction[] = [];
+
+    if (selected.type === "youtube") {
+      title = "Finished video";
+      description = "Keep the final YouTube upload beside its brief and script.";
+      actions = [{ kind: "video", label: "Upload video", accept: "video/*", ariaLabel: "Choose YouTube video" }];
+    } else if (selected.type === "instagram") {
+      title = "Instagram media";
+      description = "Add one image, a finished Reel, or several Canva slides.";
+      actions = [
+        { kind: "image", label: "Add images", accept: "image/*", ariaLabel: "Choose Instagram images", multiple: true },
+        { kind: "video", label: "Add Reel", accept: "video/*", ariaLabel: "Choose Instagram video" },
+      ];
+    } else if (selected.type === "tiktok") {
+      title = "Finished video";
+      description = "Keep the final TikTok video beside its script.";
+      actions = [{ kind: "video", label: "Upload video", accept: "video/*", ariaLabel: "Choose TikTok video" }];
+    } else if (selected.type === "linkedin") {
+      title = "Post media";
+      description = "Add an image or upload a Canva carousel as a PDF.";
+      actions = [
+        { kind: "image", label: "Add image", accept: "image/*", ariaLabel: "Choose LinkedIn image" },
+        { kind: "pdf", label: "Add PDF", accept: "application/pdf", ariaLabel: "Choose LinkedIn PDF" },
+      ];
+    } else if (selected.type === "x") {
+      title = "Post image";
+      description = "Add one image to publish with the post.";
+      actions = [{ kind: "image", label: "Add image", accept: "image/*", ariaLabel: "Choose X image" }];
+    } else {
+      return null;
+    }
+
+    const attachments = selected.attachments ?? [];
+    const instagramSlides = selected.type === "instagram"
+      ? attachments.filter((attachment) => attachment.kind === "image").length
+      : 0;
+
+    return (
+      <section className="asset-panel" aria-label={`${typeMeta[selected.type].label} assets`}>
+        <div className="asset-panel-header">
+          <span className="asset-panel-icon"><Paperclip size={18} /></span>
+          <div className="asset-panel-copy">
+            <strong>{title}</strong>
+            <small>{description}</small>
+          </div>
+          <div className="asset-actions">
+            {actions.map((action) => {
+              const inputId = `${selected.id}-${action.kind}-upload`;
+              return (
+                <span className="asset-action" key={action.kind}>
+                  <input
+                    className="visually-hidden"
+                    id={inputId}
+                    type="file"
+                    accept={action.accept}
+                    multiple={action.multiple}
+                    aria-label={action.ariaLabel}
+                    onChange={(event) => {
+                      captureAttachments(event.currentTarget.files, action.kind, Boolean(action.multiple));
+                      event.currentTarget.value = "";
+                    }}
+                  />
+                  <label className="asset-upload-button" htmlFor={inputId}>
+                    <Upload size={14} /> {action.label}
+                  </label>
+                </span>
+              );
+            })}
+          </div>
+        </div>
+
+        {attachments.length > 0 && (
+          <div className="asset-list">
+            {instagramSlides > 1 && (
+              <div className="asset-summary"><ImagePlus size={14} /> Carousel · {instagramSlides} slides</div>
+            )}
+            {attachments.map((attachment, index) => (
+              <div className="asset-file" key={attachment.id}>
+                <span className="asset-file-icon"><AttachmentIcon kind={attachment.kind} /></span>
+                <span className="asset-file-copy">
+                  <strong>{attachment.name}</strong>
+                  <small>
+                    {attachment.kind === "pdf" ? "PDF" : attachment.kind === "video" ? "Video" : "Image"}
+                    {instagramSlides > 1 && attachment.kind === "image" ? ` · Slide ${index + 1}` : ""}
+                    {` · ${formatFileSize(attachment.size)}`}
+                  </small>
+                </span>
+                <button aria-label={`Remove ${attachment.name}`} onClick={() => removeAttachment(attachment.id)}>
+                  <X size={14} />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+        <p className="prototype-note"><Paperclip size={12} /> Mock upload. Files are not persisted and reset on reload.</p>
+      </section>
+    );
+  }
+
   function renderYouTubeEditor() {
     const youtube = selected.youtube ?? { topic: "", icp: "", angle: "", cta: "", description: "" };
     const youtubeTitle = selected.title.startsWith("Untitled") ? "" : selected.title;
     const completed = [youtube.topic, youtube.icp, youtube.angle, youtube.cta, youtubeTitle, youtube.description, youtube.thumbnailName]
       .filter((value) => value?.trim()).length;
     const thumbnailInputId = `thumbnail-${selected.id}`;
+    const thumbnailPreview = thumbnailPreviews[selected.id]?.dataUrl;
 
     return (
       <div className="youtube-editor">
@@ -624,32 +807,73 @@ export default function Home() {
                   />
                 </label>
               </div>
-              <div className="thumbnail-field">
-                <span className="attachment-label">Thumbnail</span>
-                <input
-                  className="visually-hidden"
-                  id={thumbnailInputId}
-                  type="file"
-                  accept="image/*"
-                  aria-label="Choose YouTube thumbnail"
-                  onChange={(event) => {
-                    const file = event.target.files?.[0];
-                    if (file) updateYouTubeBrief("thumbnailName", file.name);
-                  }}
-                />
-                <label className={`attachment-dropzone thumbnail-dropzone ${youtube.thumbnailName ? "has-file" : ""}`} htmlFor={thumbnailInputId}>
-                  <span className="attachment-visual"><ImagePlus size={22} /></span>
-                  {youtube.thumbnailName ? (
-                    <><strong>{youtube.thumbnailName}</strong><small>Choose a different image</small></>
-                  ) : (
-                    <><strong>Add thumbnail</strong><small>PNG, JPG, or WebP</small></>
+              <section className="youtube-preview-field" aria-label="YouTube video preview">
+                <span className="attachment-label">Video preview</span>
+                <div className="youtube-preview-card">
+                  <input
+                    className="visually-hidden"
+                    id={thumbnailInputId}
+                    type="file"
+                    accept="image/*"
+                    aria-label="Choose YouTube thumbnail"
+                    onChange={(event) => {
+                      const file = event.target.files?.[0];
+                      if (file) {
+                        updateSelected({ youtube: { ...youtube, thumbnailName: file.name, thumbnailSize: file.size } });
+                        replaceThumbnailPreview(file);
+                        event.currentTarget.value = "";
+                      }
+                    }}
+                  />
+                  <label
+                    className={`youtube-preview-thumbnail ${thumbnailPreview ? "has-preview" : ""}`}
+                    htmlFor={thumbnailInputId}
+                    style={thumbnailPreview ? { backgroundImage: `url("${thumbnailPreview}")` } : undefined}
+                  >
+                    {!thumbnailPreview && (
+                      <span className="youtube-thumbnail-placeholder" aria-hidden="true">
+                        <small>Content system</small>
+                        <strong>One idea.<br />Every format.</strong>
+                        <span>CF</span>
+                      </span>
+                    )}
+                    <span className="youtube-thumbnail-action">
+                      <Upload size={14} /> {youtube.thumbnailName ? "Replace thumbnail" : "Add thumbnail"}
+                    </span>
+                  </label>
+                  <div className="youtube-preview-details">
+                    <span className="youtube-channel-avatar">O</span>
+                    <div>
+                      <h3 aria-label="YouTube preview title">{youtubeTitle || "Your video title will appear here"}</h3>
+                      <small>Owain Lewis <span>·</span> Draft</small>
+                    </div>
+                    <MoreHorizontal size={17} />
+                  </div>
+                </div>
+                <div className="youtube-preview-file">
+                  <span>
+                    {youtube.thumbnailName
+                      ? `${youtube.thumbnailName} · Image · ${formatFileSize(youtube.thumbnailSize ?? 0)}`
+                      : "16:9 thumbnail · PNG, JPG, or WebP"}
+                  </span>
+                  {youtube.thumbnailName && (
+                    <button
+                      aria-label="Remove YouTube thumbnail"
+                      onClick={() => {
+                        clearThumbnailPreview(selected.id);
+                        updateSelected({ youtube: { ...youtube, thumbnailName: undefined, thumbnailSize: undefined } });
+                      }}
+                    >
+                      <X size={13} /> Remove
+                    </button>
                   )}
-                </label>
-              </div>
+                </div>
+              </section>
             </div>
-            <p className="prototype-note"><Paperclip size={12} /> Attachments are held in this session for the UI prototype.</p>
           </div>
         </details>
+
+        {renderAssetPanel()}
 
         <div className="section-intro">
           <div><p className="eyebrow">Script structure</p><h2>Build the story, one block at a time</h2></div>
@@ -688,54 +912,18 @@ export default function Home() {
   }
 
   function renderPlainEditor() {
-    const isShortFormVideo = selected.type === "instagram" || selected.type === "tiktok";
+    const isScriptContent = selected.type === "instagram" || selected.type === "tiktok";
     const editorLabel = selected.type === "email"
       ? "Email"
       : selected.type === "substack"
         ? "Article body"
-        : isShortFormVideo
+        : isScriptContent
           ? `${typeMeta[selected.type].label} script`
           : `${typeMeta[selected.type].label} post`;
-    const videoInputId = `video-${selected.id}`;
 
     return (
       <div className="plain-editor-wrap">
-        {isShortFormVideo && (
-          <section className="media-panel" aria-label={`${typeMeta[selected.type].label} video attachment`}>
-            <div className="media-panel-copy">
-              <span className="media-panel-icon"><FileVideo size={19} /></span>
-              <div><strong>Video asset</strong><small>Keep the finished {typeMeta[selected.type].label} video with its script.</small></div>
-            </div>
-            <input
-              key={videoInputId}
-              ref={shortFormVideoInputRef}
-              className="visually-hidden"
-              id={videoInputId}
-              type="file"
-              accept="video/*"
-              aria-label={`Choose ${typeMeta[selected.type].label} video`}
-              onChange={(event) => captureAttachment(event.target.files?.[0], "video")}
-            />
-            <label className="media-upload-button" htmlFor={videoInputId}>
-              <Upload size={15} /> {selected.attachment ? "Replace video" : "Attach video"}
-            </label>
-            {selected.attachment && (
-              <div className="attached-file">
-                <FileVideo size={15} />
-                <span>{selected.attachment.name}</span>
-                <button
-                  aria-label={`Remove ${typeMeta[selected.type].label} video`}
-                  onClick={() => {
-                    if (shortFormVideoInputRef.current) shortFormVideoInputRef.current.value = "";
-                    updateSelected({ attachment: undefined });
-                  }}
-                >
-                  <X size={14} />
-                </button>
-              </div>
-            )}
-          </section>
-        )}
+        {renderAssetPanel()}
         <div className="plain-editor-label"><SquarePen size={16} /> {editorLabel}</div>
         <textarea
           className="plain-editor"
@@ -745,7 +933,7 @@ export default function Home() {
             ? "Write the email…"
             : selected.type === "substack"
               ? "Start the article…"
-              : isShortFormVideo
+              : isScriptContent
                 ? "Write the script…"
                 : "Write the post…"}
           onChange={(event) => updateSelected({ body: event.target.value, words: wordCount(event.target.value) })}
@@ -952,13 +1140,8 @@ export default function Home() {
           <section ref={repurposeModalRef} className="modal-card repurpose-modal" role="dialog" aria-modal="true" aria-labelledby="repurpose-title">
             <div className="repurpose-glow" />
             <div className="modal-header">
-              <div><p className="eyebrow"><Sparkles size={13} /> Repurpose</p><h2 id="repurpose-title">Turn one idea into more</h2><p>Choose the formats you want to create from this source.</p></div>
+              <div><p className="eyebrow"><Sparkles size={13} /> Repurpose</p><h2 id="repurpose-title">Turn one idea into more</h2><p>Choose the formats you want to create.</p></div>
               <button className="icon-button" onClick={() => setRepurposeOpen(false)} aria-label="Close"><X size={19} /></button>
-            </div>
-            <div className="source-card">
-              <span style={{ color: typeMeta[selected.type].color }}><TypeIcon type={selected.type} size={18} /></span>
-              <div><small>Source content</small><strong>{displayTitle(selected)}</strong></div>
-              <Check size={16} />
             </div>
             <p className="output-label">Create drafts for</p>
             <div className="output-list">
