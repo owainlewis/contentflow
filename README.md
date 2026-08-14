@@ -8,7 +8,10 @@ The current version is intentionally front-end only. Content lives in local Reac
 
 - Searchable content library with type and status filters
 - Plain-text editing for email, Substack, X, reels, and LinkedIn
-- Structured blocks for YouTube scripts
+- Collapsible YouTube brief for topic, audience, angle, CTA, publishing details, and thumbnail
+- Structured YouTube script blocks with inline section names
+- Format-specific fields for email, Substack, LinkedIn, X, and reels
+- UI-only image and video attachment controls
 - New-content flow for all six formats
 - Repurposing flow that creates draft content from a source
 - Responsive desktop and mobile layouts
