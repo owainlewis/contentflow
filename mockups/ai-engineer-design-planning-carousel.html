@@ -1,0 +1,746 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Design and planning for AI engineers · Carousel mockup</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --page: #161616;
+        --panel: #222220;
+        --paper: #d9d9d6;
+        --ink: #11110f;
+        --muted: #66645e;
+        --rule: #aaa79f;
+        --accent: #b88d4f;
+        --button: #f2f1ed;
+        --slide-ratio: 4 / 5;
+        font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
+      }
+
+      * { box-sizing: border-box; }
+
+      html { min-height: 100%; background: var(--page); }
+
+      body {
+        min-height: 100vh;
+        margin: 0;
+        color: #f3f2ee;
+        background:
+          radial-gradient(circle at 50% -20%, #3a3934 0, transparent 44rem),
+          var(--page);
+      }
+
+      button { font: inherit; }
+
+      .app {
+        width: min(100%, 1380px);
+        min-height: 100vh;
+        display: grid;
+        grid-template-columns: minmax(280px, 1fr) minmax(270px, 360px);
+        gap: clamp(28px, 5vw, 72px);
+        align-items: center;
+        margin: 0 auto;
+        padding: clamp(24px, 4vw, 56px);
+      }
+
+      .stage { min-width: 0; }
+
+      .stage-header,
+      .controls {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+      }
+
+      .stage-header { margin-bottom: 14px; }
+
+      .stage-header p,
+      .stage-header span {
+        margin: 0;
+        color: #aaa8a1;
+        font-size: 12px;
+        font-weight: 650;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+      }
+
+      .deck {
+        width: min(100%, 648px);
+        aspect-ratio: var(--slide-ratio);
+        position: relative;
+        overflow: hidden;
+        margin-inline: auto;
+        color: var(--ink);
+        background: var(--paper);
+        box-shadow: 0 36px 90px rgb(0 0 0 / 40%);
+      }
+
+      .slide {
+        position: absolute;
+        inset: 0;
+        display: none;
+        grid-template-rows: auto 1fr auto;
+        padding: 5.1% 5.6% 4.8%;
+        background:
+          linear-gradient(135deg, rgb(255 255 255 / 15%), transparent 50%),
+          var(--paper);
+      }
+
+      .slide.is-active { display: grid; }
+
+      .slide-chrome {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 16px;
+        padding-bottom: 2.8%;
+        border-bottom: 1px solid var(--rule);
+        color: #25241f;
+        font-size: clamp(7px, 1.05vw, 12px);
+        font-weight: 650;
+        letter-spacing: 0.14em;
+      }
+
+      .slide-content {
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        min-height: 0;
+        padding: 5% 5%;
+      }
+
+      .slide-footer {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        color: #36342f;
+        font-size: clamp(7px, 1vw, 11px);
+        font-weight: 680;
+        letter-spacing: 0.12em;
+      }
+
+      .footer-arrow {
+        color: var(--accent);
+        font-size: clamp(20px, 3.5vw, 34px);
+        font-weight: 400;
+        letter-spacing: 0;
+        line-height: 0.7;
+      }
+
+      h1,
+      h2,
+      p { margin-top: 0; }
+
+      h1,
+      h2 {
+        max-width: 11.8ch;
+        margin-bottom: 6%;
+        font-size: clamp(34px, 6.25vw, 72px);
+        font-weight: 800;
+        letter-spacing: -0.065em;
+        line-height: 0.93;
+      }
+
+      h1 { font-size: clamp(39px, 7vw, 80px); }
+
+      .wide-title { max-width: 15ch; }
+      .compact-title { font-size: clamp(31px, 5.55vw, 64px); }
+      .accent { color: var(--accent); }
+
+      .eyebrow {
+        margin-bottom: 5%;
+        color: var(--accent);
+        font-size: clamp(9px, 1.25vw, 14px);
+        font-weight: 800;
+        letter-spacing: 0.13em;
+        text-transform: uppercase;
+      }
+
+      .subtitle {
+        max-width: 31ch;
+        margin: 0;
+        color: #383630;
+        font-size: clamp(15px, 2.25vw, 26px);
+        font-weight: 540;
+        line-height: 1.35;
+      }
+
+      .cover .slide-content { justify-content: flex-start; padding-top: 11%; }
+
+      .cover-note {
+        margin-top: 3%;
+        color: #55524b;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: clamp(8px, 1.15vw, 13px);
+        font-weight: 700;
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+      }
+
+      .body-copy {
+        max-width: 40ch;
+        margin: 0;
+        color: #34322d;
+        font-size: clamp(13px, 2vw, 22px);
+        line-height: 1.45;
+      }
+
+      .body-copy + .body-copy { margin-top: 4%; }
+
+      .tool-list,
+      .question-grid,
+      .decision-grid,
+      .task-card,
+      .workflow { margin-top: 1%; }
+
+      .tool-list {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: clamp(8px, 1.5vw, 16px);
+      }
+
+      .tool-list span,
+      .decision-grid > div {
+        padding: 7% 8%;
+        border: 1px solid #aaa79f;
+        border-radius: 999px;
+        color: #46443e;
+        font-size: clamp(10px, 1.55vw, 18px);
+        font-weight: 650;
+        text-align: center;
+      }
+
+      .phase-list {
+        display: grid;
+        grid-template-columns: repeat(5, 1fr);
+        align-items: stretch;
+        gap: 1.4%;
+        margin-top: 2%;
+      }
+
+      .phase {
+        min-height: clamp(92px, 16vw, 180px);
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        padding: 14% 11%;
+        border: 1px solid #a7a49c;
+        border-radius: clamp(6px, 1vw, 12px);
+      }
+
+      .phase strong {
+        color: var(--accent);
+        font-size: clamp(9px, 1.25vw, 14px);
+      }
+
+      .phase span {
+        font-size: clamp(8px, 1.3vw, 15px);
+        font-weight: 760;
+        line-height: 1.15;
+      }
+
+      .automation-row {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 2%;
+        margin-top: 2%;
+      }
+
+      .automation-card {
+        min-height: clamp(110px, 19vw, 210px);
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        padding: 10%;
+        border: 1px solid #aaa79f;
+        border-radius: clamp(8px, 1.2vw, 14px);
+      }
+
+      .automation-card strong {
+        font-size: clamp(14px, 2.2vw, 25px);
+        line-height: 1;
+      }
+
+      .automation-card span {
+        color: #57544d;
+        font-size: clamp(8px, 1.25vw, 14px);
+        line-height: 1.25;
+      }
+
+      .automation-card.agent { color: #eee8de; background: #26251f; border-color: #26251f; }
+      .automation-card.agent span { color: #c7c1b6; }
+
+      .decision-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 2%;
+      }
+
+      .decision-grid > div {
+        min-height: clamp(110px, 19vw, 210px);
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        border-radius: clamp(8px, 1.2vw, 14px);
+        text-align: left;
+      }
+
+      .decision-grid strong {
+        display: block;
+        margin-bottom: 7%;
+        color: var(--ink);
+        font-size: clamp(14px, 2.2vw, 25px);
+        line-height: 1;
+      }
+
+      .decision-grid span { font-weight: 520; line-height: 1.3; }
+
+      .question-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 2%;
+      }
+
+      .question {
+        min-height: clamp(118px, 20vw, 220px);
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        padding: 10%;
+        border-top: clamp(3px, 0.6vw, 7px) solid var(--accent);
+        background: rgb(255 255 255 / 23%);
+      }
+
+      .question span {
+        color: var(--accent);
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: clamp(9px, 1.2vw, 14px);
+        font-weight: 800;
+      }
+
+      .question strong {
+        font-size: clamp(15px, 2.4vw, 28px);
+        line-height: 1.06;
+      }
+
+      .technical-list {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 0 7%;
+        margin: 0;
+        padding: 0;
+        list-style: none;
+      }
+
+      .technical-list li {
+        display: flex;
+        align-items: center;
+        gap: 8%;
+        padding: 7% 0;
+        border-bottom: 1px solid #aaa79f;
+        font-size: clamp(12px, 1.8vw, 21px);
+        font-weight: 680;
+      }
+
+      .technical-list li::before {
+        content: "";
+        width: 0.55em;
+        aspect-ratio: 1;
+        flex: 0 0 auto;
+        border-radius: 50%;
+        background: var(--accent);
+      }
+
+      .task-card {
+        padding: 5%;
+        border: 1px solid #99968e;
+        border-radius: clamp(9px, 1.3vw, 15px);
+        background: rgb(255 255 255 / 21%);
+      }
+
+      .task-card h3 {
+        margin: 0 0 4%;
+        font-size: clamp(16px, 2.6vw, 30px);
+        letter-spacing: -0.03em;
+      }
+
+      .task-card ul {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 3% 8%;
+        margin: 0;
+        padding: 0;
+        list-style: none;
+      }
+
+      .task-card li {
+        padding-top: 4%;
+        border-top: 1px solid #aaa79f;
+        color: #45423c;
+        font-size: clamp(9px, 1.45vw, 17px);
+        font-weight: 630;
+        line-height: 1.3;
+      }
+
+      .workflow {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 1.5%;
+      }
+
+      .workflow-step {
+        min-height: clamp(98px, 17vw, 190px);
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        padding: 13% 10%;
+        border: 1px solid #aaa79f;
+      }
+
+      .workflow-step span {
+        color: var(--accent);
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: clamp(9px, 1.2vw, 14px);
+        font-weight: 800;
+      }
+
+      .workflow-step strong {
+        font-size: clamp(10px, 1.55vw, 18px);
+        line-height: 1.12;
+      }
+
+      .closing-note {
+        max-width: 25ch;
+        margin: 5% 0 0;
+        color: #46433d;
+        font-size: clamp(12px, 1.8vw, 21px);
+        line-height: 1.38;
+      }
+
+      .controls {
+        width: min(100%, 648px);
+        margin: 18px auto 0;
+      }
+
+      .control-group { display: flex; gap: 8px; }
+
+      .control-button {
+        min-width: 42px;
+        min-height: 42px;
+        border: 1px solid #484741;
+        border-radius: 999px;
+        color: #f3f2ee;
+        background: #252522;
+        cursor: pointer;
+      }
+
+      .control-button:hover { background: #33322e; }
+      .control-button:focus-visible { outline: 3px solid #d8aa66; outline-offset: 3px; }
+
+      .progress {
+        color: #aaa8a1;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 13px;
+      }
+
+      .sidebar {
+        max-height: min(80vh, 760px);
+        overflow: auto;
+        padding-right: 8px;
+        scrollbar-color: #514f49 transparent;
+      }
+
+      .sidebar h2 {
+        max-width: none;
+        margin: 0 0 6px;
+        color: #f3f2ee;
+        font-size: 24px;
+        letter-spacing: -0.035em;
+        line-height: 1.1;
+      }
+
+      .sidebar > p {
+        margin: 0 0 22px;
+        color: #aaa8a1;
+        font-size: 14px;
+        line-height: 1.5;
+      }
+
+      .thumbnail-list { display: grid; gap: 8px; }
+
+      .thumbnail {
+        width: 100%;
+        display: grid;
+        grid-template-columns: 34px 1fr;
+        gap: 12px;
+        align-items: center;
+        padding: 12px;
+        border: 1px solid transparent;
+        border-radius: 10px;
+        color: #c7c5bf;
+        background: transparent;
+        cursor: pointer;
+        text-align: left;
+      }
+
+      .thumbnail:hover { background: #23231f; }
+      .thumbnail:focus-visible { outline: 3px solid #d8aa66; outline-offset: 2px; }
+      .thumbnail.is-active { color: #fff; background: #2b2b27; border-color: #4e4c46; }
+
+      .thumbnail-number {
+        display: grid;
+        place-items: center;
+        width: 32px;
+        aspect-ratio: 1;
+        border-radius: 7px;
+        color: #171612;
+        background: #b88d4f;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        font-size: 12px;
+        font-weight: 800;
+      }
+
+      .thumbnail strong { font-size: 13px; line-height: 1.3; }
+
+      @media (max-width: 900px) {
+        .app {
+          grid-template-columns: 1fr;
+          align-items: start;
+          padding: 22px;
+        }
+
+        .sidebar { max-height: none; }
+        .thumbnail-list { grid-template-columns: repeat(3, 1fr); }
+        .thumbnail { grid-template-columns: 1fr; gap: 8px; }
+      }
+
+      @media (max-width: 580px) {
+        .app { padding: 14px; gap: 30px; }
+        .stage-header span { display: none; }
+        .thumbnail-list { grid-template-columns: 1fr 1fr; }
+        .thumbnail { grid-template-columns: 28px 1fr; padding: 9px; }
+        .thumbnail-number { width: 28px; }
+      }
+
+      @media (prefers-reduced-motion: no-preference) {
+        .slide.is-active { animation: reveal 180ms ease-out; }
+        @keyframes reveal {
+          from { opacity: 0; transform: translateX(8px); }
+          to { opacity: 1; transform: translateX(0); }
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="app">
+      <section class="stage" aria-label="Carousel preview">
+        <header class="stage-header">
+          <p>Carousel mockup</p>
+          <span>1080 × 1350 · 4:5</span>
+        </header>
+
+        <div class="deck" aria-live="polite">
+          <article class="slide cover is-active" aria-label="Slide 1 of 9">
+            <header class="slide-chrome"><span>Owain Lewis</span><span>AI Engineering</span></header>
+            <div class="slide-content">
+              <p class="eyebrow">The work has changed</p>
+              <h1>Coding is no longer the <span class="accent">hard part</span></h1>
+              <p class="subtitle">The two skills AI engineers need most are design and planning.</p>
+              <p class="cover-note">A practical workflow for agentic development</p>
+            </div>
+            <footer class="slide-footer"><span>Design before you delegate</span><span class="footer-arrow">→</span></footer>
+          </article>
+
+          <article class="slide" aria-label="Slide 2 of 9" hidden>
+            <header class="slide-chrome"><span>Owain Lewis</span><span>AI Engineering</span></header>
+            <div class="slide-content">
+              <h2 class="wide-title">Better tools will not fix a <span class="accent">weak idea</span></h2>
+              <p class="body-copy">Most advice focuses on model choices, agent setups, and prompt tricks.</p>
+              <p class="body-copy">Those things can help. But they cannot rescue work that was poorly defined from the start.</p>
+              <div class="tool-list" aria-label="Common areas of focus">
+                <span>Model choice</span><span>Agent setup</span><span>Prompt tricks</span><span>Tool config</span>
+              </div>
+            </div>
+            <footer class="slide-footer"><span>02 / 09</span><span class="footer-arrow">→</span></footer>
+          </article>
+
+          <article class="slide" aria-label="Slide 3 of 9" hidden>
+            <header class="slide-chrome"><span>Owain Lewis</span><span>AI Engineering</span></header>
+            <div class="slide-content">
+              <p class="eyebrow">The software workflow</p>
+              <h2 class="wide-title compact-title">Every feature moves through <span class="accent">five stages</span></h2>
+              <div class="phase-list" aria-label="Five stages of software delivery">
+                <div class="phase"><strong>01</strong><span>Design</span></div>
+                <div class="phase"><strong>02</strong><span>Plan</span></div>
+                <div class="phase"><strong>03</strong><span>Build</span></div>
+                <div class="phase"><strong>04</strong><span>Verify</span></div>
+                <div class="phase"><strong>05</strong><span>Deploy</span></div>
+              </div>
+            </div>
+            <footer class="slide-footer"><span>03 / 09</span><span class="footer-arrow">→</span></footer>
+          </article>
+
+          <article class="slide" aria-label="Slide 4 of 9" hidden>
+            <header class="slide-chrome"><span>Owain Lewis</span><span>AI Engineering</span></header>
+            <div class="slide-content">
+              <h2 class="wide-title compact-title">Agents can handle much of the <span class="accent">middle</span></h2>
+              <div class="automation-row">
+                <div class="automation-card agent"><strong>Build</strong><span>An agent can turn a clear task into code and open a pull request.</span></div>
+                <div class="automation-card"><strong>Verify</strong><span>Tests and reviews can be automated. Human checks depend on risk.</span></div>
+                <div class="automation-card agent"><strong>Deploy</strong><span>Merge the change and let the delivery system ship it.</span></div>
+              </div>
+            </div>
+            <footer class="slide-footer"><span>04 / 09</span><span class="footer-arrow">→</span></footer>
+          </article>
+
+          <article class="slide" aria-label="Slide 5 of 9" hidden>
+            <header class="slide-chrome"><span>Owain Lewis</span><span>AI Engineering</span></header>
+            <div class="slide-content">
+              <h2 class="wide-title compact-title">Your job moves to the <span class="accent">decisions</span></h2>
+              <div class="decision-grid">
+                <div><strong>Design</strong><span>Choose what to build and how it should work.</span></div>
+                <div><strong>Plan</strong><span>Break the design into clear, bounded tasks.</span></div>
+                <div><strong>Verify</strong><span>Check the result with care that matches the risk.</span></div>
+              </div>
+            </div>
+            <footer class="slide-footer"><span>05 / 09</span><span class="footer-arrow">→</span></footer>
+          </article>
+
+          <article class="slide" aria-label="Slide 6 of 9" hidden>
+            <header class="slide-chrome"><span>Owain Lewis</span><span>AI Engineering</span></header>
+            <div class="slide-content">
+              <p class="eyebrow">Start with requirements</p>
+              <h2 class="wide-title compact-title">Good design answers <span class="accent">three questions</span></h2>
+              <div class="question-grid">
+                <div class="question"><span>01</span><strong>What are we building?</strong></div>
+                <div class="question"><span>02</span><strong>Why does it matter?</strong></div>
+                <div class="question"><span>03</span><strong>Who is it for?</strong></div>
+              </div>
+            </div>
+            <footer class="slide-footer"><span>06 / 09</span><span class="footer-arrow">→</span></footer>
+          </article>
+
+          <article class="slide" aria-label="Slide 7 of 9" hidden>
+            <header class="slide-chrome"><span>Owain Lewis</span><span>AI Engineering</span></header>
+            <div class="slide-content">
+              <h2 class="wide-title compact-title">Then make the <span class="accent">hard choices</span></h2>
+              <ul class="technical-list">
+                <li>Interfaces</li><li>Data</li><li>Edge cases</li><li>Security</li><li>Limits</li><li>Operations</li><li>Monitoring</li><li>Failure paths</li>
+              </ul>
+              <p class="closing-note">An agent can help you find options. You still need to judge the trade-offs.</p>
+            </div>
+            <footer class="slide-footer"><span>07 / 09</span><span class="footer-arrow">→</span></footer>
+          </article>
+
+          <article class="slide" aria-label="Slide 8 of 9" hidden>
+            <header class="slide-chrome"><span>Owain Lewis</span><span>AI Engineering</span></header>
+            <div class="slide-content">
+              <h2 class="wide-title compact-title">Planning makes a design <span class="accent">executable</span></h2>
+              <p class="body-copy">Large designs carry too much context for one reliable implementation pass. Split them into small tasks.</p>
+              <div class="task-card">
+                <h3>Each task should state:</h3>
+                <ul>
+                  <li>The outcome</li>
+                  <li>What is in scope</li>
+                  <li>Important constraints</li>
+                  <li>Acceptance criteria</li>
+                  <li>Required checks</li>
+                  <li>Delivery order</li>
+                </ul>
+              </div>
+            </div>
+            <footer class="slide-footer"><span>08 / 09</span><span class="footer-arrow">→</span></footer>
+          </article>
+
+          <article class="slide" aria-label="Slide 9 of 9" hidden>
+            <header class="slide-chrome"><span>Owain Lewis</span><span>AI Engineering</span></header>
+            <div class="slide-content">
+              <p class="eyebrow">A simple working loop</p>
+              <h2 class="wide-title compact-title">Spend your best thinking on the <span class="accent">design</span></h2>
+              <div class="workflow" aria-label="Four step design workflow">
+                <div class="workflow-step"><span>01</span><strong>Write the design</strong></div>
+                <div class="workflow-step"><span>02</span><strong>Review the architecture</strong></div>
+                <div class="workflow-step"><span>03</span><strong>Make it easy to read</strong></div>
+                <div class="workflow-step"><span>04</span><strong>Break it into tasks</strong></div>
+              </div>
+              <p class="closing-note">Use agents for the mechanical work. Keep humans responsible for the important choices.</p>
+            </div>
+            <footer class="slide-footer"><span>Save this workflow</span><span>09 / 09</span></footer>
+          </article>
+        </div>
+
+        <nav class="controls" aria-label="Carousel controls">
+          <div class="control-group">
+            <button class="control-button" id="previous" type="button" aria-label="Previous slide">←</button>
+            <button class="control-button" id="next" type="button" aria-label="Next slide">→</button>
+          </div>
+          <output class="progress" id="progress" aria-live="polite">01 / 09</output>
+        </nav>
+      </section>
+
+      <aside class="sidebar" aria-label="Slide outline">
+        <h2>Design and planning</h2>
+        <p>A nine-slide LinkedIn carousel distilled from the video transcript. Use the arrow keys to move through it.</p>
+        <div class="thumbnail-list" id="thumbnail-list"></div>
+      </aside>
+    </main>
+
+    <script>
+      const slides = Array.from(document.querySelectorAll(".slide"));
+      const previousButton = document.querySelector("#previous");
+      const nextButton = document.querySelector("#next");
+      const progress = document.querySelector("#progress");
+      const thumbnailList = document.querySelector("#thumbnail-list");
+      const slideTitles = [
+        "Coding is no longer the hard part",
+        "Better tools will not fix a weak idea",
+        "Every feature moves through five stages",
+        "Agents can handle much of the middle",
+        "Your job moves to the decisions",
+        "Good design answers three questions",
+        "Then make the hard choices",
+        "Planning makes a design executable",
+        "Spend your best thinking on the design",
+      ];
+      let activeIndex = 0;
+
+      const thumbnailButtons = slideTitles.map((title, index) => {
+        const button = document.createElement("button");
+        button.className = "thumbnail";
+        button.type = "button";
+        button.setAttribute("aria-label", `Show slide ${index + 1}: ${title}`);
+        button.innerHTML = `<span class="thumbnail-number">${String(index + 1).padStart(2, "0")}</span><strong>${title}</strong>`;
+        button.addEventListener("click", () => showSlide(index));
+        thumbnailList.append(button);
+        return button;
+      });
+
+      function showSlide(index) {
+        activeIndex = (index + slides.length) % slides.length;
+        slides.forEach((slide, slideIndex) => {
+          const isActive = slideIndex === activeIndex;
+          slide.classList.toggle("is-active", isActive);
+          slide.hidden = !isActive;
+        });
+        thumbnailButtons.forEach((button, buttonIndex) => {
+          const isActive = buttonIndex === activeIndex;
+          button.classList.toggle("is-active", isActive);
+          button.setAttribute("aria-current", isActive ? "true" : "false");
+        });
+        progress.value = `${String(activeIndex + 1).padStart(2, "0")} / ${String(slides.length).padStart(2, "0")}`;
+      }
+
+      previousButton.addEventListener("click", () => showSlide(activeIndex - 1));
+      nextButton.addEventListener("click", () => showSlide(activeIndex + 1));
+      document.addEventListener("keydown", (event) => {
+        if (event.key === "ArrowLeft") showSlide(activeIndex - 1);
+        if (event.key === "ArrowRight") showSlide(activeIndex + 1);
+      });
+
+      showSlide(0);
+    </script>
+  </body>
+</html>
