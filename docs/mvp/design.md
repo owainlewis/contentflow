@@ -12,7 +12,7 @@ The application will run on Google Cloud. Cloud Run will host the application, F
 
 The existing app stores example items in React state. It supports searching, status filters, format-specific editors, YouTube script blocks, attachment placeholders, and a simulated repurposing flow. It has no durable database, authentication, upload storage, API, CLI, conflict handling, or automatic expiry.
 
-The MVP is a single-owner application. It must let the owner create, edit, search, organise, and relate content across six formats. It must also let trusted agents do the same work through an API or CLI. Content is working material, not a permanent archive. Every content item and uploaded asset remains available for no more than eight weeks from its creation. The API then hides it immediately and Google Cloud removes its stored data asynchronously.
+The MVP is a single-owner application. It must let the owner create, edit, search, organise, and relate content across seven formats. It must also let trusted agents do the same work through an API or CLI. Content is working material, not a permanent archive. Every content item and uploaded asset remains available for no more than eight weeks from its creation. The API then hides it immediately and Google Cloud removes its stored data asynchronously.
 
 AI generation stays outside the core application for the MVP. An agent may generate content, but it writes the result through the same public contract as the web app.
 
@@ -52,7 +52,7 @@ The web app owns the content library, editors, serialized autosave queue, light 
 
 The existing Vinext application remains the visual and interaction starting point. When the monorepo is introduced, it moves to `apps/web` and becomes a client-rendered Vite application. Server rendering is unnecessary for an authenticated content workspace. The production build is embedded in the Go binary with `go:embed`, which keeps deployment to one Cloud Run service and one container. Theme preference is stored on the device. Content is never treated as device-local state after the API is available.
 
-A small head bootstrap script reads `contentflow-theme` before styles paint. It sets `data-theme` to `light` or `dark`, resolving `system` through `prefers-color-scheme`. CSS custom properties own both palettes and the ratio-derived type tokens.
+A small head bootstrap script reads `contentflow-theme` before styles paint and sets `data-theme` to the saved `light` or `dark` value. It defaults to dark when no valid preference exists. CSS custom properties own both palettes and the ratio-derived type tokens.
 
 #### Go API
 
@@ -120,18 +120,18 @@ Local development uses the Firestore emulator and a persistent filesystem implem
 ### Requirements
 
 - The owner can create, read, update, search, filter, archive, restore, and delete content during its 56-day lifetime.
-- Supported types are YouTube, LinkedIn, X, reel, email, and Substack.
+- Supported types are YouTube, LinkedIn, X, Instagram, TikTok, email, and Substack.
 - Every item has a working title for the library. Type-specific publishing fields remain in the typed payload.
 - YouTube stores topic, ideal customer profile, angle, call to action, publishing title, description, thumbnail, and ordered script sections.
 - LinkedIn and X store a working title and plain-text body.
 - Email stores a working title, subject, and plain-text body.
 - Substack stores a working title, headline, subheadline, and plain-text body.
-- Reel stores a working title, plain-text script, and optional video asset.
+- Instagram and TikTok each store a working title, plain-text script, and optional video asset.
 - The owner can link content items as repurposed content while both records exist.
 - The API supports atomic batch creation for agent-generated drafts.
 - Content created through the web, API, or CLI expires under the same rule.
 - The UI displays the expiry date and warns during the final seven days.
-- The UI supports light, dark, and system theme choices and applies the resolved theme before first paint.
+- The UI supports persistent light and dark theme choices and applies the saved theme before first paint.
 - Typography uses a 1rem minimum body size, 1.618 line height for reading copy, a 68ch maximum reading measure, `clamp(1.25rem, 1.1rem + 0.6vw, 1.618rem)` for section headings, and `clamp(2rem, 1.6rem + 1.5vw, 2.618rem)` for document titles. UI labels never fall below 0.75rem.
 - Cloud mode uses Cloud Run, Firestore, Cloud Storage, and Google OAuth in one Google Cloud project.
 
@@ -148,7 +148,8 @@ Local development uses the Firestore emulator and a persistent filesystem implem
 - `x`: body
 - `email`: subject, body
 - `substack`: headline, subheadline, body
-- `reel`: script
+- `instagram`: script
+- `tiktok`: script
 
 `content_items/{content_id}/sections/{section_id}` stores a YouTube section's `position`, `title`, `body`, `workspace_id`, and `expires_at`. Other content types cannot create section documents.
 
@@ -232,7 +233,7 @@ Batch creation accepts one idempotency key and up to 50 items. The service valid
 
 An asset upload starts by recording expected size, media type, and SHA-256 checksum. Before issuing a URL, a Firestore transaction reserves the expected bytes against the workspace's 25 GiB limit. The API rejects the request if the reservation would exceed the limit. It then returns a 15-minute signed Cloud Storage upload request under the `pending/` prefix. Completion reads object metadata, verifies the exact reserved size, checksum, media type, signature, and ownership, then moves the object to its final key and converts reserved bytes to verified live bytes in one metadata transaction. It never trusts completion metadata from the client.
 
-YouTube accepts one image with the `thumbnail` role. Reel accepts one video with the `video` role. The API rejects cross-workspace, already-attached, wrong-role, wrong-type, and pending assets. An authenticated download endpoint authorizes ownership before returning a signed URL whose expiry is the earlier of 15 minutes or the asset's logical `expires_at`.
+YouTube accepts one image with the `thumbnail` role. Instagram and TikTok each accept one video with the `video` role. The API rejects cross-workspace, already-attached, wrong-role, wrong-type, and pending assets. An authenticated download endpoint authorizes ownership before returning a signed URL whose expiry is the earlier of 15 minutes or the asset's logical `expires_at`.
 
 The API returns `400` for invalid input, `401` for missing identity, `403` for insufficient scope, `404` for a missing, expired, or out-of-workspace record, `409` for a stale revision or conflicting idempotency key, `413` for a payload over the limit, and `429` for rate limiting.
 
@@ -275,12 +276,12 @@ Local development binds the API to the private Compose network. The same-origin 
 - `AC-1`: After signing in, the owner can create and edit every supported content type and the data remains after browser and Cloud Run instance restarts.
 - `AC-2`: The API rejects a payload whose discriminator and detail shape do not match, preserving `INV-2`.
 - `AC-3`: The owner can reorder, add, edit, and remove YouTube sections without changing section IDs or producing duplicate positions.
-- `AC-4`: The owner can upload a thumbnail or reel video, reload the item, and retrieve the attached asset only while authenticated to the owning workspace.
+- `AC-4`: The owner can upload a YouTube thumbnail or an Instagram or TikTok video, reload the item, and retrieve the attached asset only while authenticated to the owning workspace.
 - `AC-5`: Search and filters return the same content through the web app, API, and CLI.
 - `AC-6`: An agent can create 20 derived drafts in one batch, link them to one source, and safely retry the request without duplicates.
 - `AC-7`: A stale browser or agent update receives the current server document and does not overwrite it. Retrying a committed operation after a lost response returns the original result.
 - `AC-8`: The CLI supports JSON output for list, show, create, update, archive, restore, batch-create, and link commands.
-- `AC-9`: Light, dark, and system themes initialize before first paint, respond to system changes, persist on the device, and meet WCAG AA at 390 by 844 and 1440 by 1000 viewports.
+- `AC-9`: Light and dark themes initialize before first paint, persist on the device, and meet WCAG AA at 390 by 844 and 1440 by 1000 viewports.
 - `AC-10`: Local setup starts the web app, private API, Firestore emulator, and persistent local asset storage with one documented command.
 - `AC-11`: Cloud mode deploys to Cloud Run and uses Firestore, Cloud Storage, and Google OAuth from configured Google Cloud resources.
 - `AC-12`: Revoking an API token prevents its next authenticated request.
@@ -298,7 +299,7 @@ HTTP integration tests prove authentication, CSRF, local proxy rejection, token 
 
 Storage contract tests run against the filesystem adapter and a Google Cloud test bucket. They cover pre-upload quota reservation, concurrent reservation attempts, signed upload constraints, verification, abandoned reservation cleanup, ownership, download URL expiry, manual deletion, and lifecycle configuration for `AC-4`, `AC-14`, and `AC-17`.
 
-CLI tests run commands against a real test API and assert human and JSON output for `AC-5` and `AC-8`. Browser tests cover each editor, autosave retry, external conflicts, asset uploads, expiry warnings, search, themes, keyboard access, and desktop and mobile layouts for `AC-1`, `AC-3`, `AC-4`, `AC-5`, `AC-7`, and `AC-9`.
+CLI tests run commands against a real test API and assert human and JSON output for `AC-5` and `AC-8`. Browser tests cover each editor, autosave retry, external conflicts, asset uploads, expiry warnings, search, theme persistence, keyboard access, and desktop and mobile layouts for `AC-1`, `AC-3`, `AC-4`, `AC-5`, `AC-7`, and `AC-9`.
 
 A deployment smoke test checks Cloud Run readiness, Google sign-in, Firestore access, exact-origin storage preflight, a signed upload, service-account permissions, TTL policies, bucket lifecycle rules, and required configuration failure for `AC-11` and `AC-14`.
 

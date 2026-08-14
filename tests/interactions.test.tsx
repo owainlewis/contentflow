@@ -41,7 +41,8 @@ describe("ContentFlow interactions", () => {
     ["YouTube", "Video brief and script blocks", "youtube"],
     ["LinkedIn", "One focused post", "linkedin"],
     ["X", "One short-form post", "x"],
-    ["Short-form reels", "Script and video asset", "reel"],
+    ["Instagram", "Script and video asset", "instagram"],
+    ["TikTok", "Script and video asset", "tiktok"],
     ["Email", "Subject line and email body", "email"],
     ["Substack", "Headline, sub-headline, and article", "substack"],
   ])("creates a %s draft with the correct editor", async (label, description, type) => {
@@ -68,9 +69,9 @@ describe("ContentFlow interactions", () => {
       expect(screen.getByLabelText("Substack headline")).toBeTruthy();
       expect(screen.getByLabelText("Substack sub-headline")).toBeTruthy();
       expect(screen.getByLabelText("Article body")).toBeTruthy();
-    } else if (type === "reel") {
-      expect(screen.getByLabelText("Reel script")).toBeTruthy();
-      expect(screen.getByLabelText("Choose reel video")).toBeTruthy();
+    } else if (type === "instagram" || type === "tiktok") {
+      expect(screen.getByLabelText(`${label} script`)).toBeTruthy();
+      expect(screen.getByLabelText(`Choose ${label} video`)).toBeTruthy();
     } else {
       expect(screen.getByLabelText(`${label} post`)).toBeTruthy();
     }
@@ -129,7 +130,7 @@ describe("ContentFlow interactions", () => {
     await user.click(screen.getByRole("button", { name: /You don’t need more content ideas/ }));
     await user.click(screen.getByRole("button", { name: "Repurpose" }));
 
-    for (const output of ["X", "Email", "Short-form reels"]) {
+    for (const output of ["X", "Email", "Instagram"]) {
       const button = screen.getByRole("button", { name: output });
       expect(button.getAttribute("aria-pressed")).toBe("true");
       await user.click(button);
@@ -145,23 +146,43 @@ describe("ContentFlow interactions", () => {
     expect((screen.getByLabelText("Main section script") as HTMLTextAreaElement).value).toMatch(/better way to reuse the good ones/i);
   });
 
-  it("captures and removes a reel video attachment", async () => {
+  it("captures and removes an Instagram video attachment", async () => {
     const user = userEvent.setup();
     render(<Home />);
 
     await user.click(screen.getByRole("button", { name: /Hook: If content creation feels exhausting/ }));
     expect(screen.getByText("stop-starting-from-scratch-v2.mp4")).toBeTruthy();
 
-    const videoInput = screen.getByLabelText("Choose reel video") as HTMLInputElement;
-    const video = new File(["video"], "content-system-reel.mp4", { type: "video/mp4" });
+    const videoInput = screen.getByLabelText("Choose Instagram video") as HTMLInputElement;
+    const video = new File(["video"], "content-system-instagram.mp4", { type: "video/mp4" });
     await user.upload(videoInput, video);
-    expect(screen.getByText("content-system-reel.mp4")).toBeTruthy();
-    await user.click(screen.getByRole("button", { name: "Remove reel video" }));
-    expect(screen.queryByText("content-system-reel.mp4")).toBeNull();
+    expect(screen.getByText("content-system-instagram.mp4")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Remove Instagram video" }));
+    expect(screen.queryByText("content-system-instagram.mp4")).toBeNull();
     expect(videoInput.value).toBe("");
 
     await user.upload(videoInput, video);
-    expect(screen.getByText("content-system-reel.mp4")).toBeTruthy();
+    expect(screen.getByText("content-system-instagram.mp4")).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: /You do not need another list of content ideas/ }));
+    const tikTokInput = screen.getByLabelText("Choose TikTok video") as HTMLInputElement;
+    expect(tikTokInput.value).toBe("");
+    await user.upload(tikTokInput, video);
+    expect(screen.getByText("content-system-instagram.mp4")).toBeTruthy();
+  });
+
+  it("switches between persistent light and dark themes", async () => {
+    const user = userEvent.setup();
+    document.documentElement.dataset.theme = "dark";
+    window.localStorage.removeItem("contentflow-theme");
+    render(<Home />);
+
+    await user.click(screen.getAllByRole("button", { name: "Switch to light mode" })[0]);
+    expect(document.documentElement.dataset.theme).toBe("light");
+    expect(window.localStorage.getItem("contentflow-theme")).toBe("light");
+
+    await user.click(screen.getAllByRole("button", { name: "Switch to dark mode" })[0]);
+    expect(document.documentElement.dataset.theme).toBe("dark");
   });
 
   it("closes dialogs with Escape and exposes output selection state", async () => {
