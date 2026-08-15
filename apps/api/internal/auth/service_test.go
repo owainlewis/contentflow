@@ -356,6 +356,38 @@ func TestBearerAuthenticationSchemeIsCaseInsensitive(t *testing.T) {
 	}
 }
 
+func TestPersistedCredentialsAreBoundToConfiguredWorkspace(t *testing.T) {
+	service, store, _ := newTestService(t, Identity{})
+	handler := protectedHandler(service)
+
+	foreignSession := Session{ID: "foreign-session", WorkspaceID: "another-workspace", CSRFToken: "csrf", ExpiresAt: time.Now().Add(time.Hour)}
+	if err := store.SaveSession(context.Background(), foreignSession); err != nil {
+		t.Fatal(err)
+	}
+	sessionRequest := httptest.NewRequest(http.MethodGet, "/api/v1/content", nil)
+	sessionRequest.AddCookie(&http.Cookie{Name: sessionCookieName, Value: foreignSession.ID})
+	sessionResponse := httptest.NewRecorder()
+	handler.ServeHTTP(sessionResponse, sessionRequest)
+	if sessionResponse.Code != http.StatusUnauthorized || !strings.Contains(sessionResponse.Body.String(), "authentication_required") {
+		t.Fatalf("foreign-workspace session returned %d: %s", sessionResponse.Code, sessionResponse.Body.String())
+	}
+
+	raw := "cf_foreign_workspace_token"
+	hash := sha256.Sum256([]byte(raw))
+	if err := store.SaveToken(context.Background(), Token{
+		ID: "foreign-token", WorkspaceID: "another-workspace", Prefix: raw[:12], Hash: hash, Scopes: []Scope{ScopeContentRead},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	tokenRequest := httptest.NewRequest(http.MethodGet, "/api/v1/content", nil)
+	tokenRequest.Header.Set("Authorization", "Bearer "+raw)
+	tokenResponse := httptest.NewRecorder()
+	handler.ServeHTTP(tokenResponse, tokenRequest)
+	if tokenResponse.Code != http.StatusUnauthorized || !strings.Contains(tokenResponse.Body.String(), "invalid_bearer_token") {
+		t.Fatalf("foreign-workspace token returned %d: %s", tokenResponse.Code, tokenResponse.Body.String())
+	}
+}
+
 func TestAPIClientsAreLimitedTo120RequestsPerMinute(t *testing.T) {
 	service, store, _ := newTestService(t, Identity{})
 	_, raw := createToken(t, service, store, `["content:read"]`)

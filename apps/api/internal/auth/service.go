@@ -295,6 +295,9 @@ func (s *Service) authenticate(request *http.Request) (Principal, int, string) {
 			}
 			return Principal{}, http.StatusUnauthorized, "invalid_bearer_token"
 		}
+		if !secureEqual(token.WorkspaceID, s.config.WorkspaceID) {
+			return Principal{}, http.StatusUnauthorized, "invalid_bearer_token"
+		}
 		allowed, err := s.store.AllowTokenRequest(request.Context(), token.ID, s.now(), 120, time.Minute)
 		if err != nil {
 			return Principal{}, http.StatusServiceUnavailable, "authentication_unavailable"
@@ -313,6 +316,9 @@ func (s *Service) authenticate(request *http.Request) (Principal, int, string) {
 		if !errors.Is(err, ErrNotFound) {
 			return Principal{}, http.StatusServiceUnavailable, "authentication_unavailable"
 		}
+		return Principal{}, http.StatusUnauthorized, "authentication_required"
+	}
+	if !secureEqual(session.WorkspaceID, s.config.WorkspaceID) {
 		return Principal{}, http.StatusUnauthorized, "authentication_required"
 	}
 	return Principal{WorkspaceID: session.WorkspaceID, Kind: "session", Scopes: slices.Clone(allowedScopes), CSRFToken: session.CSRFToken}, 0, ""
