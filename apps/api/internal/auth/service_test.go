@@ -208,6 +208,28 @@ func TestBrowserMutationsRequireMatchingOriginAndSessionCSRF(t *testing.T) {
 	}
 }
 
+func TestBrowserOriginChecksUseCanonicalURLForm(t *testing.T) {
+	provider := &fakeProvider{}
+	store := NewMemoryStore()
+	service, err := New(Config{
+		PublicOrigin: "https://CONTENTFLOW.EXAMPLE:443/", OwnerIssuer: "https://accounts.google.com", OwnerSubject: "owner",
+		WorkspaceID: "owner-workspace", CredentialKey: make([]byte, 32),
+	}, provider, store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := sessionRequest(t, service, store, http.MethodPost, "/api/v1/content", nil)
+	request.Header.Set("Origin", "https://contentflow.example")
+	response := httptest.NewRecorder()
+	protectedHandler(service).ServeHTTP(response, request)
+	if response.Code != http.StatusNoContent {
+		t.Fatalf("browser-canonical origin returned %d: %s", response.Code, response.Body.String())
+	}
+	if service.config.PublicOrigin != "https://contentflow.example" {
+		t.Fatalf("configured origin was not canonicalized: %q", service.config.PublicOrigin)
+	}
+}
+
 func createToken(t *testing.T, service *Service, store Store, scopes string) (string, string) {
 	t.Helper()
 	request := sessionRequest(t, service, store, http.MethodPost, "/api/v1/tokens", strings.NewReader(`{"scopes":`+scopes+`}`))

@@ -30,8 +30,14 @@ func NewFirestoreStore(client *firestore.Client) *FirestoreStore {
 }
 
 func (s *FirestoreStore) Check(ctx context.Context) error {
-	_, err := s.client.Collection(sessionsCollection).Doc("_readiness").Get(ctx)
-	if firestoreIsNotFound(err) {
+	documents := s.client.Collection(sessionsCollection).Limit(1).Documents(ctx)
+	defer documents.Stop()
+	_, err := documents.Next()
+	return firestoreReadinessError(err)
+}
+
+func firestoreReadinessError(err error) error {
+	if err == iterator.Done {
 		return nil
 	}
 	return err

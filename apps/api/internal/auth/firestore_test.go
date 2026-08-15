@@ -11,7 +11,20 @@ import (
 	"time"
 
 	"cloud.google.com/go/firestore"
+	"google.golang.org/api/iterator"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
+
+func TestFirestoreReadinessOnlyTreatsAnEmptyQueryAsHealthy(t *testing.T) {
+	if err := firestoreReadinessError(iterator.Done); err != nil {
+		t.Fatalf("empty Firestore query failed readiness: %v", err)
+	}
+	databaseMissing := status.Error(codes.NotFound, "database missing")
+	if err := firestoreReadinessError(databaseMissing); !errors.Is(err, databaseMissing) {
+		t.Fatalf("database-level NotFound was treated as healthy: %v", err)
+	}
+}
 
 func TestFirestoreStorePersistsSessionsAndImmediateTokenRevocation(t *testing.T) {
 	if os.Getenv("FIRESTORE_EMULATOR_HOST") == "" {

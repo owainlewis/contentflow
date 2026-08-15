@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/oklog/ulid/v2"
+	"golang.org/x/net/idna"
 )
 
 type Scope string
@@ -66,14 +67,14 @@ type Principal struct {
 type principalKey struct{}
 
 func New(config Config, provider OAuthProvider, store Store) (*Service, error) {
-	origin, err := url.Parse(config.PublicOrigin)
-	if err != nil || origin.Host == "" || (origin.Scheme != "http" && origin.Scheme != "https") || origin.User != nil || (origin.Path != "" && origin.Path != "/") || origin.RawQuery != "" || origin.Fragment != "" {
+	canonicalOrigin, origin, err := normalizeOrigin(config.PublicOrigin)
+	if err != nil {
 		return nil, fmt.Errorf("valid public origin is required")
 	}
 	if origin.Scheme == "http" && !isLoopbackHostname(origin.Hostname()) {
 		return nil, fmt.Errorf("authenticated HTTP origins are allowed only on loopback")
 	}
-	config.PublicOrigin = strings.TrimSuffix(config.PublicOrigin, "/")
+	config.PublicOrigin = canonicalOrigin
 	if config.OwnerIssuer == "" || config.OwnerSubject == "" || config.WorkspaceID == "" {
 		return nil, fmt.Errorf("owner issuer, subject, and workspace are required")
 	}
@@ -256,7 +257,8 @@ func (s *Service) Authorize(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		principal, _ := PrincipalFromContext(request.Context())
 		if principal.Kind == "session" && isMutation(request.Method) {
-			if request.Header.Get("Origin") != s.config.PublicOrigin || subtle.ConstantTimeCompare([]byte(request.Header.Get("X-CSRF-Token")), []byte(principal.CSRFToken)) != 1 {
+			requestOrigin, _, err := normalizeOrigin(request.Header.Get("Origin"))
+			if err != nil || !secureEqual(requestOrigin, s.config.PublicOrigin) || subtle.ConstantTimeCompare([]byte(request.Header.Get("X-CSRF-Token")), []byte(principal.CSRFToken)) != 1 {
 				writeError(response, http.StatusForbidden, "csrf_check_failed")
 				return
 			}
@@ -373,6 +375,39 @@ func isLoopbackHostname(hostname string) bool {
 	}
 	ip := net.ParseIP(hostname)
 	return ip != nil && ip.IsLoopback()
+}
+
+func normalizeOrigin(raw string) (string, *url.URL, error) {
+	origin, err := url.Parse(raw)
+	if err != nil || origin.Host == "" || (origin.Scheme != "http" && origin.Scheme != "https") || origin.User != nil || (origin.Path != "" && origin.Path != "/") || origin.RawQuery != "" || origin.Fragment != "" {
+		return "", nil, fmt.Errorf("invalid origin")
+	}
+	scheme := strings.ToLower(origin.Scheme)
+	hostname := origin.Hostname()
+	if ip := net.ParseIP(hostname); ip != nil {
+		hostname = ip.String()
+	} else {
+		hostname, err = idna.Lookup.ToASCII(strings.TrimSuffix(strings.ToLower(hostname), "."))
+		if err != nil || hostname == "" {
+			return "", nil, fmt.Errorf("invalid origin hostname")
+		}
+	}
+	port := origin.Port()
+	if (scheme == "https" && port == "443") || (scheme == "http" && port == "80") {
+		port = ""
+	}
+	host := hostname
+	if port != "" {
+		host = net.JoinHostPort(hostname, port)
+	} else if strings.Contains(hostname, ":") {
+		host = "[" + hostname + "]"
+	}
+	canonical := scheme + "://" + host
+	parsed, err := url.Parse(canonical)
+	if err != nil {
+		return "", nil, err
+	}
+	return canonical, parsed, nil
 }
 
 func secureEqual(left, right string) bool {
