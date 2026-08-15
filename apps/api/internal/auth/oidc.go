@@ -28,18 +28,50 @@ func NewOIDCProvider(ctx context.Context, issuer, clientID, clientSecret, redire
 	if err != nil {
 		return nil, fmt.Errorf("discover OAuth issuer: %w", err)
 	}
+	endpoint := provider.Endpoint()
+	var metadata struct {
+		JWKSURL string `json:"jwks_uri"`
+	}
+	if err := provider.Claims(&metadata); err != nil {
+		return nil, fmt.Errorf("read OAuth discovery metadata: %w", err)
+	}
+	for name, rawURL := range map[string]string{
+		"authorization": endpoint.AuthURL,
+		"token":         endpoint.TokenURL,
+		"signing keys":  metadata.JWKSURL,
+	} {
+		if err := validateDiscoveredEndpoint(issuer, name, rawURL); err != nil {
+			return nil, err
+		}
+	}
 	return &OIDCProvider{
 		issuer: issuer,
 		oauth: oauth2.Config{
 			ClientID:     clientID,
 			ClientSecret: clientSecret,
-			Endpoint:     provider.Endpoint(),
+			Endpoint:     endpoint,
 			RedirectURL:  redirectURL,
 			Scopes:       []string{oidc.ScopeOpenID},
 		},
 		verifier: provider.Verifier(&oidc.Config{ClientID: clientID}),
 		formPost: formPost,
 	}, nil
+}
+
+func validateDiscoveredEndpoint(issuer, name, rawURL string) error {
+	issuerURL, issuerErr := url.Parse(issuer)
+	allowLoopbackHTTP := issuerErr == nil && issuerURL.Scheme == "http" && isLoopbackHostname(issuerURL.Hostname())
+	endpoint, err := url.Parse(rawURL)
+	if err != nil || endpoint.Host == "" || endpoint.User != nil {
+		return fmt.Errorf("valid OAuth %s endpoint is required", name)
+	}
+	if endpoint.Scheme == "https" {
+		return nil
+	}
+	if allowLoopbackHTTP && endpoint.Scheme == "http" && isLoopbackHostname(endpoint.Hostname()) {
+		return nil
+	}
+	return fmt.Errorf("OAuth %s endpoint must use HTTPS", name)
 }
 
 func formPostForRedirect(redirectURL string) (bool, error) {

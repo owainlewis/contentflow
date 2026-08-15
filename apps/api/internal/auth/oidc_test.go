@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -10,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	coreoidc "github.com/coreos/go-oidc/v3/oidc"
 	"golang.org/x/oauth2"
 )
 
@@ -92,5 +94,55 @@ func TestOIDCTokenExchangeHasAnInternalDeadline(t *testing.T) {
 	}
 	if result.elapsed > time.Second {
 		t.Fatalf("stalled OAuth exchange took %s", result.elapsed)
+	}
+}
+
+func TestOIDCDiscoveryRejectsPlaintextEndpointsForHTTPSIssuer(t *testing.T) {
+	for _, endpointName := range []string{"authorization_endpoint", "token_endpoint", "jwks_uri"} {
+		t.Run(endpointName, func(t *testing.T) {
+			var metadata map[string]string
+			server := httptest.NewTLSServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+				if request.URL.Path != "/.well-known/openid-configuration" {
+					http.NotFound(response, request)
+					return
+				}
+				response.Header().Set("Content-Type", "application/json")
+				if err := json.NewEncoder(response).Encode(metadata); err != nil {
+					t.Error(err)
+				}
+			}))
+			defer server.Close()
+			metadata = map[string]string{
+				"issuer":                 server.URL,
+				"authorization_endpoint": server.URL + "/authorize",
+				"token_endpoint":         server.URL + "/token",
+				"jwks_uri":               server.URL + "/keys",
+			}
+			metadata[endpointName] = "http://credentials.example/" + endpointName
+			ctx := coreoidc.ClientContext(context.Background(), server.Client())
+			if _, err := NewOIDCProvider(ctx, server.URL, "client", "secret", "https://contentflow.example/api/v1/auth/callback"); err == nil || !strings.Contains(err.Error(), "must use HTTPS") {
+				t.Fatalf("plaintext %s returned %v", endpointName, err)
+			}
+		})
+	}
+}
+
+func TestOIDCDiscoveryAllowsExplicitLoopbackHTTPDevelopment(t *testing.T) {
+	var metadata map[string]string
+	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		response.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(response).Encode(metadata); err != nil {
+			t.Error(err)
+		}
+	}))
+	defer server.Close()
+	metadata = map[string]string{
+		"issuer":                 server.URL,
+		"authorization_endpoint": server.URL + "/authorize",
+		"token_endpoint":         server.URL + "/token",
+		"jwks_uri":               server.URL + "/keys",
+	}
+	if _, err := NewOIDCProvider(context.Background(), server.URL, "client", "secret", "http://localhost:3000/api/v1/auth/callback"); err != nil {
+		t.Fatalf("loopback HTTP discovery failed: %v", err)
 	}
 }
