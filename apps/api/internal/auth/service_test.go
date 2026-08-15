@@ -133,6 +133,10 @@ func TestLoginAttemptWritesUsePerClientAndGlobalLimits(t *testing.T) {
 	if globalResponse.Code != http.StatusTooManyRequests || len(globalStore.attempts) != loginAttemptGlobalRateLimit {
 		t.Fatalf("global login cap returned %d after storing %d attempts", globalResponse.Code, len(globalStore.attempts))
 	}
+	blockedClientBucket := credentialDocumentID("oauth-login-client:owner-workspace:2001:db8:ffff::/64")
+	if _, exists := globalStore.rates[blockedClientBucket]; exists {
+		t.Fatal("globally rejected login committed a new per-client rate record")
+	}
 }
 
 func TestLoginClientIdentityIgnoresSpoofedForwardedPrefixes(t *testing.T) {
@@ -159,7 +163,7 @@ type failingAdmissionStore struct {
 	err error
 }
 
-func (s failingAdmissionStore) AllowRequest(context.Context, string, time.Time, int, time.Duration) (bool, error) {
+func (s failingAdmissionStore) AllowRequests(context.Context, []RateLimitBucket, time.Time, time.Duration) (bool, error) {
 	return false, s.err
 }
 

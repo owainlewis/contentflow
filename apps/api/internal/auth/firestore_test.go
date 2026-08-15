@@ -211,6 +211,56 @@ func TestFirestoreRateLimitIsSharedAcrossStoreInstances(t *testing.T) {
 	}
 }
 
+func TestFirestoreMultiBucketRateLimitRejectsAtomically(t *testing.T) {
+	if os.Getenv("FIRESTORE_EMULATOR_HOST") == "" {
+		t.Skip("FIRESTORE_EMULATOR_HOST is not set")
+	}
+	ctx := context.Background()
+	client, err := firestore.NewClient(ctx, "contentflow-auth-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+	store := NewFirestoreStore(client)
+	now := time.Now()
+	suffix := now.UTC().Format("20060102150405.000000000")
+	globalBucket := "atomic-global-" + suffix
+	firstClientBucket := "atomic-client-one-" + suffix
+	secondClientBucket := "atomic-client-two-" + suffix
+
+	allowed, err := store.AllowRequests(ctx, []RateLimitBucket{
+		{ID: firstClientBucket, Limit: 1},
+		{ID: globalBucket, Limit: 1},
+	}, now, time.Minute)
+	if err != nil || !allowed {
+		t.Fatalf("first multi-bucket request was not allowed: %v", err)
+	}
+	allowed, err = store.AllowRequests(ctx, []RateLimitBucket{
+		{ID: secondClientBucket, Limit: 1},
+		{ID: globalBucket, Limit: 1},
+	}, now, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if allowed {
+		t.Fatal("full global bucket allowed a second client")
+	}
+	if _, err := client.Collection(rateLimitsCollection).Doc(secondClientBucket).Get(ctx); !firestoreIsNotFound(err) {
+		t.Fatalf("globally rejected request created a per-client document: %v", err)
+	}
+	var global rateLimitDocument
+	snapshot, err := client.Collection(rateLimitsCollection).Doc(globalBucket).Get(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := snapshot.DataTo(&global); err != nil {
+		t.Fatal(err)
+	}
+	if global.Count != 1 {
+		t.Fatalf("global count is %d after rejected request, want 1", global.Count)
+	}
+}
+
 func TestFirestoreRateLimitDoesNotOverAdmitDuringConcurrentRetries(t *testing.T) {
 	if os.Getenv("FIRESTORE_EMULATOR_HOST") == "" {
 		t.Skip("FIRESTORE_EMULATOR_HOST is not set")

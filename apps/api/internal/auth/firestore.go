@@ -191,33 +191,46 @@ func (s *FirestoreStore) RevokeToken(ctx context.Context, workspaceID, id string
 	return err
 }
 
-func (s *FirestoreStore) AllowRequest(ctx context.Context, bucketID string, now time.Time, limit int, window time.Duration) (bool, error) {
-	ref := s.client.Collection(rateLimitsCollection).Doc(bucketID)
+func (s *FirestoreStore) AllowRequests(ctx context.Context, buckets []RateLimitBucket, now time.Time, window time.Duration) (bool, error) {
 	allowed := false
 	err := s.client.RunTransaction(ctx, func(ctx context.Context, transaction *firestore.Transaction) error {
 		// RunTransaction may retry this callback after a commit conflict.
 		allowed = false
-		document := rateLimitDocument{WindowStartedAt: now, ExpiresAt: now.Add(2 * window)}
-		snapshot, err := transaction.Get(ref)
-		if err == nil {
-			if err := snapshot.DataTo(&document); err != nil {
+		references := make([]*firestore.DocumentRef, len(buckets))
+		documents := make([]rateLimitDocument, len(buckets))
+		for index, bucket := range buckets {
+			references[index] = s.client.Collection(rateLimitsCollection).Doc(bucket.ID)
+			documents[index] = rateLimitDocument{WindowStartedAt: now, ExpiresAt: now.Add(2 * window)}
+			snapshot, err := transaction.Get(references[index])
+			if err == nil {
+				if err := snapshot.DataTo(&documents[index]); err != nil {
+					return err
+				}
+			} else if !firestoreIsNotFound(err) {
 				return err
 			}
-		} else if !firestoreIsNotFound(err) {
-			return err
+			if now.Sub(documents[index].WindowStartedAt) >= window {
+				documents[index] = rateLimitDocument{WindowStartedAt: now, ExpiresAt: now.Add(2 * window)}
+			}
+			if documents[index].Count >= bucket.Limit {
+				return nil
+			}
 		}
-		if now.Sub(document.WindowStartedAt) >= window {
-			document = rateLimitDocument{WindowStartedAt: now, ExpiresAt: now.Add(2 * window)}
+		for index := range documents {
+			documents[index].Count++
+			documents[index].ExpiresAt = documents[index].WindowStartedAt.Add(2 * window)
+			if err := transaction.Set(references[index], documents[index]); err != nil {
+				return err
+			}
 		}
-		if document.Count >= limit {
-			return nil
-		}
-		document.Count++
-		document.ExpiresAt = document.WindowStartedAt.Add(2 * window)
 		allowed = true
-		return transaction.Set(ref, document)
+		return nil
 	})
 	return allowed, err
+}
+
+func (s *FirestoreStore) AllowRequest(ctx context.Context, bucketID string, now time.Time, limit int, window time.Duration) (bool, error) {
+	return s.AllowRequests(ctx, []RateLimitBucket{{ID: bucketID, Limit: limit}}, now, window)
 }
 
 func credentialDocumentID(raw string) string {

@@ -33,6 +33,11 @@ type Token struct {
 	CreatedAt   time.Time
 }
 
+type RateLimitBucket struct {
+	ID    string
+	Limit int
+}
+
 type Store interface {
 	SaveLoginAttempt(context.Context, LoginAttempt) error
 	TakeLoginAttempt(context.Context, string, string, time.Time) (LoginAttempt, error)
@@ -41,7 +46,7 @@ type Store interface {
 	SaveToken(context.Context, Token) error
 	TokenByHash(context.Context, [sha256.Size]byte) (Token, error)
 	RevokeToken(context.Context, string, string) error
-	AllowRequest(context.Context, string, time.Time, int, time.Duration) (bool, error)
+	AllowRequests(context.Context, []RateLimitBucket, time.Time, time.Duration) (bool, error)
 }
 
 type MemoryStore struct {
@@ -63,19 +68,29 @@ func NewMemoryStore() *MemoryStore {
 	}
 }
 
-func (s *MemoryStore) AllowRequest(_ context.Context, bucketID string, now time.Time, limit int, window time.Duration) (bool, error) {
+func (s *MemoryStore) AllowRequests(_ context.Context, buckets []RateLimitBucket, now time.Time, window time.Duration) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	item := s.rates[bucketID]
-	if item.start.IsZero() || now.Sub(item.start) >= window {
-		item = rateLimit{start: now}
+	updates := make(map[string]rateLimit, len(buckets))
+	for _, bucket := range buckets {
+		item := s.rates[bucket.ID]
+		if item.start.IsZero() || now.Sub(item.start) >= window {
+			item = rateLimit{start: now}
+		}
+		if item.count >= bucket.Limit {
+			return false, nil
+		}
+		item.count++
+		updates[bucket.ID] = item
 	}
-	if item.count >= limit {
-		return false, nil
+	for bucketID, item := range updates {
+		s.rates[bucketID] = item
 	}
-	item.count++
-	s.rates[bucketID] = item
 	return true, nil
+}
+
+func (s *MemoryStore) AllowRequest(ctx context.Context, bucketID string, now time.Time, limit int, window time.Duration) (bool, error) {
+	return s.AllowRequests(ctx, []RateLimitBucket{{ID: bucketID, Limit: limit}}, now, window)
 }
 
 func (s *MemoryStore) SaveLoginAttempt(_ context.Context, attempt LoginAttempt) error {

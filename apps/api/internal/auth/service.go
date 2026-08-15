@@ -315,7 +315,7 @@ func (s *Service) authenticate(request *http.Request) (Principal, int, string) {
 		if !secureEqual(token.WorkspaceID, s.config.WorkspaceID) {
 			return Principal{}, http.StatusUnauthorized, "invalid_bearer_token"
 		}
-		allowed, err := s.store.AllowRequest(request.Context(), token.ID, s.now(), 120, time.Minute)
+		allowed, err := s.store.AllowRequests(request.Context(), []RateLimitBucket{{ID: token.ID, Limit: 120}}, s.now(), time.Minute)
 		if err != nil {
 			return Principal{}, http.StatusServiceUnavailable, "authentication_unavailable"
 		}
@@ -342,21 +342,17 @@ func (s *Service) authenticate(request *http.Request) (Principal, int, string) {
 }
 
 func (s *Service) allowLoginAttempt(request *http.Request) (bool, error) {
-	now := s.now()
-	buckets := []struct {
-		id    string
-		limit int
-	}{
-		{id: credentialDocumentID("oauth-login-client:" + s.config.WorkspaceID + ":" + loginClientIdentity(request)), limit: loginAttemptClientRateLimit},
-		{id: credentialDocumentID("oauth-login-global:" + s.config.WorkspaceID), limit: loginAttemptGlobalRateLimit},
+	buckets := []RateLimitBucket{
+		{
+			ID:    credentialDocumentID("oauth-login-client:" + s.config.WorkspaceID + ":" + loginClientIdentity(request)),
+			Limit: loginAttemptClientRateLimit,
+		},
+		{
+			ID:    credentialDocumentID("oauth-login-global:" + s.config.WorkspaceID),
+			Limit: loginAttemptGlobalRateLimit,
+		},
 	}
-	for _, bucket := range buckets {
-		allowed, err := s.store.AllowRequest(request.Context(), bucket.id, now, bucket.limit, loginAttemptRateWindow)
-		if err != nil || !allowed {
-			return allowed, err
-		}
-	}
-	return true, nil
+	return s.store.AllowRequests(request.Context(), buckets, s.now(), loginAttemptRateWindow)
 }
 
 func loginClientIdentity(request *http.Request) string {
