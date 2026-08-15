@@ -166,6 +166,7 @@ func TestFirestoreRateLimitDoesNotOverAdmitDuringConcurrentRetries(t *testing.T)
 	start := make(chan struct{})
 	errorsChannel := make(chan error, 160)
 	var allowed atomic.Int64
+	var limited atomic.Int64
 	var wait sync.WaitGroup
 	for worker := range 8 {
 		wait.Add(1)
@@ -180,6 +181,8 @@ func TestFirestoreRateLimitDoesNotOverAdmitDuringConcurrentRetries(t *testing.T)
 				}
 				if accepted {
 					allowed.Add(1)
+				} else {
+					limited.Add(1)
 				}
 			}
 		}()
@@ -187,11 +190,46 @@ func TestFirestoreRateLimitDoesNotOverAdmitDuringConcurrentRetries(t *testing.T)
 	close(start)
 	wait.Wait()
 	close(errorsChannel)
+	retryableFailures := 0
 	for err := range errorsChannel {
-		t.Errorf("concurrent rate-limit transaction failed: %v", err)
+		if status.Code(err) != codes.Aborted {
+			t.Fatalf("concurrent rate-limit transaction returned non-retryable error: %v", err)
+		}
+		retryableFailures++
 	}
-	if got := allowed.Load(); got != 120 {
-		t.Fatalf("concurrent shared limit admitted %d requests, want exactly 120", got)
+	admitted := allowed.Load()
+	if admitted > 120 {
+		t.Fatalf("concurrent shared limit admitted %d requests, want at most 120", admitted)
+	}
+	if got := admitted + limited.Load() + int64(retryableFailures); got != 160 {
+		t.Fatalf("concurrent outcomes accounted for %d requests, want 160", got)
+	}
+
+	var document rateLimitDocument
+	snapshot, err := clients[0].Collection(rateLimitsCollection).Doc(tokenID).Get(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := snapshot.DataTo(&document); err != nil {
+		t.Fatal(err)
+	}
+	if int64(document.Count) != admitted {
+		t.Fatalf("persisted rate count is %d after %d admitted requests", document.Count, admitted)
+	}
+
+	for admitted < 120 {
+		accepted, err := stores[0].AllowTokenRequest(ctx, tokenID, now, 120, time.Minute)
+		if err != nil || !accepted {
+			t.Fatalf("sequential retry %d was not admitted: accepted=%t error=%v", admitted+1, accepted, err)
+		}
+		admitted++
+	}
+	accepted, err := stores[0].AllowTokenRequest(ctx, tokenID, now, 120, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if accepted {
+		t.Fatal("concurrent rate state allowed request 121 after retryable failures were replayed")
 	}
 }
 

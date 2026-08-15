@@ -34,7 +34,7 @@ npm run dev:down
 
 ## Build and run the production binary
 
-Node.js 22.13 or later and Go 1.24 or later are required.
+Node.js 22.13 or later and Go 1.26.6 or later are required.
 
 ```bash
 npm install
