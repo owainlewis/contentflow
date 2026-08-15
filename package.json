@@ -10,7 +10,7 @@
     "dev:down": "docker compose down",
     "dev:web": "vite --config apps/web/vite.config.ts",
     "build:web": "vite build --config apps/web/vite.config.ts",
-    "build": "npm run build:web && go build -o bin/contentflow ./apps/api/cmd/server",
+    "build": "npm run build:web && go build -o bin/contentflow ./apps/api/cmd/server && go build -o bin/flow ./apps/api/cmd/flow",
     "start": "./bin/contentflow",
     "test": "npm run build && node --test tests/rendered-html.test.mjs && vitest run --config vitest.config.ts tests/interactions.test.tsx",
     "lint": "eslint apps/web/src tests"
