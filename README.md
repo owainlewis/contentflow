@@ -2,7 +2,7 @@
 
 ContentFlow is a focused workspace for writing, organising, and repurposing creator content. It supports YouTube scripts, LinkedIn posts, X posts, Instagram and TikTok scripts, emails, and Substack drafts.
 
-The approved MVP is a Go and TypeScript monorepo. A Vite-built React app is embedded in one Go binary, so the workspace and its `/api/v1` contract share one public origin. The current issue preserves the prototype data and interactions; authentication, durable content storage, uploads, and Google Cloud deployment follow in later work.
+The approved MVP is a Go and TypeScript monorepo. A Vite-built React app is embedded in one Go binary, so the workspace and its `/api/v1` contract share one public origin. Google OAuth owner sessions and scoped API tokens protect the API. Durable content storage, uploads, and Google Cloud deployment follow in later work.
 
 See the [MVP design](docs/mvp/design.md) for the domain model, interfaces, lifecycle, and security boundaries.
 
@@ -34,20 +34,52 @@ npm run dev:down
 
 ## Build and run the production binary
 
-Node.js 22.13 or later and Go 1.24 or later are required.
+Node.js 22.13 or later and Go 1.26.6 or later are required.
 
 ```bash
 npm install
 npm run build
-CONTENTFLOW_ENV=production CONTENTFLOW_ASSET_DIR=var/assets npm start
+CONTENTFLOW_ENV=production \
+CONTENTFLOW_ASSET_DIR=var/assets \
+CONTENTFLOW_GOOGLE_PROJECT_ID=your-project \
+CONTENTFLOW_PUBLIC_ORIGIN=https://contentflow.example \
+CONTENTFLOW_OAUTH_ISSUER=https://accounts.google.com \
+CONTENTFLOW_OAUTH_CLIENT_ID=your-client-id \
+CONTENTFLOW_OAUTH_CLIENT_SECRET=your-client-secret \
+CONTENTFLOW_OWNER_SUBJECT=your-google-subject \
+CONTENTFLOW_WORKSPACE_ID=your-workspace-id \
+npm start
 ```
 
 The self-contained binary listens on `http://localhost:8080`. Client-side routes fall back to the embedded `index.html`; `/api` and `/health` routes never fall through to the SPA.
 
+Production refuses to start unless every authentication value above is present, the public origin is HTTPS, and local proxy authentication is disabled. Any authenticated public origin or OAuth issuer must also use HTTPS unless it uses an explicit loopback address for local development. Cookie security is derived from that validated origin. The OAuth redirect URI is `<public-origin>/api/v1/auth/callback`; an explicitly configured port is retained for exact provider matching. HTTPS sign-in uses OIDC `form_post` so authorization codes and state never enter request URLs or platform request logs. OAuth attempts, sessions, distributed token rate limits, and SHA-256 token hashes are stored in Firestore. Raw API tokens are returned only by `POST /api/v1/tokens` and are never stored.
+
+Before serving production traffic, enable managed deletion for the three expiring authentication collections:
+
+```bash
+scripts/configure-firestore-ttl.sh your-project-id
+```
+
+The script targets the default Firestore database used by the service and enables `expires_at` TTL policies for OAuth attempts, sessions, and authentication rate-limit records. Login admission is limited per client and globally across service instances before an OAuth attempt is stored. API token records remain until explicit revocation.
+
 Health endpoints:
 
 - `GET /health/live` reports whether the process is serving requests.
-- `GET /health/ready` checks the writable asset directory and, when `FIRESTORE_EMULATOR_HOST` is configured, Firestore connectivity.
+- `GET /health/ready` checks the writable asset directory and checks Firestore whenever authentication or the Firestore emulator is configured.
+
+Public dependency calls are bounded as follows:
+
+| Public entry point | Firestore or outbound work | Bound |
+| --- | --- | --- |
+| Static files, missing routes, `/health/live` | None | No dependency call |
+| `/health/ready` | Firestore readiness query | Coalesced and cached for 5 seconds, with a 2-second internal deadline |
+| `/api/v1/auth/login` | Distributed admission transaction and OAuth-attempt write | Process-local 120/client and 1,000/instance per minute, then distributed 20/client and 300/workspace per minute |
+| `/api/v1/auth/callback` | OAuth-attempt transaction, OIDC token exchange and signing-key fetch, session write | Same process-local shield; attempts are single-use; outbound calls have a 10-second deadline |
+| Protected `/api/v1/*` with a session or bearer credential | Session or token lookup; distributed token admission | Same process-local shield; tokens also have a distributed 120/minute limit |
+| OIDC discovery | Provider metadata | Startup-only, with a 5-second deadline before listeners start |
+
+The local-development public API proxy only forwards to the loopback private listener. It is disabled in production.
 
 ## Checks
 

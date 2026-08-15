@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"html"
 	"io/fs"
+	"log/slog"
 	"mime"
 	"net/http"
 	"net/http/httputil"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/owainlewis/contentflow/apps/api/internal/auth"
 	"github.com/owainlewis/contentflow/apps/api/internal/health"
 )
 
@@ -29,8 +31,9 @@ type errorResponse struct {
 	Error string `json:"error"`
 }
 
-func NewAPI(checker health.Checker) http.Handler {
+func NewAPI(checker health.Checker, authentication *auth.Service) http.Handler {
 	router := chi.NewRouter()
+	router.Use(redactedRequestLogger)
 	router.Get("/health/live", func(response http.ResponseWriter, _ *http.Request) {
 		writeJSON(response, http.StatusOK, statusResponse{Status: "live"})
 	})
@@ -49,10 +52,34 @@ func NewAPI(checker health.Checker) http.Handler {
 		}
 		writeJSON(response, status, statusResponse{Status: state, Checks: checks})
 	})
-	router.NotFound(func(response http.ResponseWriter, _ *http.Request) {
-		writeJSON(response, http.StatusNotFound, errorResponse{Error: "not_found"})
-	})
+	if authentication != nil {
+		service := authentication
+		router.Get("/api/v1/auth/login", service.HandleLogin)
+		router.Get("/api/v1/auth/callback", service.HandleCallback)
+		router.Post("/api/v1/auth/callback", service.HandleCallback)
+		router.Group(func(protected chi.Router) {
+			protected.Use(service.Authenticate, service.Authorize)
+			protected.Get("/api/v1/session", service.HandleSession)
+			protected.Post("/api/v1/tokens", service.HandleCreateToken)
+			protected.Delete("/api/v1/tokens/{tokenID}", func(response http.ResponseWriter, request *http.Request) {
+				service.HandleRevokeToken(response, request, chi.URLParam(request, "tokenID"))
+			})
+			protected.Handle("/api/v1/*", http.HandlerFunc(notFound))
+		})
+	}
+	router.NotFound(notFound)
 	return router
+}
+
+func notFound(response http.ResponseWriter, _ *http.Request) {
+	writeJSON(response, http.StatusNotFound, errorResponse{Error: "not_found"})
+}
+
+func redactedRequestLogger(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		slog.DebugContext(request.Context(), "HTTP request", "method", request.Method, "path", request.URL.Path)
+		next.ServeHTTP(response, request)
+	})
 }
 
 func NewApplication(assets fs.FS, api http.Handler) http.Handler {

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -16,13 +17,21 @@ import (
 	"syscall"
 	"time"
 
+	"cloud.google.com/go/firestore"
+	"github.com/owainlewis/contentflow/apps/api/internal/auth"
 	"github.com/owainlewis/contentflow/apps/api/internal/config"
 	"github.com/owainlewis/contentflow/apps/api/internal/health"
 	"github.com/owainlewis/contentflow/apps/api/internal/server"
 	webassets "github.com/owainlewis/contentflow/apps/api/web"
 )
 
-const shutdownTimeout = 10 * time.Second
+const (
+	shutdownTimeout                = 10 * time.Second
+	oidcDiscoveryTimeout           = 5 * time.Second
+	requestReadTimeout             = 10 * time.Second
+	firestoreReadinessCacheTTL     = 5 * time.Second
+	firestoreReadinessCheckTimeout = 2 * time.Second
+)
 
 func main() {
 	if len(os.Args) > 1 && os.Args[1] == "healthcheck" {
@@ -56,7 +65,36 @@ func run(ctx context.Context, cfg config.Config) error {
 		AssetDirectory: cfg.AssetDirectory,
 		FirestoreHost:  cfg.FirestoreHost,
 	}
-	api := server.NewAPI(checker)
+	var authentication *auth.Service
+	if cfg.AuthEnabled() {
+		publicOrigin, redirectURL, err := authenticationURLs(cfg.PublicOrigin)
+		if err != nil {
+			return fmt.Errorf("configure authentication origin: %w", err)
+		}
+		discoveryContext, cancelDiscovery := context.WithTimeout(ctx, oidcDiscoveryTimeout)
+		provider, err := auth.NewOIDCProvider(discoveryContext, cfg.OAuthIssuer, cfg.OAuthClientID, cfg.OAuthSecret, redirectURL)
+		cancelDiscovery()
+		if err != nil {
+			return err
+		}
+		firestoreClient, err := firestore.NewClient(ctx, cfg.GoogleProject)
+		if err != nil {
+			return fmt.Errorf("connect to Firestore auth store: %w", err)
+		}
+		defer firestoreClient.Close()
+		credentialKey := sha256.Sum256([]byte(cfg.OAuthSecret))
+		firestoreStore := auth.NewFirestoreStore(firestoreClient)
+		checker.FirestoreCheck = health.CacheCheck(firestoreStore.Check, firestoreReadinessCacheTTL, firestoreReadinessCheckTimeout)
+		checker.DialTimeout = firestoreReadinessCheckTimeout
+		authentication, err = auth.New(auth.Config{
+			PublicOrigin: publicOrigin, OwnerIssuer: cfg.OAuthIssuer, OwnerSubject: cfg.OwnerSubject,
+			WorkspaceID: cfg.WorkspaceID, CredentialKey: credentialKey[:],
+		}, provider, firestoreStore)
+		if err != nil {
+			return fmt.Errorf("configure authentication: %w", err)
+		}
+	}
+	api := server.NewAPI(checker, authentication)
 	servers := make([]*http.Server, 0, 2)
 
 	publicHandler := server.NewApplication(webassets.Assets(), api)
@@ -65,11 +103,7 @@ func run(ctx context.Context, cfg config.Config) error {
 		if err != nil {
 			return fmt.Errorf("generate local proxy secret: %w", err)
 		}
-		privateServer := &http.Server{
-			Addr:              cfg.PrivateAddress,
-			Handler:           server.RequireProxySecret(api, secret),
-			ReadHeaderTimeout: 5 * time.Second,
-		}
+		privateServer := newHTTPServer(cfg.PrivateAddress, server.RequireProxySecret(api, secret))
 		servers = append(servers, privateServer)
 
 		privateURL, err := url.Parse("http://" + loopbackAddress(cfg.PrivateAddress))
@@ -79,11 +113,7 @@ func run(ctx context.Context, cfg config.Config) error {
 		publicHandler = server.NewLocalPublicApplication(webassets.Assets(), privateURL, secret)
 	}
 
-	publicServer := &http.Server{
-		Addr:              cfg.PublicAddress,
-		Handler:           publicHandler,
-		ReadHeaderTimeout: 5 * time.Second,
-	}
+	publicServer := newHTTPServer(cfg.PublicAddress, publicHandler)
 	servers = append(servers, publicServer)
 
 	errorChannel := make(chan error, len(servers))
@@ -112,6 +142,27 @@ func run(ctx context.Context, cfg config.Config) error {
 		}
 	}
 	return runErr
+}
+
+func newHTTPServer(address string, handler http.Handler) *http.Server {
+	return &http.Server{
+		Addr:              address,
+		Handler:           handler,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       requestReadTimeout,
+	}
+}
+
+func authenticationURLs(configuredOrigin string) (string, string, error) {
+	publicOrigin, err := auth.CanonicalOrigin(configuredOrigin)
+	if err != nil {
+		return "", "", err
+	}
+	redirectOrigin, err := auth.OAuthRedirectOrigin(configuredOrigin)
+	if err != nil {
+		return "", "", err
+	}
+	return publicOrigin, redirectOrigin + "/api/v1/auth/callback", nil
 }
 
 func generateProxySecret() (string, error) {

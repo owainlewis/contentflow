@@ -8,7 +8,7 @@ COPY apps/web ./apps/web
 COPY apps/api/web ./apps/api/web
 RUN npm run build:web
 
-FROM golang:1.24-alpine AS go-build
+FROM golang:1.26.6-alpine AS go-build
 
 WORKDIR /src
 COPY go.mod go.sum ./
