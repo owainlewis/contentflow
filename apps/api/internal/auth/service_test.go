@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -78,32 +79,78 @@ func formPostCallback(cookie *http.Cookie, state, code string) *http.Request {
 	return request
 }
 
-func TestLoginAttemptWritesAreRateLimitedBeforeCreation(t *testing.T) {
+func TestLoginAttemptWritesUsePerClientAndGlobalLimits(t *testing.T) {
 	service, store, _ := newTestService(t, Identity{})
 	now := time.Now()
 	service.now = func() time.Time { return now }
 
-	for requestNumber := 1; requestNumber <= loginAttemptRateLimit; requestNumber++ {
+	for requestNumber := 1; requestNumber <= loginAttemptClientRateLimit; requestNumber++ {
 		response := httptest.NewRecorder()
-		service.HandleLogin(response, httptest.NewRequest(http.MethodGet, "/api/v1/auth/login", nil))
+		request := httptest.NewRequest(http.MethodGet, "/api/v1/auth/login", nil)
+		request.RemoteAddr = "192.0.2.1:1234"
+		service.HandleLogin(response, request)
 		if response.Code != http.StatusFound {
 			t.Fatalf("login request %d returned %d: %s", requestNumber, response.Code, response.Body.String())
 		}
 	}
-	if got := len(store.attempts); got != loginAttemptRateLimit {
-		t.Fatalf("stored %d login attempts, want %d", got, loginAttemptRateLimit)
+	if got := len(store.attempts); got != loginAttemptClientRateLimit {
+		t.Fatalf("stored %d login attempts, want %d", got, loginAttemptClientRateLimit)
 	}
 
 	response := httptest.NewRecorder()
-	service.HandleLogin(response, httptest.NewRequest(http.MethodGet, "/api/v1/auth/login", nil))
+	limitedRequest := httptest.NewRequest(http.MethodGet, "/api/v1/auth/login", nil)
+	limitedRequest.RemoteAddr = "192.0.2.1:5678"
+	service.HandleLogin(response, limitedRequest)
 	if response.Code != http.StatusTooManyRequests || !strings.Contains(response.Body.String(), "login_rate_limit_exceeded") {
 		t.Fatalf("limited login returned %d: %s", response.Code, response.Body.String())
 	}
 	if len(response.Result().Cookies()) != 0 {
 		t.Fatal("limited login set an OAuth attempt cookie")
 	}
-	if got := len(store.attempts); got != loginAttemptRateLimit {
+	if got := len(store.attempts); got != loginAttemptClientRateLimit {
 		t.Fatalf("limited login stored an extra attempt: got %d", got)
+	}
+
+	otherClientResponse := httptest.NewRecorder()
+	otherClientRequest := httptest.NewRequest(http.MethodGet, "/api/v1/auth/login", nil)
+	otherClientRequest.RemoteAddr = "192.0.2.2:1234"
+	service.HandleLogin(otherClientResponse, otherClientRequest)
+	if otherClientResponse.Code != http.StatusFound {
+		t.Fatalf("different client was blocked by another client: %d: %s", otherClientResponse.Code, otherClientResponse.Body.String())
+	}
+
+	globalService, globalStore, _ := newTestService(t, Identity{})
+	globalService.now = func() time.Time { return now }
+	for requestNumber := 1; requestNumber <= loginAttemptGlobalRateLimit; requestNumber++ {
+		request := httptest.NewRequest(http.MethodGet, "/api/v1/auth/login", nil)
+		request.RemoteAddr = "[2001:db8:" + strconv.Itoa(requestNumber) + "::1]:1234"
+		globalService.HandleLogin(httptest.NewRecorder(), request)
+	}
+	globalResponse := httptest.NewRecorder()
+	globalRequest := httptest.NewRequest(http.MethodGet, "/api/v1/auth/login", nil)
+	globalRequest.RemoteAddr = "[2001:db8:ffff::1]:1234"
+	globalService.HandleLogin(globalResponse, globalRequest)
+	if globalResponse.Code != http.StatusTooManyRequests || len(globalStore.attempts) != loginAttemptGlobalRateLimit {
+		t.Fatalf("global login cap returned %d after storing %d attempts", globalResponse.Code, len(globalStore.attempts))
+	}
+}
+
+func TestLoginClientIdentityIgnoresSpoofedForwardedPrefixes(t *testing.T) {
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/auth/login", nil)
+	request.RemoteAddr = "192.0.2.200:1234"
+	request.Header.Set("X-Forwarded-For", "198.51.100.99, 203.0.113.7, 203.0.113.254")
+	if got := loginClientIdentity(request); got != "203.0.113.7" {
+		t.Fatalf("forwarded client identity is %q", got)
+	}
+
+	request.Header.Set("X-Forwarded-For", "spoofed, 2001:db8:abcd:1234::42, 2001:db8::ffff")
+	if got := loginClientIdentity(request); got != "2001:db8:abcd:1234::/64" {
+		t.Fatalf("IPv6 client identity is %q", got)
+	}
+
+	request.Header.Set("X-Forwarded-For", "spoofed, invalid, 203.0.113.254")
+	if got := loginClientIdentity(request); got != "192.0.2.200" {
+		t.Fatalf("invalid forwarded address did not fall back to peer: %q", got)
 	}
 }
 

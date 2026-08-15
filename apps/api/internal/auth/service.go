@@ -32,10 +32,11 @@ const (
 	ScopeContentWrite Scope = "content:write"
 	ScopeAssetsWrite  Scope = "assets:write"
 
-	loginCookieName        = "contentflow_oauth"
-	sessionCookieName      = "contentflow_session"
-	loginAttemptRateLimit  = 20
-	loginAttemptRateWindow = time.Minute
+	loginCookieName             = "contentflow_oauth"
+	sessionCookieName           = "contentflow_session"
+	loginAttemptClientRateLimit = 20
+	loginAttemptGlobalRateLimit = 300
+	loginAttemptRateWindow      = time.Minute
 )
 
 var allowedScopes = []Scope{ScopeContentRead, ScopeContentWrite, ScopeAssetsWrite}
@@ -102,7 +103,7 @@ func New(config Config, provider OAuthProvider, store Store) (*Service, error) {
 }
 
 func (s *Service) HandleLogin(response http.ResponseWriter, request *http.Request) {
-	allowed, err := s.store.AllowRequest(request.Context(), s.loginAttemptRateBucket(), s.now(), loginAttemptRateLimit, loginAttemptRateWindow)
+	allowed, err := s.allowLoginAttempt(request)
 	if err != nil {
 		writeError(response, http.StatusServiceUnavailable, "authentication_unavailable")
 		return
@@ -340,8 +341,54 @@ func (s *Service) authenticate(request *http.Request) (Principal, int, string) {
 	return Principal{WorkspaceID: session.WorkspaceID, Kind: "session", Scopes: slices.Clone(allowedScopes), CSRFToken: session.CSRFToken}, 0, ""
 }
 
-func (s *Service) loginAttemptRateBucket() string {
-	return credentialDocumentID("oauth-login:" + s.config.WorkspaceID)
+func (s *Service) allowLoginAttempt(request *http.Request) (bool, error) {
+	now := s.now()
+	buckets := []struct {
+		id    string
+		limit int
+	}{
+		{id: credentialDocumentID("oauth-login-client:" + s.config.WorkspaceID + ":" + loginClientIdentity(request)), limit: loginAttemptClientRateLimit},
+		{id: credentialDocumentID("oauth-login-global:" + s.config.WorkspaceID), limit: loginAttemptGlobalRateLimit},
+	}
+	for _, bucket := range buckets {
+		allowed, err := s.store.AllowRequest(request.Context(), bucket.id, now, bucket.limit, loginAttemptRateWindow)
+		if err != nil || !allowed {
+			return allowed, err
+		}
+	}
+	return true, nil
+}
+
+func loginClientIdentity(request *http.Request) string {
+	forwarded := strings.Split(request.Header.Get("X-Forwarded-For"), ",")
+	if len(forwarded) >= 2 {
+		// Google load balancers append the observed client IP and then the
+		// forwarding-rule IP. Values before that pair are client-controlled.
+		if identity := normalizedClientIP(forwarded[len(forwarded)-2]); identity != "" {
+			return identity
+		}
+	}
+	host, _, err := net.SplitHostPort(request.RemoteAddr)
+	if err == nil {
+		if identity := normalizedClientIP(host); identity != "" {
+			return identity
+		}
+	}
+	if identity := normalizedClientIP(request.RemoteAddr); identity != "" {
+		return identity
+	}
+	return "unknown"
+}
+
+func normalizedClientIP(raw string) string {
+	ip := net.ParseIP(strings.TrimSpace(raw))
+	if ip == nil {
+		return ""
+	}
+	if ipv4 := ip.To4(); ipv4 != nil {
+		return ipv4.String()
+	}
+	return ip.Mask(net.CIDRMask(64, 128)).String() + "/64"
 }
 
 func PrincipalFromContext(ctx context.Context) (Principal, bool) {

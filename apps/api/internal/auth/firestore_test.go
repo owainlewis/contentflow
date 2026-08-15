@@ -144,25 +144,37 @@ func TestFirestoreLoginAdmissionIsSharedBeforeAttemptCreation(t *testing.T) {
 	}
 	services := []*Service{newService(NewFirestoreStore(firstClient)), newService(NewFirestoreStore(secondClient))}
 
-	for requestNumber := 1; requestNumber <= loginAttemptRateLimit; requestNumber++ {
+	for requestNumber := 1; requestNumber <= loginAttemptClientRateLimit; requestNumber++ {
 		response := httptest.NewRecorder()
-		services[requestNumber%len(services)].HandleLogin(response, httptest.NewRequest(http.MethodGet, "/api/v1/auth/login", nil))
+		request := httptest.NewRequest(http.MethodGet, "/api/v1/auth/login", nil)
+		request.RemoteAddr = "192.0.2.1:1234"
+		services[requestNumber%len(services)].HandleLogin(response, request)
 		if response.Code != http.StatusFound {
 			t.Fatalf("shared login request %d returned %d: %s", requestNumber, response.Code, response.Body.String())
 		}
 	}
 	response := httptest.NewRecorder()
-	services[0].HandleLogin(response, httptest.NewRequest(http.MethodGet, "/api/v1/auth/login", nil))
+	limitedRequest := httptest.NewRequest(http.MethodGet, "/api/v1/auth/login", nil)
+	limitedRequest.RemoteAddr = "192.0.2.1:5678"
+	services[0].HandleLogin(response, limitedRequest)
 	if response.Code != http.StatusTooManyRequests || len(response.Result().Cookies()) != 0 {
-		t.Fatalf("shared login request %d returned %d with cookies %#v", loginAttemptRateLimit+1, response.Code, response.Result().Cookies())
+		t.Fatalf("shared login request %d returned %d with cookies %#v", loginAttemptClientRateLimit+1, response.Code, response.Result().Cookies())
+	}
+	otherClientResponse := httptest.NewRecorder()
+	otherClientRequest := httptest.NewRequest(http.MethodGet, "/api/v1/auth/login", nil)
+	otherClientRequest.RemoteAddr = "192.0.2.2:1234"
+	services[1].HandleLogin(otherClientResponse, otherClientRequest)
+	if otherClientResponse.Code != http.StatusFound {
+		t.Fatalf("different client was blocked by another client: %d: %s", otherClientResponse.Code, otherClientResponse.Body.String())
 	}
 
 	documents, err := firstClient.Collection(loginAttemptsCollection).Where("expires_at", "==", now.Add(10*time.Minute)).Documents(ctx).GetAll()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(documents) != loginAttemptRateLimit {
-		t.Fatalf("shared limiter stored %d login attempts, want %d", len(documents), loginAttemptRateLimit)
+	wantAttempts := loginAttemptClientRateLimit + 1
+	if len(documents) != wantAttempts {
+		t.Fatalf("shared limiter stored %d login attempts, want %d", len(documents), wantAttempts)
 	}
 }
 

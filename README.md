@@ -61,7 +61,7 @@ Before serving production traffic, enable managed deletion for the three expirin
 scripts/configure-firestore-ttl.sh your-project-id
 ```
 
-The script targets the default Firestore database used by the service and enables `expires_at` TTL policies for OAuth attempts, sessions, and authentication rate-limit records. Login admission is limited across service instances before an OAuth attempt is stored. API token records remain until explicit revocation.
+The script targets the default Firestore database used by the service and enables `expires_at` TTL policies for OAuth attempts, sessions, and authentication rate-limit records. Login admission is limited per client and globally across service instances before an OAuth attempt is stored. API token records remain until explicit revocation.
 
 Health endpoints:
 
