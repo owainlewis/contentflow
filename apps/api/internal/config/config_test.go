@@ -18,6 +18,14 @@ func TestProductionRejectsLocalProxyAuthentication(t *testing.T) {
 	}
 }
 
+func TestProductionRejectsFirestoreEmulator(t *testing.T) {
+	cfg := productionConfig(t)
+	cfg.FirestoreHost = "127.0.0.1:8787"
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected production configuration to reject the Firestore emulator")
+	}
+}
+
 func productionConfig(t *testing.T) Config {
 	t.Helper()
 	return Config{

@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"net/url"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -393,6 +394,13 @@ func normalizeOrigin(raw string) (string, *url.URL, error) {
 		}
 	}
 	port := origin.Port()
+	if port != "" {
+		numericPort, err := strconv.Atoi(port)
+		if err != nil || numericPort < 1 || numericPort > 65535 {
+			return "", nil, fmt.Errorf("invalid origin port")
+		}
+		port = strconv.Itoa(numericPort)
+	}
 	if (scheme == "https" && port == "443") || (scheme == "http" && port == "80") {
 		port = ""
 	}
@@ -408,6 +416,11 @@ func normalizeOrigin(raw string) (string, *url.URL, error) {
 		return "", nil, err
 	}
 	return canonical, parsed, nil
+}
+
+func CanonicalOrigin(raw string) (string, error) {
+	canonical, _, err := normalizeOrigin(raw)
+	return canonical, err
 }
 
 func secureEqual(left, right string) bool {

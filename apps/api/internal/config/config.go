@@ -57,6 +57,9 @@ func (c Config) Validate() error {
 	if c.Environment == "production" && c.LocalProxyAuth {
 		return fmt.Errorf("CONTENTFLOW_LOCAL_PROXY_AUTH cannot be enabled in production")
 	}
+	if c.Environment == "production" && c.FirestoreHost != "" {
+		return fmt.Errorf("FIRESTORE_EMULATOR_HOST cannot be set in production")
+	}
 	if c.PublicAddress == "" {
 		return fmt.Errorf("CONTENTFLOW_ADDR is required")
 	}

@@ -61,7 +61,11 @@ func run(ctx context.Context, cfg config.Config) error {
 	}
 	var authentication *auth.Service
 	if cfg.AuthEnabled() {
-		provider, err := auth.NewOIDCProvider(ctx, cfg.OAuthIssuer, cfg.OAuthClientID, cfg.OAuthSecret, cfg.PublicOrigin+"/api/v1/auth/callback")
+		publicOrigin, redirectURL, err := authenticationURLs(cfg.PublicOrigin)
+		if err != nil {
+			return fmt.Errorf("configure authentication origin: %w", err)
+		}
+		provider, err := auth.NewOIDCProvider(ctx, cfg.OAuthIssuer, cfg.OAuthClientID, cfg.OAuthSecret, redirectURL)
 		if err != nil {
 			return err
 		}
@@ -75,7 +79,7 @@ func run(ctx context.Context, cfg config.Config) error {
 		checker.FirestoreCheck = firestoreStore.Check
 		checker.DialTimeout = 2 * time.Second
 		authentication, err = auth.New(auth.Config{
-			PublicOrigin: cfg.PublicOrigin, OwnerIssuer: cfg.OAuthIssuer, OwnerSubject: cfg.OwnerSubject,
+			PublicOrigin: publicOrigin, OwnerIssuer: cfg.OAuthIssuer, OwnerSubject: cfg.OwnerSubject,
 			WorkspaceID: cfg.WorkspaceID, CredentialKey: credentialKey[:],
 		}, provider, firestoreStore)
 		if err != nil {
@@ -138,6 +142,14 @@ func run(ctx context.Context, cfg config.Config) error {
 		}
 	}
 	return runErr
+}
+
+func authenticationURLs(configuredOrigin string) (string, string, error) {
+	publicOrigin, err := auth.CanonicalOrigin(configuredOrigin)
+	if err != nil {
+		return "", "", err
+	}
+	return publicOrigin, publicOrigin + "/api/v1/auth/callback", nil
 }
 
 func generateProxySecret() (string, error) {

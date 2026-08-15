@@ -58,7 +58,7 @@ Production refuses to start unless every authentication value above is present, 
 Health endpoints:
 
 - `GET /health/live` reports whether the process is serving requests.
-- `GET /health/ready` checks the writable asset directory and, when `FIRESTORE_EMULATOR_HOST` is configured, Firestore connectivity.
+- `GET /health/ready` checks the writable asset directory and checks Firestore whenever authentication or the Firestore emulator is configured.
 
 ## Checks
 
