@@ -152,6 +152,17 @@ func validateEncodedSizes(item Item) error {
 	return nil
 }
 
+func validateReceiptSize(receipt Receipt) error {
+	size, err := encodedFirestoreSize(receiptToDocument(receipt))
+	if err != nil {
+		return &Error{Status: 500, Code: "content_encoding_failed", Cause: err}
+	}
+	if size > MaxFirestoreBytes {
+		return problem(413, "receipt_document_too_large")
+	}
+	return nil
+}
+
 func encodedFirestoreSize(value any) (int, error) {
 	fields, err := firestoreFields(reflect.ValueOf(value))
 	if err != nil {

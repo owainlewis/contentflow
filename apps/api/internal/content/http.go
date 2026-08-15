@@ -19,12 +19,33 @@ func NewHTTPHandler(service *Service) *HTTPHandler { return &HTTPHandler{service
 func (h *HTTPHandler) Register(router chi.Router) {
 	router.Get("/api/v1/content", h.list)
 	router.Post("/api/v1/content", h.create)
+	router.Post("/api/v1/content/batches", h.batchCreate)
 	router.Get("/api/v1/content/{id}", h.get)
 	router.Get("/api/v1/content/{id}/transcript", h.transcript)
 	router.Put("/api/v1/content/{id}", h.replace)
 	router.Post("/api/v1/content/{id}/archive", h.archive)
 	router.Post("/api/v1/content/{id}/restore", h.restore)
 	router.Delete("/api/v1/content/{id}", h.delete)
+}
+
+func (h *HTTPHandler) batchCreate(response http.ResponseWriter, request *http.Request) {
+	body, err := readMutationBody(response, request)
+	if err != nil {
+		writeContentError(response, err)
+		return
+	}
+	input, err := DecodeBatch(body)
+	if err != nil {
+		writeContentError(response, err)
+		return
+	}
+	principal, _ := auth.PrincipalFromContext(request.Context())
+	result, err := h.service.BatchCreate(request.Context(), principal.WorkspaceID, input, RequestHash(request.Method, request.URL.Path, body))
+	if err != nil {
+		writeContentError(response, err)
+		return
+	}
+	writeContentJSON(response, http.StatusCreated, result)
 }
 
 func (h *HTTPHandler) list(response http.ResponseWriter, request *http.Request) {

@@ -26,6 +26,7 @@ const (
 	// one additional byte because a lexicographic successor can grow in UTF-8.
 	MaxIndexedStringBytes = 1498
 	MaxSections           = 200
+	MaxBatchItems         = 50
 	ContentLifetime       = 56 * 24 * time.Hour
 	ReceiptLifetime       = 24 * time.Hour
 )
@@ -165,6 +166,18 @@ type CreateRequest struct {
 	Content      any
 }
 
+type BatchItemRequest struct {
+	Type         Type
+	WorkingTitle string
+	Status       Status
+	Content      any
+}
+
+type BatchRequest struct {
+	OperationID string
+	Items       []BatchItemRequest
+}
+
 type ReplaceRequest struct {
 	CreateRequest
 	Revision int64
@@ -219,6 +232,49 @@ func DecodeCreate(raw []byte) (CreateRequest, error) {
 		return CreateRequest{}, err
 	}
 	return request, nil
+}
+
+func DecodeBatch(raw []byte) (BatchRequest, error) {
+	var wire struct {
+		OperationID string            `json:"operation_id"`
+		Items       []json.RawMessage `json:"items"`
+	}
+	if err := decodeExact(raw, &wire); err != nil {
+		return BatchRequest{}, problem(400, "invalid_request")
+	}
+	request := BatchRequest{OperationID: wire.OperationID, Items: make([]BatchItemRequest, len(wire.Items))}
+	if err := validateBatchOperation(request.OperationID, len(request.Items)); err != nil {
+		return BatchRequest{}, err
+	}
+	for index, rawItem := range wire.Items {
+		item, err := decodeBatchItem(rawItem, request.OperationID)
+		if err != nil {
+			return BatchRequest{}, err
+		}
+		request.Items[index] = item
+	}
+	return request, nil
+}
+
+func decodeBatchItem(raw []byte, operationID string) (BatchItemRequest, error) {
+	var wire struct {
+		Type         Type            `json:"type"`
+		WorkingTitle string          `json:"working_title"`
+		Status       Status          `json:"status"`
+		Content      json.RawMessage `json:"content"`
+	}
+	if err := decodeExact(raw, &wire); err != nil {
+		return BatchItemRequest{}, problem(400, "invalid_request")
+	}
+	contentValue, err := decodeTypedContent(wire.Type, wire.Content)
+	if err != nil {
+		return BatchItemRequest{}, err
+	}
+	item := BatchItemRequest{Type: wire.Type, WorkingTitle: wire.WorkingTitle, Status: wire.Status, Content: contentValue}
+	if err := validateBatchItem(item, operationID); err != nil {
+		return BatchItemRequest{}, err
+	}
+	return item, nil
 }
 
 func DecodeReplace(raw []byte) (ReplaceRequest, error) {
@@ -409,6 +465,42 @@ func validateRequest(request CreateRequest) error {
 		if len([]byte(text)) > MaxTextBytes {
 			return problem(413, "text_field_too_large")
 		}
+	}
+	return nil
+}
+
+func validateBatchRequest(request BatchRequest) error {
+	if err := validateBatchOperation(request.OperationID, len(request.Items)); err != nil {
+		return err
+	}
+	for _, item := range request.Items {
+		if err := validateBatchItem(item, request.OperationID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateBatchOperation(operationID string, itemCount int) error {
+	if _, err := ulid.ParseStrict(operationID); err != nil {
+		return problem(400, "invalid_operation_id")
+	}
+	if itemCount < 1 || itemCount > MaxBatchItems {
+		return problem(400, "invalid_batch_size")
+	}
+	return nil
+}
+
+func validateBatchItem(item BatchItemRequest, operationID string) error {
+	request := CreateRequest{
+		Type: item.Type, WorkingTitle: item.WorkingTitle, Status: item.Status,
+		OperationID: operationID, Content: item.Content,
+	}
+	if err := validateRequest(request); err != nil {
+		return err
+	}
+	if youtube, ok := item.Content.(YouTubeContent); ok && len(youtube.Sections) != 0 {
+		return problem(400, "batch_item_not_standalone")
 	}
 	return nil
 }

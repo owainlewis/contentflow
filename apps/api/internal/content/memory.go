@@ -48,6 +48,24 @@ func (s *MemoryStore) Create(_ context.Context, item Item, receipt Receipt) (Mut
 	return cloneResult(receipt.MutationResult), nil
 }
 
+func (s *MemoryStore) BatchCreate(_ context.Context, items []Item, receipt Receipt) (MutationResult, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if result, found, err := s.receiptLocked(receipt); found || err != nil {
+		return result, err
+	}
+	for _, item := range items {
+		if _, found := s.items[memoryKey(item.WorkspaceID, item.ID)]; found {
+			return MutationResult{}, unavailable(errIDCollision{})
+		}
+	}
+	for _, item := range items {
+		s.items[memoryKey(item.WorkspaceID, item.ID)] = cloneItem(item)
+	}
+	s.receipts[memoryKey(receipt.WorkspaceID, receipt.OperationID)] = cloneReceipt(receipt)
+	return cloneResult(receipt.MutationResult), nil
+}
+
 func (s *MemoryStore) Replace(_ context.Context, item Item, revision int64, receipt Receipt) (MutationResult, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

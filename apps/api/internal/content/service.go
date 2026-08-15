@@ -14,6 +14,7 @@ import (
 type Store interface {
 	Receipt(context.Context, string, string, string, time.Time) (MutationResult, bool, error)
 	Create(context.Context, Item, Receipt) (MutationResult, error)
+	BatchCreate(context.Context, []Item, Receipt) (MutationResult, error)
 	Replace(context.Context, Item, int64, Receipt) (MutationResult, error)
 	SetArchived(context.Context, string, string, int64, bool, time.Time, Receipt) (MutationResult, error)
 	Delete(context.Context, string, string, int64, time.Time, Receipt) (MutationResult, error)
@@ -68,6 +69,48 @@ func (s *Service) Create(ctx context.Context, workspaceID string, request Create
 	}
 	result := MutationResult{OperationID: request.OperationID, ItemIDs: []string{id}, Revisions: []int64{1}, ExpiresAt: []time.Time{item.ExpiresAt}, Status: "created"}
 	return s.store.Create(ctx, item, newReceipt(workspaceID, requestHash, "create", http.StatusCreated, result, now))
+}
+
+func (s *Service) BatchCreate(ctx context.Context, workspaceID string, request BatchRequest, requestHash string) (MutationResult, error) {
+	if err := validateBatchRequest(request); err != nil {
+		return MutationResult{}, err
+	}
+	now := s.canonicalNow()
+	if replay, found, err := s.store.Receipt(ctx, workspaceID, request.OperationID, requestHash, now); found || err != nil {
+		return replay, err
+	}
+	items := make([]Item, len(request.Items))
+	result := MutationResult{
+		OperationID: request.OperationID,
+		ItemIDs:     make([]string, len(request.Items)),
+		Revisions:   make([]int64, len(request.Items)),
+		ExpiresAt:   make([]time.Time, len(request.Items)),
+		Status:      "created",
+	}
+	for index, requestItem := range request.Items {
+		id, err := s.ids.New(now)
+		if err != nil {
+			return MutationResult{}, &Error{Status: 500, Code: "id_generation_failed", Cause: err}
+		}
+		item := Item{
+			ID: id, WorkspaceID: workspaceID, Type: requestItem.Type, Status: requestItem.Status,
+			WorkingTitle: requestItem.WorkingTitle, NormalizedWorkingTitle: NormalizeTitle(requestItem.WorkingTitle),
+			Revision: 1, CreatedAt: now, UpdatedAt: now, ExpiresAt: now.Add(ContentLifetime), Content: requestItem.Content,
+		}
+		item.SearchableWorkingTitle = SearchableTitle(item.NormalizedWorkingTitle)
+		if err := validateEncodedSizes(item); err != nil {
+			return MutationResult{}, err
+		}
+		items[index] = item
+		result.ItemIDs[index] = id
+		result.Revisions[index] = 1
+		result.ExpiresAt[index] = item.ExpiresAt
+	}
+	receipt := newReceipt(workspaceID, requestHash, "batch_create", http.StatusCreated, result, now)
+	if err := validateReceiptSize(receipt); err != nil {
+		return MutationResult{}, err
+	}
+	return s.store.BatchCreate(ctx, items, receipt)
 }
 
 func (s *Service) Replace(ctx context.Context, workspaceID, id string, request ReplaceRequest, requestHash string) (MutationResult, error) {

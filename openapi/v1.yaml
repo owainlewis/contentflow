@@ -42,6 +42,23 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '409': { $ref: '#/components/responses/Conflict' }
         '413': { $ref: '#/components/responses/TooLarge' }
+  /content/batches:
+    post:
+      operationId: batchCreateContent
+      description: Creates 1 to 50 standalone typed items and one completed receipt atomically. The top-level operation_id is the sole idempotency key and binds to the exact request bytes for 24 hours. YouTube items cannot contain script sections. Receipts contain no content, source links, or provenance.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BatchCreateRequest' }
+      responses:
+        '201': { $ref: '#/components/responses/BatchMutationCreated' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '413': { $ref: '#/components/responses/TooLarge' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
   /content/{id}:
     parameters:
       - { $ref: '#/components/parameters/ContentID' }
@@ -132,6 +149,9 @@ components:
     MutationOK:
       description: Bounded mutation result.
       content: { application/json: { schema: { $ref: '#/components/schemas/MutationResult' } } }
+    BatchMutationCreated:
+      description: Bounded result for every atomically created item. Matching retries return these exact stored values without creating duplicates.
+      content: { application/json: { schema: { $ref: '#/components/schemas/BatchMutationResult' } } }
     BadRequest:
       description: Invalid input, discriminator mismatch, or omitted YouTube transcript.
       content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
@@ -149,6 +169,9 @@ components:
       content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
     TooLarge:
       description: JSON over 1 MiB, a text field over 500 KiB, a parent document over 900 KiB, or a Firestore document over its platform limit.
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+    ServiceUnavailable:
+      description: The transaction could not commit. No item or completed receipt is created.
       content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
   schemas:
     ULID:
@@ -291,6 +314,89 @@ components:
           tiktok: '#/components/schemas/TikTokCreate'
           email: '#/components/schemas/EmailCreate'
           substack: '#/components/schemas/SubstackCreate'
+    BatchYouTubeContent:
+      type: object
+      additionalProperties: false
+      required: [transcript]
+      properties:
+        topic: { $ref: '#/components/schemas/Text' }
+        icp: { $ref: '#/components/schemas/Text' }
+        angle: { $ref: '#/components/schemas/Text' }
+        cta: { $ref: '#/components/schemas/Text' }
+        publishing_title: { $ref: '#/components/schemas/Text' }
+        description: { $ref: '#/components/schemas/Text' }
+        transcript: { $ref: '#/components/schemas/Text' }
+        sections: { type: array, maxItems: 0, items: { $ref: '#/components/schemas/Section' } }
+    BatchItemCommon:
+      type: object
+      required: [type, working_title, status, content]
+      properties:
+        type: { $ref: '#/components/schemas/ContentType' }
+        working_title: { $ref: '#/components/schemas/Text' }
+        status: { $ref: '#/components/schemas/ContentStatus' }
+    BatchYouTubeCreate:
+      allOf:
+        - { $ref: '#/components/schemas/BatchItemCommon' }
+        - type: object
+          properties: { type: { const: youtube }, content: { $ref: '#/components/schemas/BatchYouTubeContent' } }
+      unevaluatedProperties: false
+    BatchLinkedInCreate:
+      allOf:
+        - { $ref: '#/components/schemas/BatchItemCommon' }
+        - type: object
+          properties: { type: { const: linkedin }, content: { $ref: '#/components/schemas/LinkedInContent' } }
+      unevaluatedProperties: false
+    BatchXCreate:
+      allOf:
+        - { $ref: '#/components/schemas/BatchItemCommon' }
+        - type: object
+          properties: { type: { const: x }, content: { $ref: '#/components/schemas/XContent' } }
+      unevaluatedProperties: false
+    BatchInstagramCreate:
+      allOf:
+        - { $ref: '#/components/schemas/BatchItemCommon' }
+        - type: object
+          properties: { type: { const: instagram }, content: { $ref: '#/components/schemas/InstagramContent' } }
+      unevaluatedProperties: false
+    BatchTikTokCreate:
+      allOf:
+        - { $ref: '#/components/schemas/BatchItemCommon' }
+        - type: object
+          properties: { type: { const: tiktok }, content: { $ref: '#/components/schemas/TikTokContent' } }
+      unevaluatedProperties: false
+    BatchEmailCreate:
+      allOf:
+        - { $ref: '#/components/schemas/BatchItemCommon' }
+        - type: object
+          properties: { type: { const: email }, content: { $ref: '#/components/schemas/EmailContent' } }
+      unevaluatedProperties: false
+    BatchSubstackCreate:
+      allOf:
+        - { $ref: '#/components/schemas/BatchItemCommon' }
+        - type: object
+          properties: { type: { const: substack }, content: { $ref: '#/components/schemas/SubstackContent' } }
+      unevaluatedProperties: false
+    BatchCreateItem:
+      oneOf:
+        - { $ref: '#/components/schemas/BatchYouTubeCreate' }
+        - { $ref: '#/components/schemas/BatchLinkedInCreate' }
+        - { $ref: '#/components/schemas/BatchXCreate' }
+        - { $ref: '#/components/schemas/BatchInstagramCreate' }
+        - { $ref: '#/components/schemas/BatchTikTokCreate' }
+        - { $ref: '#/components/schemas/BatchEmailCreate' }
+        - { $ref: '#/components/schemas/BatchSubstackCreate' }
+      discriminator: { propertyName: type }
+    BatchCreateRequest:
+      type: object
+      additionalProperties: false
+      required: [operation_id, items]
+      properties:
+        operation_id: { $ref: '#/components/schemas/OperationID', description: The sole idempotency key for the complete batch. }
+        items:
+          type: array
+          minItems: 1
+          maxItems: 50
+          items: { $ref: '#/components/schemas/BatchCreateItem' }
     YouTubeReplace:
       allOf:
         - { $ref: '#/components/schemas/ReplaceCommon' }
@@ -459,6 +565,16 @@ components:
         revisions: { type: array, maxItems: 1, items: { type: integer, minimum: 1 } }
         expires_at: { type: array, maxItems: 1, items: { type: string, format: date-time } }
         status: { type: string, enum: [created, updated, archived, restored, deleted] }
+    BatchMutationResult:
+      type: object
+      additionalProperties: false
+      required: [operation_id, item_ids, revisions, expires_at, status]
+      properties:
+        operation_id: { $ref: '#/components/schemas/OperationID' }
+        item_ids: { type: array, minItems: 1, maxItems: 50, items: { $ref: '#/components/schemas/ULID' } }
+        revisions: { type: array, minItems: 1, maxItems: 50, items: { type: integer, const: 1 } }
+        expires_at: { type: array, minItems: 1, maxItems: 50, items: { type: string, format: date-time } }
+        status: { type: string, const: created }
     Error:
       type: object
       required: [error]
