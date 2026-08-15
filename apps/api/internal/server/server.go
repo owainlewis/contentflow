@@ -3,6 +3,7 @@ package server
 import (
 	"crypto/subtle"
 	"encoding/json"
+	"html"
 	"io/fs"
 	"mime"
 	"net/http"
@@ -17,6 +18,7 @@ import (
 )
 
 const proxySecretHeader = "X-ContentFlow-Proxy-Secret"
+const socialImagePlaceholder = "__CONTENTFLOW_SOCIAL_IMAGE__"
 
 type statusResponse struct {
 	Status string            `json:"status"`
@@ -102,11 +104,15 @@ func staticHandler(assets fs.FS) http.Handler {
 
 		name := strings.TrimPrefix(path.Clean(request.URL.Path), "/")
 		if name == "." || name == "" {
-			serveFile(response, request, assets, "index.html")
+			serveIndex(response, request, assets)
 			return
 		}
 
 		if info, err := fs.Stat(assets, name); err == nil && !info.IsDir() {
+			if name == "index.html" {
+				serveIndex(response, request, assets)
+				return
+			}
 			serveFile(response, request, assets, name)
 			return
 		}
@@ -115,11 +121,48 @@ func staticHandler(assets fs.FS) http.Handler {
 			return
 		}
 		if path.Ext(name) == "" {
-			serveFile(response, request, assets, "index.html")
+			serveIndex(response, request, assets)
 			return
 		}
 		http.NotFound(response, request)
 	})
+}
+
+func serveIndex(response http.ResponseWriter, request *http.Request, assets fs.FS) {
+	contents, err := fs.ReadFile(assets, "index.html")
+	if err != nil {
+		http.Error(response, "web build is unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	socialImage := html.EscapeString(absoluteRequestURL(request, "/og.png"))
+	contents = []byte(strings.ReplaceAll(string(contents), socialImagePlaceholder, socialImage))
+	response.Header().Set("Content-Type", "text/html; charset=utf-8")
+	response.Header().Set("Cache-Control", "no-cache")
+	http.ServeContent(response, request, "index.html", time.Time{}, strings.NewReader(string(contents)))
+}
+
+func absoluteRequestURL(request *http.Request, assetPath string) string {
+	scheme := "http"
+	if request.TLS != nil {
+		scheme = "https"
+	}
+	if forwardedScheme := firstForwardedValue(request.Header.Get("X-Forwarded-Proto")); forwardedScheme == "http" || forwardedScheme == "https" {
+		scheme = forwardedScheme
+	}
+
+	host := firstForwardedValue(request.Header.Get("X-Forwarded-Host"))
+	if host == "" {
+		host = request.Host
+	}
+	if host == "" {
+		return assetPath
+	}
+	return (&url.URL{Scheme: scheme, Host: host, Path: assetPath}).String()
+}
+
+func firstForwardedValue(value string) string {
+	first, _, _ := strings.Cut(value, ",")
+	return strings.TrimSpace(first)
 }
 
 func serveFile(response http.ResponseWriter, request *http.Request, assets fs.FS, name string) {

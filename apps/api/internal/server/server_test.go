@@ -20,7 +20,7 @@ func (f fakeChecker) Check(context.Context) map[string]error {
 
 func testAssets() fs.FS {
 	return fstest.MapFS{
-		"index.html":    {Data: []byte("<!doctype html><title>ContentFlow</title><div id=root></div>")},
+		"index.html":    {Data: []byte(`<!doctype html><title>ContentFlow</title><meta property="og:image" content="__CONTENTFLOW_SOCIAL_IMAGE__"><meta name="twitter:image" content="__CONTENTFLOW_SOCIAL_IMAGE__"><div id=root></div>`)},
 		"assets/app.js": {Data: []byte("console.log('ContentFlow')")},
 	}
 }
@@ -75,6 +75,28 @@ func TestApplicationServesAssetsAndFallsBackForSPARoutes(t *testing.T) {
 	application.ServeHTTP(invalidHealth, httptest.NewRequest(http.MethodGet, "/health/ready/", nil))
 	if invalidHealth.Code != http.StatusNotFound || !strings.Contains(invalidHealth.Header().Get("Content-Type"), "application/json") {
 		t.Fatalf("invalid health route fell through to the SPA: %d %s", invalidHealth.Code, invalidHealth.Body.String())
+	}
+}
+
+func TestApplicationInjectsOriginQualifiedSocialImages(t *testing.T) {
+	t.Parallel()
+
+	application := NewApplication(testAssets(), NewAPI(fakeChecker{"assets": nil}))
+	request := httptest.NewRequest(http.MethodGet, "http://internal/content/01ABC", nil)
+	request.Header.Set("X-Forwarded-Proto", "https")
+	request.Header.Set("X-Forwarded-Host", "contentflow.example")
+	response := httptest.NewRecorder()
+	application.ServeHTTP(response, request)
+
+	const socialImage = "https://contentflow.example/og.png"
+	if response.Code != http.StatusOK {
+		t.Fatalf("nested SPA route returned %d", response.Code)
+	}
+	if count := strings.Count(response.Body.String(), socialImage); count != 2 {
+		t.Fatalf("expected both social image tags to use %s, found %d", socialImage, count)
+	}
+	if strings.Contains(response.Body.String(), socialImagePlaceholder) {
+		t.Fatal("social image placeholder was not replaced")
 	}
 }
 

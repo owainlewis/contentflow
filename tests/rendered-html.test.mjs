@@ -8,6 +8,7 @@ test("builds the ContentFlow client application", async () => {
   assert.match(html, /ContentFlow/);
   assert.match(html, /ContentFlow · Your content, in one place/);
   assert.match(html, /contentflow-theme/);
+  assert.equal((html.match(/__CONTENTFLOW_SOCIAL_IMAGE__/g) ?? []).length, 2);
   assert.match(html, /<div id="root"><\/div>/);
 
   const assets = await readdir(new URL("assets/", buildRoot));
@@ -28,7 +29,7 @@ test("ships the final product surface without starter artifacts", async () => {
   assert.match(page, /function createRepurposedDrafts/);
   assert.match(page, /className="plain-editor"/);
   assert.match(page, /className="script-block"/);
-  assert.match(html, /og\.png/);
+  assert.equal((html.match(/__CONTENTFLOW_SOCIAL_IMAGE__/g) ?? []).length, 2);
   assert.doesNotMatch(packageJson, /vinext|react-server-dom-webpack|wrangler/);
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
 
