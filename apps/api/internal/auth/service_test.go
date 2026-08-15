@@ -38,7 +38,7 @@ func newTestService(t *testing.T, identity Identity) (*Service, *MemoryStore, *f
 	store := NewMemoryStore()
 	service, err := New(Config{
 		PublicOrigin: "https://contentflow.example", OwnerIssuer: "https://accounts.google.com",
-		OwnerSubject: "owner-subject", WorkspaceID: "owner-workspace", SecureCookie: true, CredentialKey: make([]byte, 32),
+		OwnerSubject: "owner-subject", WorkspaceID: "owner-workspace", CredentialKey: make([]byte, 32),
 	}, provider, store)
 	if err != nil {
 		t.Fatal(err)
@@ -101,6 +101,42 @@ func TestOwnerSignInUsesPKCEAndSecureHostOnlySession(t *testing.T) {
 	}
 	if sessionCookie == nil || !sessionCookie.HttpOnly || !sessionCookie.Secure || sessionCookie.SameSite != http.SameSiteLaxMode || sessionCookie.Domain != "" || sessionCookie.Path != "/" {
 		t.Fatalf("session cookie is not secure and host-only: %#v", sessionCookie)
+	}
+}
+
+func TestCookieSecurityIsDerivedFromAuthenticatedOrigin(t *testing.T) {
+	provider := &fakeProvider{}
+	for _, test := range []struct {
+		origin string
+		secure bool
+	}{
+		{"https://staging.contentflow.example", true},
+		{"http://localhost:3000", false},
+		{"http://127.0.0.1:3000", false},
+	} {
+		service, err := New(Config{
+			PublicOrigin: test.origin, OwnerIssuer: "https://accounts.google.com", OwnerSubject: "owner",
+			WorkspaceID: "workspace", CredentialKey: make([]byte, 32),
+		}, provider, NewMemoryStore())
+		if err != nil {
+			t.Fatalf("origin %s failed: %v", test.origin, err)
+		}
+		response := httptest.NewRecorder()
+		service.HandleLogin(response, httptest.NewRequest(http.MethodGet, "/api/v1/auth/login", nil))
+		cookies := response.Result().Cookies()
+		if len(cookies) == 0 {
+			t.Fatalf("origin %s produced no login cookie", test.origin)
+		}
+		if cookies[0].Secure != test.secure {
+			t.Fatalf("origin %s produced Secure=%t, want %t", test.origin, cookies[0].Secure, test.secure)
+		}
+	}
+
+	if _, err := New(Config{
+		PublicOrigin: "http://staging.contentflow.example", OwnerIssuer: "https://accounts.google.com", OwnerSubject: "owner",
+		WorkspaceID: "workspace", CredentialKey: make([]byte, 32),
+	}, provider, NewMemoryStore()); err == nil {
+		t.Fatal("expected authenticated non-loopback HTTP origin to fail")
 	}
 }
 

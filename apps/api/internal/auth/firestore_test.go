@@ -5,6 +5,8 @@ import (
 	"crypto/sha256"
 	"errors"
 	"os"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -29,6 +31,9 @@ func TestFirestoreStorePersistsSessionsAndImmediateTokenRevocation(t *testing.T)
 
 	first := NewFirestoreStore(firstClient)
 	second := NewFirestoreStore(secondClient)
+	if err := second.Check(ctx); err != nil {
+		t.Fatalf("Firestore auth readiness check failed: %v", err)
+	}
 	suffix := time.Now().UTC().Format("20060102150405.000000000")
 	session := Session{ID: "raw-session-" + suffix, WorkspaceID: "workspace", CSRFToken: "csrf", ExpiresAt: time.Now().Add(time.Hour)}
 	if err := first.SaveSession(ctx, session); err != nil {
@@ -120,5 +125,56 @@ func TestFirestoreRateLimitIsSharedAcrossStoreInstances(t *testing.T) {
 	}
 	if allowed {
 		t.Fatal("shared Firestore rate limit allowed request 121")
+	}
+}
+
+func TestFirestoreRateLimitDoesNotOverAdmitDuringConcurrentRetries(t *testing.T) {
+	if os.Getenv("FIRESTORE_EMULATOR_HOST") == "" {
+		t.Skip("FIRESTORE_EMULATOR_HOST is not set")
+	}
+	ctx := context.Background()
+	clients := make([]*firestore.Client, 4)
+	stores := make([]*FirestoreStore, len(clients))
+	for index := range clients {
+		client, err := firestore.NewClient(ctx, "contentflow-auth-test")
+		if err != nil {
+			t.Fatal(err)
+		}
+		clients[index] = client
+		stores[index] = NewFirestoreStore(client)
+		defer client.Close()
+	}
+
+	tokenID := "concurrent-rate-" + time.Now().String()
+	now := time.Now()
+	start := make(chan struct{})
+	errorsChannel := make(chan error, 160)
+	var allowed atomic.Int64
+	var wait sync.WaitGroup
+	for worker := range 8 {
+		wait.Add(1)
+		go func() {
+			defer wait.Done()
+			<-start
+			for range 20 {
+				accepted, err := stores[worker%len(stores)].AllowTokenRequest(ctx, tokenID, now, 120, time.Minute)
+				if err != nil {
+					errorsChannel <- err
+					continue
+				}
+				if accepted {
+					allowed.Add(1)
+				}
+			}
+		}()
+	}
+	close(start)
+	wait.Wait()
+	close(errorsChannel)
+	for err := range errorsChannel {
+		t.Errorf("concurrent rate-limit transaction failed: %v", err)
+	}
+	if got := allowed.Load(); got != 120 {
+		t.Fatalf("concurrent shared limit admitted %d requests, want exactly 120", got)
 	}
 }

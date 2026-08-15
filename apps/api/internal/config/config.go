@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"net"
 	"net/url"
 	"os"
 	"strconv"
@@ -65,6 +66,15 @@ func (c Config) Validate() error {
 	if c.LocalProxyAuth && c.PrivateAddress == "" {
 		return fmt.Errorf("CONTENTFLOW_PRIVATE_ADDR is required when local proxy authentication is enabled")
 	}
+	if c.AuthEnabled() {
+		origin, err := url.Parse(c.PublicOrigin)
+		if err != nil || origin.Host == "" || (origin.Scheme != "http" && origin.Scheme != "https") || origin.User != nil || (origin.Path != "" && origin.Path != "/") || origin.RawQuery != "" || origin.Fragment != "" {
+			return fmt.Errorf("CONTENTFLOW_PUBLIC_ORIGIN must be an HTTP or HTTPS origin")
+		}
+		if origin.Scheme == "http" && !loopbackHostname(origin.Hostname()) {
+			return fmt.Errorf("authenticated HTTP origins are allowed only on loopback")
+		}
+	}
 	if c.Environment == "production" {
 		required := map[string]string{
 			"CONTENTFLOW_GOOGLE_PROJECT_ID":   c.GoogleProject,
@@ -86,6 +96,14 @@ func (c Config) Validate() error {
 		}
 	}
 	return nil
+}
+
+func loopbackHostname(hostname string) bool {
+	if strings.EqualFold(hostname, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(hostname)
+	return ip != nil && ip.IsLoopback()
 }
 
 func (c Config) AuthEnabled() bool {

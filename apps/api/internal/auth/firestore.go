@@ -29,6 +29,14 @@ func NewFirestoreStore(client *firestore.Client) *FirestoreStore {
 	return &FirestoreStore{client: client}
 }
 
+func (s *FirestoreStore) Check(ctx context.Context) error {
+	_, err := s.client.Collection(sessionsCollection).Doc("_readiness").Get(ctx)
+	if firestoreIsNotFound(err) {
+		return nil
+	}
+	return err
+}
+
 type loginAttemptDocument struct {
 	State        string    `firestore:"state"`
 	CodeVerifier string    `firestore:"code_verifier"`
@@ -181,6 +189,8 @@ func (s *FirestoreStore) AllowTokenRequest(ctx context.Context, tokenID string, 
 	ref := s.client.Collection(rateLimitsCollection).Doc(tokenID)
 	allowed := false
 	err := s.client.RunTransaction(ctx, func(ctx context.Context, transaction *firestore.Transaction) error {
+		// RunTransaction may retry this callback after a commit conflict.
+		allowed = false
 		document := rateLimitDocument{WindowStartedAt: now, ExpiresAt: now.Add(2 * window)}
 		snapshot, err := transaction.Get(ref)
 		if err == nil {

@@ -2,6 +2,7 @@ package health
 
 import (
 	"context"
+	"errors"
 	"net"
 	"testing"
 	"time"
@@ -26,6 +27,24 @@ func TestDependenciesReportAssetAndFirestoreState(t *testing.T) {
 		if err := checks[dependency]; err != nil {
 			t.Fatalf("expected %s to be ready: %v", dependency, err)
 		}
+	}
+}
+
+func TestDependenciesUseBoundedProductionFirestoreCheck(t *testing.T) {
+	t.Parallel()
+	want := errors.New("firestore unavailable")
+	checks := (Dependencies{
+		AssetDirectory: t.TempDir(),
+		DialTimeout:    time.Second,
+		FirestoreCheck: func(ctx context.Context) error {
+			if _, hasDeadline := ctx.Deadline(); !hasDeadline {
+				t.Error("production Firestore check has no deadline")
+			}
+			return want
+		},
+	}).Check(context.Background())
+	if !errors.Is(checks["firestore"], want) {
+		t.Fatalf("readiness did not report production Firestore failure: %v", checks["firestore"])
 	}
 }
 

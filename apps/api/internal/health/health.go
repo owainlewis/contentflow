@@ -15,6 +15,7 @@ type Checker interface {
 type Dependencies struct {
 	AssetDirectory string
 	FirestoreHost  string
+	FirestoreCheck func(context.Context) error
 	DialTimeout    time.Duration
 }
 
@@ -22,11 +23,15 @@ func (d Dependencies) Check(ctx context.Context) map[string]error {
 	checks := map[string]error{
 		"assets": checkAssetDirectory(d.AssetDirectory),
 	}
-	if d.FirestoreHost != "" {
-		timeout := d.DialTimeout
-		if timeout == 0 {
-			timeout = 500 * time.Millisecond
-		}
+	timeout := d.DialTimeout
+	if timeout == 0 {
+		timeout = 500 * time.Millisecond
+	}
+	if d.FirestoreCheck != nil {
+		checkContext, cancel := context.WithTimeout(ctx, timeout)
+		checks["firestore"] = d.FirestoreCheck(checkContext)
+		cancel()
+	} else if d.FirestoreHost != "" {
 		dialer := net.Dialer{Timeout: timeout}
 		connection, err := dialer.DialContext(ctx, "tcp", d.FirestoreHost)
 		if err == nil {

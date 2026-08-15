@@ -157,7 +157,7 @@ func (serverFakeOAuth) ExchangeIdentity(context.Context, string, string) (auth.I
 func TestConfiguredAPIRequiresAuthenticationBeforeWorkspaceRoutes(t *testing.T) {
 	service, err := auth.New(auth.Config{
 		PublicOrigin: "https://contentflow.example", OwnerIssuer: "https://accounts.google.com", OwnerSubject: "owner",
-		WorkspaceID: "workspace", SecureCookie: true, CredentialKey: make([]byte, 32),
+		WorkspaceID: "workspace", CredentialKey: make([]byte, 32),
 	}, serverFakeOAuth{}, auth.NewMemoryStore())
 	if err != nil {
 		t.Fatal(err)
@@ -198,7 +198,7 @@ func TestExpiredSessionIsRejected(t *testing.T) {
 	store := auth.NewMemoryStore()
 	service, err := auth.New(auth.Config{
 		PublicOrigin: "https://contentflow.example", OwnerIssuer: "https://accounts.google.com", OwnerSubject: "owner",
-		WorkspaceID: "workspace", SecureCookie: true, CredentialKey: make([]byte, 32),
+		WorkspaceID: "workspace", CredentialKey: make([]byte, 32),
 	}, serverFakeOAuth{}, store)
 	if err != nil {
 		t.Fatal(err)
@@ -219,7 +219,7 @@ func TestTokenRevocationBlocksTheNextHTTPAPIRequest(t *testing.T) {
 	store := auth.NewMemoryStore()
 	service, err := auth.New(auth.Config{
 		PublicOrigin: "https://contentflow.example", OwnerIssuer: "https://accounts.google.com", OwnerSubject: "owner",
-		WorkspaceID: "workspace", SecureCookie: true, CredentialKey: make([]byte, 32),
+		WorkspaceID: "workspace", CredentialKey: make([]byte, 32),
 	}, serverFakeOAuth{}, store)
 	if err != nil {
 		t.Fatal(err)

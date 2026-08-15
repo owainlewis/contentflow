@@ -71,10 +71,13 @@ func run(ctx context.Context, cfg config.Config) error {
 		}
 		defer firestoreClient.Close()
 		credentialKey := sha256.Sum256([]byte(cfg.OAuthSecret))
+		firestoreStore := auth.NewFirestoreStore(firestoreClient)
+		checker.FirestoreCheck = firestoreStore.Check
+		checker.DialTimeout = 2 * time.Second
 		authentication, err = auth.New(auth.Config{
 			PublicOrigin: cfg.PublicOrigin, OwnerIssuer: cfg.OAuthIssuer, OwnerSubject: cfg.OwnerSubject,
-			WorkspaceID: cfg.WorkspaceID, SecureCookie: cfg.Environment == "production", CredentialKey: credentialKey[:],
-		}, provider, auth.NewFirestoreStore(firestoreClient))
+			WorkspaceID: cfg.WorkspaceID, CredentialKey: credentialKey[:],
+		}, provider, firestoreStore)
 		if err != nil {
 			return fmt.Errorf("configure authentication: %w", err)
 		}

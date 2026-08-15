@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"slices"
@@ -40,19 +41,19 @@ type Config struct {
 	OwnerIssuer   string
 	OwnerSubject  string
 	WorkspaceID   string
-	SecureCookie  bool
 	CredentialKey []byte
 }
 
 type Service struct {
-	config   Config
-	provider OAuthProvider
-	store    Store
-	now      func() time.Time
-	random   func([]byte) (int, error)
-	entropy  io.Reader
-	ulidMu   sync.Mutex
-	sealer   cipher.AEAD
+	config        Config
+	provider      OAuthProvider
+	store         Store
+	now           func() time.Time
+	random        func([]byte) (int, error)
+	entropy       io.Reader
+	ulidMu        sync.Mutex
+	sealer        cipher.AEAD
+	secureCookies bool
 }
 
 type Principal struct {
@@ -65,9 +66,14 @@ type Principal struct {
 type principalKey struct{}
 
 func New(config Config, provider OAuthProvider, store Store) (*Service, error) {
-	if _, err := url.ParseRequestURI(config.PublicOrigin); err != nil || !strings.HasPrefix(config.PublicOrigin, "http") {
+	origin, err := url.Parse(config.PublicOrigin)
+	if err != nil || origin.Host == "" || (origin.Scheme != "http" && origin.Scheme != "https") || origin.User != nil || (origin.Path != "" && origin.Path != "/") || origin.RawQuery != "" || origin.Fragment != "" {
 		return nil, fmt.Errorf("valid public origin is required")
 	}
+	if origin.Scheme == "http" && !isLoopbackHostname(origin.Hostname()) {
+		return nil, fmt.Errorf("authenticated HTTP origins are allowed only on loopback")
+	}
+	config.PublicOrigin = strings.TrimSuffix(config.PublicOrigin, "/")
 	if config.OwnerIssuer == "" || config.OwnerSubject == "" || config.WorkspaceID == "" {
 		return nil, fmt.Errorf("owner issuer, subject, and workspace are required")
 	}
@@ -87,7 +93,7 @@ func New(config Config, provider OAuthProvider, store Store) (*Service, error) {
 	}
 	return &Service{
 		config: config, provider: provider, store: store, now: time.Now, random: rand.Read,
-		entropy: ulid.Monotonic(rand.Reader, 0), sealer: sealer,
+		entropy: ulid.Monotonic(rand.Reader, 0), sealer: sealer, secureCookies: origin.Scheme == "https",
 	}, nil
 }
 
@@ -354,11 +360,19 @@ func (s *Service) open(value string) (string, error) {
 }
 
 func (s *Service) setCookie(response http.ResponseWriter, name, value string, expires time.Time) {
-	http.SetCookie(response, &http.Cookie{Name: name, Value: value, Path: "/", Expires: expires, MaxAge: int(expires.Sub(s.now()).Seconds()), HttpOnly: true, Secure: s.config.SecureCookie, SameSite: http.SameSiteLaxMode})
+	http.SetCookie(response, &http.Cookie{Name: name, Value: value, Path: "/", Expires: expires, MaxAge: int(expires.Sub(s.now()).Seconds()), HttpOnly: true, Secure: s.secureCookies, SameSite: http.SameSiteLaxMode})
 }
 
 func (s *Service) clearCookie(response http.ResponseWriter, name string) {
-	http.SetCookie(response, &http.Cookie{Name: name, Path: "/", MaxAge: -1, HttpOnly: true, Secure: s.config.SecureCookie, SameSite: http.SameSiteLaxMode})
+	http.SetCookie(response, &http.Cookie{Name: name, Path: "/", MaxAge: -1, HttpOnly: true, Secure: s.secureCookies, SameSite: http.SameSiteLaxMode})
+}
+
+func isLoopbackHostname(hostname string) bool {
+	if strings.EqualFold(hostname, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(hostname)
+	return ip != nil && ip.IsLoopback()
 }
 
 func secureEqual(left, right string) bool {

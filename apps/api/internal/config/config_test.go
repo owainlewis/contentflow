@@ -59,6 +59,25 @@ func TestProductionRequiresHTTPSPublicOrigin(t *testing.T) {
 	}
 }
 
+func TestAuthenticatedNonProductionOriginMustBeHTTPSOrLoopback(t *testing.T) {
+	cfg := productionConfig(t)
+	cfg.Environment = "staging"
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("authenticated HTTPS staging config failed: %v", err)
+	}
+
+	cfg.PublicOrigin = "http://staging.contentflow.example"
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected authenticated non-loopback HTTP origin to fail")
+	}
+
+	cfg.Environment = "development"
+	cfg.PublicOrigin = "http://127.0.0.1:3000"
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("explicit loopback HTTP development origin failed: %v", err)
+	}
+}
+
 func TestDevelopmentAcceptsLocalProxyAuthentication(t *testing.T) {
 	t.Parallel()
 
