@@ -56,6 +56,7 @@ func NewAPI(checker health.Checker, authentication *auth.Service) http.Handler {
 		service := authentication
 		router.Get("/api/v1/auth/login", service.HandleLogin)
 		router.Get("/api/v1/auth/callback", service.HandleCallback)
+		router.Post("/api/v1/auth/callback", service.HandleCallback)
 		router.Group(func(protected chi.Router) {
 			protected.Use(service.Authenticate, service.Authorize)
 			protected.Get("/api/v1/session", service.HandleSession)

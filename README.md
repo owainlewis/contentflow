@@ -53,7 +53,7 @@ npm start
 
 The self-contained binary listens on `http://localhost:8080`. Client-side routes fall back to the embedded `index.html`; `/api` and `/health` routes never fall through to the SPA.
 
-Production refuses to start unless every authentication value above is present, the public origin is HTTPS, and local proxy authentication is disabled. Any authenticated public origin or OAuth issuer must also use HTTPS unless it uses an explicit loopback address for local development. Cookie security is derived from that validated origin. The OAuth redirect URI is `<public-origin>/api/v1/auth/callback`. OAuth attempts, sessions, distributed token rate limits, and SHA-256 token hashes are stored in Firestore. Raw API tokens are returned only by `POST /api/v1/tokens` and are never stored.
+Production refuses to start unless every authentication value above is present, the public origin is HTTPS, and local proxy authentication is disabled. Any authenticated public origin or OAuth issuer must also use HTTPS unless it uses an explicit loopback address for local development. Cookie security is derived from that validated origin. The OAuth redirect URI is `<public-origin>/api/v1/auth/callback`; HTTPS sign-in uses OIDC `form_post` so authorization codes and state never enter request URLs or platform request logs. OAuth attempts, sessions, distributed token rate limits, and SHA-256 token hashes are stored in Firestore. Raw API tokens are returned only by `POST /api/v1/tokens` and are never stored.
 
 Before serving production traffic, enable managed deletion for the three expiring authentication collections:
 

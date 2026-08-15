@@ -125,18 +125,23 @@ func (s *Service) HandleLogin(response http.ResponseWriter, request *http.Reques
 		writeError(response, http.StatusServiceUnavailable, "authentication_unavailable")
 		return
 	}
-	s.setCookie(response, loginCookieName, attemptID, attempt.ExpiresAt)
+	s.setCookie(response, loginCookieName, attemptID, attempt.ExpiresAt, s.loginCookieSameSite())
 	challenge := sha256.Sum256([]byte(verifier))
 	http.Redirect(response, request, s.provider.AuthorizationURL(state, base64.RawURLEncoding.EncodeToString(challenge[:])), http.StatusFound)
 }
 
 func (s *Service) HandleCallback(response http.ResponseWriter, request *http.Request) {
 	cookie, err := request.Cookie(loginCookieName)
-	if err != nil || request.URL.Query().Get("code") == "" || request.URL.Query().Get("state") == "" {
+	if err != nil {
 		writeError(response, http.StatusUnauthorized, "oauth_state_invalid")
 		return
 	}
-	attempt, err := s.store.TakeLoginAttempt(request.Context(), cookie.Value, credentialDocumentID(request.URL.Query().Get("state")), s.now())
+	code, state, err := s.callbackValues(response, request)
+	if err != nil || code == "" || state == "" {
+		writeError(response, http.StatusUnauthorized, "oauth_state_invalid")
+		return
+	}
+	attempt, err := s.store.TakeLoginAttempt(request.Context(), cookie.Value, credentialDocumentID(state), s.now())
 	if err != nil {
 		if !errors.Is(err, ErrNotFound) {
 			writeError(response, http.StatusServiceUnavailable, "authentication_unavailable")
@@ -150,7 +155,7 @@ func (s *Service) HandleCallback(response http.ResponseWriter, request *http.Req
 		writeError(response, http.StatusUnauthorized, "oauth_state_invalid")
 		return
 	}
-	identity, err := s.provider.ExchangeIdentity(request.Context(), request.URL.Query().Get("code"), verifier)
+	identity, err := s.provider.ExchangeIdentity(request.Context(), code, verifier)
 	if err != nil {
 		writeError(response, http.StatusUnauthorized, "oauth_exchange_failed")
 		return
@@ -174,8 +179,8 @@ func (s *Service) HandleCallback(response http.ResponseWriter, request *http.Req
 		writeError(response, http.StatusServiceUnavailable, "authentication_unavailable")
 		return
 	}
-	s.clearCookie(response, loginCookieName)
-	s.setCookie(response, sessionCookieName, sessionID, session.ExpiresAt)
+	s.clearCookie(response, loginCookieName, s.loginCookieSameSite())
+	s.setCookie(response, sessionCookieName, sessionID, session.ExpiresAt, http.SameSiteLaxMode)
 	http.Redirect(response, request, s.config.PublicOrigin+"/", http.StatusFound)
 }
 
@@ -369,12 +374,36 @@ func (s *Service) open(value string) (string, error) {
 	return string(plain), nil
 }
 
-func (s *Service) setCookie(response http.ResponseWriter, name, value string, expires time.Time) {
-	http.SetCookie(response, &http.Cookie{Name: name, Value: value, Path: "/", Expires: expires, MaxAge: int(expires.Sub(s.now()).Seconds()), HttpOnly: true, Secure: s.secureCookies, SameSite: http.SameSiteLaxMode})
+func (s *Service) callbackValues(response http.ResponseWriter, request *http.Request) (string, string, error) {
+	if s.secureCookies {
+		if request.Method != http.MethodPost {
+			return "", "", fmt.Errorf("HTTPS OAuth callback requires form POST")
+		}
+		request.Body = http.MaxBytesReader(response, request.Body, 64<<10)
+		if err := request.ParseForm(); err != nil {
+			return "", "", err
+		}
+		return request.PostForm.Get("code"), request.PostForm.Get("state"), nil
+	}
+	if request.Method != http.MethodGet {
+		return "", "", fmt.Errorf("local HTTP OAuth callback requires query response")
+	}
+	return request.URL.Query().Get("code"), request.URL.Query().Get("state"), nil
 }
 
-func (s *Service) clearCookie(response http.ResponseWriter, name string) {
-	http.SetCookie(response, &http.Cookie{Name: name, Path: "/", MaxAge: -1, HttpOnly: true, Secure: s.secureCookies, SameSite: http.SameSiteLaxMode})
+func (s *Service) loginCookieSameSite() http.SameSite {
+	if s.secureCookies {
+		return http.SameSiteNoneMode
+	}
+	return http.SameSiteLaxMode
+}
+
+func (s *Service) setCookie(response http.ResponseWriter, name, value string, expires time.Time, sameSite http.SameSite) {
+	http.SetCookie(response, &http.Cookie{Name: name, Value: value, Path: "/", Expires: expires, MaxAge: int(expires.Sub(s.now()).Seconds()), HttpOnly: true, Secure: s.secureCookies, SameSite: sameSite})
+}
+
+func (s *Service) clearCookie(response http.ResponseWriter, name string, sameSite http.SameSite) {
+	http.SetCookie(response, &http.Cookie{Name: name, Path: "/", MaxAge: -1, HttpOnly: true, Secure: s.secureCookies, SameSite: sameSite})
 }
 
 func isLoopbackHostname(hostname string) bool {

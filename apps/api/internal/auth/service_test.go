@@ -70,6 +70,14 @@ func beginLogin(t *testing.T, service *Service) (*http.Cookie, string) {
 	return cookie, location.Query().Get("state")
 }
 
+func formPostCallback(cookie *http.Cookie, state, code string) *http.Request {
+	form := url.Values{"code": {code}, "state": {state}}
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/auth/callback", strings.NewReader(form.Encode()))
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	request.AddCookie(cookie)
+	return request
+}
+
 func TestOwnerSignInUsesPKCEAndSecureHostOnlySession(t *testing.T) {
 	service, store, provider := newTestService(t, Identity{Issuer: "https://accounts.google.com", Subject: "owner-subject"})
 	loginCookie, state := beginLogin(t, service)
@@ -83,8 +91,10 @@ func TestOwnerSignInUsesPKCEAndSecureHostOnlySession(t *testing.T) {
 	if storedAttempt.State == state || storedAttempt.CodeVerifier == plainVerifier {
 		t.Fatal("raw OAuth state or PKCE verifier was retained in storage")
 	}
-	callback := httptest.NewRequest(http.MethodGet, "/api/v1/auth/callback?code=authorization-code&state="+url.QueryEscape(state), nil)
-	callback.AddCookie(loginCookie)
+	if !loginCookie.HttpOnly || !loginCookie.Secure || loginCookie.SameSite != http.SameSiteNoneMode || loginCookie.Domain != "" || loginCookie.Path != "/" {
+		t.Fatalf("cross-site login cookie is not secure and host-only: %#v", loginCookie)
+	}
+	callback := formPostCallback(loginCookie, state, "authorization-code")
 	response := httptest.NewRecorder()
 	service.HandleCallback(response, callback)
 	if response.Code != http.StatusFound || response.Header().Get("Location") != "https://contentflow.example/" {
@@ -108,12 +118,13 @@ func TestOwnerSignInUsesPKCEAndSecureHostOnlySession(t *testing.T) {
 func TestCookieSecurityIsDerivedFromAuthenticatedOrigin(t *testing.T) {
 	provider := &fakeProvider{}
 	for _, test := range []struct {
-		origin string
-		secure bool
+		origin   string
+		secure   bool
+		sameSite http.SameSite
 	}{
-		{"https://staging.contentflow.example", true},
-		{"http://localhost:3000", false},
-		{"http://127.0.0.1:3000", false},
+		{"https://staging.contentflow.example", true, http.SameSiteNoneMode},
+		{"http://localhost:3000", false, http.SameSiteLaxMode},
+		{"http://127.0.0.1:3000", false, http.SameSiteLaxMode},
 	} {
 		service, err := New(Config{
 			PublicOrigin: test.origin, OwnerIssuer: "https://accounts.google.com", OwnerSubject: "owner",
@@ -128,8 +139,8 @@ func TestCookieSecurityIsDerivedFromAuthenticatedOrigin(t *testing.T) {
 		if len(cookies) == 0 {
 			t.Fatalf("origin %s produced no login cookie", test.origin)
 		}
-		if cookies[0].Secure != test.secure {
-			t.Fatalf("origin %s produced Secure=%t, want %t", test.origin, cookies[0].Secure, test.secure)
+		if cookies[0].Secure != test.secure || cookies[0].SameSite != test.sameSite {
+			t.Fatalf("origin %s produced Secure=%t SameSite=%d, want Secure=%t SameSite=%d", test.origin, cookies[0].Secure, cookies[0].SameSite, test.secure, test.sameSite)
 		}
 	}
 
@@ -148,13 +159,70 @@ func TestDifferentOwnerIssuerOrSubjectIsForbidden(t *testing.T) {
 	} {
 		service, _, _ := newTestService(t, identity)
 		cookie, state := beginLogin(t, service)
-		request := httptest.NewRequest(http.MethodGet, "/api/v1/auth/callback?code=code&state="+url.QueryEscape(state), nil)
-		request.AddCookie(cookie)
+		request := formPostCallback(cookie, state, "code")
 		response := httptest.NewRecorder()
 		service.HandleCallback(response, request)
 		if response.Code != http.StatusForbidden || !strings.Contains(response.Body.String(), "owner_mismatch") {
 			t.Fatalf("owner mismatch returned %d: %s", response.Code, response.Body.String())
 		}
+	}
+}
+
+func TestHTTPSCallbackRequiresBoundedFormPost(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		request func(*http.Cookie, string) *http.Request
+	}{
+		{
+			name: "query response",
+			request: func(cookie *http.Cookie, state string) *http.Request {
+				request := httptest.NewRequest(http.MethodGet, "/api/v1/auth/callback?code=code&state="+url.QueryEscape(state), nil)
+				request.AddCookie(cookie)
+				return request
+			},
+		},
+		{
+			name: "oversized form",
+			request: func(cookie *http.Cookie, state string) *http.Request {
+				request := formPostCallback(cookie, state, strings.Repeat("a", 65<<10))
+				return request
+			},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			service, _, _ := newTestService(t, Identity{Issuer: "https://accounts.google.com", Subject: "owner-subject"})
+			cookie, state := beginLogin(t, service)
+			response := httptest.NewRecorder()
+			service.HandleCallback(response, test.request(cookie, state))
+			if response.Code != http.StatusUnauthorized || !strings.Contains(response.Body.String(), "oauth_state_invalid") {
+				t.Fatalf("invalid HTTPS callback returned %d: %s", response.Code, response.Body.String())
+			}
+
+			validResponse := httptest.NewRecorder()
+			service.HandleCallback(validResponse, formPostCallback(cookie, state, "valid-code"))
+			if validResponse.Code != http.StatusFound {
+				t.Fatalf("invalid callback consumed the pending attempt: %d: %s", validResponse.Code, validResponse.Body.String())
+			}
+		})
+	}
+}
+
+func TestLoopbackHTTPCallbackKeepsQueryModeForLocalDevelopment(t *testing.T) {
+	provider := &fakeProvider{identity: Identity{Issuer: "https://accounts.google.com", Subject: "owner-subject"}}
+	service, err := New(Config{
+		PublicOrigin: "http://localhost:3000", OwnerIssuer: "https://accounts.google.com", OwnerSubject: "owner-subject",
+		WorkspaceID: "owner-workspace", CredentialKey: make([]byte, 32),
+	}, provider, NewMemoryStore())
+	if err != nil {
+		t.Fatal(err)
+	}
+	cookie, state := beginLogin(t, service)
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/auth/callback?code=code&state="+url.QueryEscape(state), nil)
+	request.AddCookie(cookie)
+	response := httptest.NewRecorder()
+	service.HandleCallback(response, request)
+	if response.Code != http.StatusFound {
+		t.Fatalf("loopback query callback returned %d: %s", response.Code, response.Body.String())
 	}
 }
 

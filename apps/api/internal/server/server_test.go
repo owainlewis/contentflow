@@ -170,6 +170,36 @@ func TestConfiguredAPIRequiresAuthenticationBeforeWorkspaceRoutes(t *testing.T) 
 	}
 }
 
+func TestOAuthCallbackAcceptsFormPostWithoutQueryParameters(t *testing.T) {
+	service, err := auth.New(auth.Config{
+		PublicOrigin: "https://contentflow.example", OwnerIssuer: "https://accounts.google.com", OwnerSubject: "owner",
+		WorkspaceID: "workspace", CredentialKey: make([]byte, 32),
+	}, serverFakeOAuth{}, auth.NewMemoryStore())
+	if err != nil {
+		t.Fatal(err)
+	}
+	api := NewAPI(fakeChecker{"assets": nil}, service)
+	loginResponse := httptest.NewRecorder()
+	api.ServeHTTP(loginResponse, httptest.NewRequest(http.MethodGet, "/api/v1/auth/login", nil))
+	location, err := url.Parse(loginResponse.Header().Get("Location"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	loginCookies := loginResponse.Result().Cookies()
+	if len(loginCookies) == 0 {
+		t.Fatal("login cookie missing")
+	}
+	form := url.Values{"code": {"authorization-code"}, "state": {location.Query().Get("state")}}
+	callback := httptest.NewRequest(http.MethodPost, "/api/v1/auth/callback", strings.NewReader(form.Encode()))
+	callback.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	callback.AddCookie(loginCookies[0])
+	response := httptest.NewRecorder()
+	api.ServeHTTP(response, callback)
+	if response.Code != http.StatusFound || callback.URL.RawQuery != "" {
+		t.Fatalf("form-post callback returned %d with query %q: %s", response.Code, callback.URL.RawQuery, response.Body.String())
+	}
+}
+
 func TestRequestLogsExcludeCredentialsAndSensitiveContent(t *testing.T) {
 	var logs bytes.Buffer
 	previous := slog.Default()
