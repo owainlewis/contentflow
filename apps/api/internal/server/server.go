@@ -16,6 +16,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/owainlewis/contentflow/apps/api/internal/auth"
+	"github.com/owainlewis/contentflow/apps/api/internal/content"
 	"github.com/owainlewis/contentflow/apps/api/internal/health"
 )
 
@@ -32,6 +33,10 @@ type errorResponse struct {
 }
 
 func NewAPI(checker health.Checker, authentication *auth.Service) http.Handler {
+	return NewAPIWithContent(checker, authentication, nil)
+}
+
+func NewAPIWithContent(checker health.Checker, authentication *auth.Service, contentHandler *content.HTTPHandler) http.Handler {
 	router := chi.NewRouter()
 	router.Use(redactedRequestLogger)
 	router.Get("/health/live", func(response http.ResponseWriter, _ *http.Request) {
@@ -64,6 +69,9 @@ func NewAPI(checker health.Checker, authentication *auth.Service) http.Handler {
 			protected.Delete("/api/v1/tokens/{tokenID}", func(response http.ResponseWriter, request *http.Request) {
 				service.HandleRevokeToken(response, request, chi.URLParam(request, "tokenID"))
 			})
+			if contentHandler != nil {
+				contentHandler.Register(protected)
+			}
 			protected.Handle("/api/v1/*", http.HandlerFunc(notFound))
 		})
 	}

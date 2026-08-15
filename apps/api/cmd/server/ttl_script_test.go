@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-func TestFirestoreTTLScriptConfiguresEveryExpiringAuthCollection(t *testing.T) {
+func TestFirestoreTTLScriptConfiguresEveryExpiringCollection(t *testing.T) {
 	temporaryDirectory := t.TempDir()
 	logPath := filepath.Join(temporaryDirectory, "gcloud.log")
 	fakeGcloud := filepath.Join(temporaryDirectory, "gcloud")
@@ -28,10 +28,10 @@ func TestFirestoreTTLScriptConfiguresEveryExpiringAuthCollection(t *testing.T) {
 		t.Fatal(err)
 	}
 	lines := strings.Split(strings.TrimSpace(string(logged)), "\n")
-	if len(lines) != 3 {
-		t.Fatalf("TTL script ran %d commands, want 3: %q", len(lines), logged)
+	if len(lines) != 6 {
+		t.Fatalf("TTL script ran %d commands, want 6: %q", len(lines), logged)
 	}
-	for index, collection := range []string{"oauth_login_attempts", "sessions", "api_token_rate_limits"} {
+	for index, collection := range []string{"oauth_login_attempts", "sessions", "api_token_rate_limits", "content_items", "sections", "mutation_receipts"} {
 		for _, argument := range []string{
 			"firestore fields ttls update expires_at",
 			"--collection-group=" + collection,

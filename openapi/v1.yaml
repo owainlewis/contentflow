@@ -1,0 +1,467 @@
+openapi: 3.1.0
+info:
+  title: ContentFlow API
+  version: 1.0.0
+  description: Typed, workspace-scoped content persistence. JSON request bodies are limited to 1 MiB and text fields to 500 KiB of UTF-8.
+servers:
+  - url: /api/v1
+security:
+  - bearerToken: []
+  - sessionCookie: []
+paths:
+  /content:
+    get:
+      operationId: listContent
+      parameters:
+        - { name: type, in: query, schema: { $ref: '#/components/schemas/ContentType' } }
+        - { name: status, in: query, schema: { $ref: '#/components/schemas/ContentStatus' } }
+        - { name: q, in: query, description: Case-insensitive Unicode-normalized working-title prefix., schema: { type: string, x-max-utf8-bytes: 512000 } }
+      responses:
+        '200':
+          description: Summary-only results. Typed content, transcripts, sections, and signed URLs are never included.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/ContentSummary' } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    post:
+      operationId: createContent
+      description: Creates one item with a server-owned ULID, revision 1, and expiry exactly 56 days after server creation time.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CreateContentRequest' }
+      responses:
+        '201': { $ref: '#/components/responses/MutationCreated' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '413': { $ref: '#/components/responses/TooLarge' }
+  /content/{id}:
+    parameters:
+      - { $ref: '#/components/parameters/ContentID' }
+    get:
+      operationId: getContent
+      responses:
+        '200':
+          description: Complete typed item. YouTube sections are inline.
+          content: { application/json: { schema: { $ref: '#/components/schemas/ContentItem' } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      operationId: replaceContent
+      description: Full replacement. Omitted optional typed fields clear. Identity, discriminator, creation, and expiry cannot change. YouTube transcript is always required and may be an empty string.
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/ReplaceContentRequest' } } }
+      responses:
+        '200': { $ref: '#/components/responses/MutationOK' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '413': { $ref: '#/components/responses/TooLarge' }
+    delete:
+      operationId: deleteContent
+      description: Permanently removes the item and its section documents. Owner browser session only.
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/RevisionMutationRequest' } } }
+      responses:
+        '200': { $ref: '#/components/responses/MutationOK' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /content/{id}/transcript:
+    parameters:
+      - { $ref: '#/components/parameters/ContentID' }
+    get:
+      operationId: getYouTubeTranscript
+      description: Returns canonical transcript input only. It never returns metadata, description, or script sections and never falls back to the script.
+      responses:
+        '200':
+          description: Transcript-only response.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Transcript' } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409':
+          description: The transcript contains only Unicode whitespace.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Error' }, examples: { missing: { value: { error: transcript_missing } } } } }
+  /content/{id}/archive:
+    parameters:
+      - { $ref: '#/components/parameters/ContentID' }
+    post:
+      operationId: archiveContent
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/RevisionMutationRequest' } } }
+      responses:
+        '200': { $ref: '#/components/responses/MutationOK' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /content/{id}/restore:
+    parameters:
+      - { $ref: '#/components/parameters/ContentID' }
+    post:
+      operationId: restoreContent
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/RevisionMutationRequest' } } }
+      responses:
+        '200': { $ref: '#/components/responses/MutationOK' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+components:
+  securitySchemes:
+    bearerToken: { type: http, scheme: bearer }
+    sessionCookie: { type: apiKey, in: cookie, name: contentflow_session }
+  parameters:
+    ContentID:
+      name: id
+      in: path
+      required: true
+      schema: { $ref: '#/components/schemas/ULID' }
+  responses:
+    MutationCreated:
+      description: Bounded mutation result.
+      content: { application/json: { schema: { $ref: '#/components/schemas/MutationResult' } } }
+    MutationOK:
+      description: Bounded mutation result.
+      content: { application/json: { schema: { $ref: '#/components/schemas/MutationResult' } } }
+    BadRequest:
+      description: Invalid input, discriminator mismatch, or omitted YouTube transcript.
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+    Unauthorized:
+      description: Missing or invalid identity.
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+    Forbidden:
+      description: Insufficient scope or owner session required.
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+    NotFound:
+      description: Missing, expired, or out-of-workspace content.
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+    Conflict:
+      description: Revision conflict, operation ID conflict, or missing transcript. Revision conflicts include the current item.
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+    TooLarge:
+      description: JSON over 1 MiB, a text field over 500 KiB, a parent document over 900 KiB, or a Firestore document over its platform limit.
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+  schemas:
+    ULID:
+      type: string
+      pattern: '^[0-9A-HJKMNP-TV-Z]{26}$'
+    ContentType:
+      type: string
+      enum: [youtube, linkedin, x, instagram, tiktok, email, substack]
+    ContentStatus:
+      type: string
+      enum: [idea, draft, ready, published]
+    Text:
+      type: string
+      x-max-utf8-bytes: 512000
+    OperationID:
+      $ref: '#/components/schemas/ULID'
+    Section:
+      type: object
+      additionalProperties: false
+      required: [position]
+      properties:
+        id: { $ref: '#/components/schemas/ULID', description: Required for surviving sections on replacement; omitted for a new server-assigned section. }
+        position: { type: integer, minimum: 0 }
+        title: { $ref: '#/components/schemas/Text' }
+        body: { $ref: '#/components/schemas/Text' }
+    YouTubeContent:
+      type: object
+      additionalProperties: false
+      required: [transcript]
+      properties:
+        topic: { $ref: '#/components/schemas/Text' }
+        icp: { $ref: '#/components/schemas/Text' }
+        angle: { $ref: '#/components/schemas/Text' }
+        cta: { $ref: '#/components/schemas/Text' }
+        publishing_title: { $ref: '#/components/schemas/Text' }
+        description: { $ref: '#/components/schemas/Text' }
+        transcript: { $ref: '#/components/schemas/Text' }
+        sections: { type: array, maxItems: 200, items: { $ref: '#/components/schemas/Section' } }
+    LinkedInContent:
+      type: object
+      additionalProperties: false
+      properties: { body: { $ref: '#/components/schemas/Text' } }
+    XContent:
+      type: object
+      additionalProperties: false
+      properties: { body: { $ref: '#/components/schemas/Text' } }
+    InstagramContent:
+      type: object
+      additionalProperties: false
+      properties: { script: { $ref: '#/components/schemas/Text' } }
+    TikTokContent:
+      type: object
+      additionalProperties: false
+      properties: { script: { $ref: '#/components/schemas/Text' } }
+    EmailContent:
+      type: object
+      additionalProperties: false
+      properties:
+        subject: { $ref: '#/components/schemas/Text' }
+        body: { $ref: '#/components/schemas/Text' }
+    SubstackContent:
+      type: object
+      additionalProperties: false
+      properties:
+        headline: { $ref: '#/components/schemas/Text' }
+        subheadline: { $ref: '#/components/schemas/Text' }
+        body: { $ref: '#/components/schemas/Text' }
+    CreateCommon:
+      type: object
+      required: [type, working_title, status, operation_id, content]
+      properties:
+        type: { $ref: '#/components/schemas/ContentType' }
+        working_title: { $ref: '#/components/schemas/Text' }
+        status: { $ref: '#/components/schemas/ContentStatus' }
+        operation_id: { $ref: '#/components/schemas/OperationID' }
+    ReplaceCommon:
+      allOf:
+        - { $ref: '#/components/schemas/CreateCommon' }
+        - type: object
+          required: [revision]
+          properties: { revision: { type: integer, minimum: 1 } }
+    YouTubeCreate:
+      allOf:
+        - { $ref: '#/components/schemas/CreateCommon' }
+        - type: object
+          properties: { type: { const: youtube }, content: { $ref: '#/components/schemas/YouTubeContent' } }
+      unevaluatedProperties: false
+    LinkedInCreate:
+      allOf:
+        - { $ref: '#/components/schemas/CreateCommon' }
+        - type: object
+          properties: { type: { const: linkedin }, content: { $ref: '#/components/schemas/LinkedInContent' } }
+      unevaluatedProperties: false
+    XCreate:
+      allOf:
+        - { $ref: '#/components/schemas/CreateCommon' }
+        - type: object
+          properties: { type: { const: x }, content: { $ref: '#/components/schemas/XContent' } }
+      unevaluatedProperties: false
+    InstagramCreate:
+      allOf:
+        - { $ref: '#/components/schemas/CreateCommon' }
+        - type: object
+          properties: { type: { const: instagram }, content: { $ref: '#/components/schemas/InstagramContent' } }
+      unevaluatedProperties: false
+    TikTokCreate:
+      allOf:
+        - { $ref: '#/components/schemas/CreateCommon' }
+        - type: object
+          properties: { type: { const: tiktok }, content: { $ref: '#/components/schemas/TikTokContent' } }
+      unevaluatedProperties: false
+    EmailCreate:
+      allOf:
+        - { $ref: '#/components/schemas/CreateCommon' }
+        - type: object
+          properties: { type: { const: email }, content: { $ref: '#/components/schemas/EmailContent' } }
+      unevaluatedProperties: false
+    SubstackCreate:
+      allOf:
+        - { $ref: '#/components/schemas/CreateCommon' }
+        - type: object
+          properties: { type: { const: substack }, content: { $ref: '#/components/schemas/SubstackContent' } }
+      unevaluatedProperties: false
+    CreateContentRequest:
+      oneOf:
+        - { $ref: '#/components/schemas/YouTubeCreate' }
+        - { $ref: '#/components/schemas/LinkedInCreate' }
+        - { $ref: '#/components/schemas/XCreate' }
+        - { $ref: '#/components/schemas/InstagramCreate' }
+        - { $ref: '#/components/schemas/TikTokCreate' }
+        - { $ref: '#/components/schemas/EmailCreate' }
+        - { $ref: '#/components/schemas/SubstackCreate' }
+      discriminator:
+        propertyName: type
+        mapping:
+          youtube: '#/components/schemas/YouTubeCreate'
+          linkedin: '#/components/schemas/LinkedInCreate'
+          x: '#/components/schemas/XCreate'
+          instagram: '#/components/schemas/InstagramCreate'
+          tiktok: '#/components/schemas/TikTokCreate'
+          email: '#/components/schemas/EmailCreate'
+          substack: '#/components/schemas/SubstackCreate'
+    YouTubeReplace:
+      allOf:
+        - { $ref: '#/components/schemas/ReplaceCommon' }
+        - type: object
+          properties: { type: { const: youtube }, content: { $ref: '#/components/schemas/YouTubeContent' } }
+      unevaluatedProperties: false
+    LinkedInReplace:
+      allOf:
+        - { $ref: '#/components/schemas/ReplaceCommon' }
+        - type: object
+          properties: { type: { const: linkedin }, content: { $ref: '#/components/schemas/LinkedInContent' } }
+      unevaluatedProperties: false
+    XReplace:
+      allOf:
+        - { $ref: '#/components/schemas/ReplaceCommon' }
+        - type: object
+          properties: { type: { const: x }, content: { $ref: '#/components/schemas/XContent' } }
+      unevaluatedProperties: false
+    InstagramReplace:
+      allOf:
+        - { $ref: '#/components/schemas/ReplaceCommon' }
+        - type: object
+          properties: { type: { const: instagram }, content: { $ref: '#/components/schemas/InstagramContent' } }
+      unevaluatedProperties: false
+    TikTokReplace:
+      allOf:
+        - { $ref: '#/components/schemas/ReplaceCommon' }
+        - type: object
+          properties: { type: { const: tiktok }, content: { $ref: '#/components/schemas/TikTokContent' } }
+      unevaluatedProperties: false
+    EmailReplace:
+      allOf:
+        - { $ref: '#/components/schemas/ReplaceCommon' }
+        - type: object
+          properties: { type: { const: email }, content: { $ref: '#/components/schemas/EmailContent' } }
+      unevaluatedProperties: false
+    SubstackReplace:
+      allOf:
+        - { $ref: '#/components/schemas/ReplaceCommon' }
+        - type: object
+          properties: { type: { const: substack }, content: { $ref: '#/components/schemas/SubstackContent' } }
+      unevaluatedProperties: false
+    ReplaceContentRequest:
+      oneOf:
+        - { $ref: '#/components/schemas/YouTubeReplace' }
+        - { $ref: '#/components/schemas/LinkedInReplace' }
+        - { $ref: '#/components/schemas/XReplace' }
+        - { $ref: '#/components/schemas/InstagramReplace' }
+        - { $ref: '#/components/schemas/TikTokReplace' }
+        - { $ref: '#/components/schemas/EmailReplace' }
+        - { $ref: '#/components/schemas/SubstackReplace' }
+      discriminator: { propertyName: type }
+    RevisionMutationRequest:
+      type: object
+      additionalProperties: false
+      required: [operation_id, revision]
+      properties:
+        operation_id: { $ref: '#/components/schemas/OperationID' }
+        revision: { type: integer, minimum: 1 }
+    ServerFields:
+      type: object
+      required: [id, revision, created_at, updated_at, expires_at]
+      properties:
+        id: { $ref: '#/components/schemas/ULID' }
+        revision: { type: integer, minimum: 1 }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        expires_at: { type: string, format: date-time, description: Server-owned and fixed at creation plus 56 days. }
+        archived_at: { type: string, format: date-time }
+    ItemCommon:
+      type: object
+      required: [type, working_title, status, content]
+      properties:
+        type: { $ref: '#/components/schemas/ContentType' }
+        working_title: { type: string }
+        status: { $ref: '#/components/schemas/ContentStatus' }
+    YouTubeItem:
+      allOf:
+        - { $ref: '#/components/schemas/ServerFields' }
+        - { $ref: '#/components/schemas/ItemCommon' }
+        - type: object
+          properties: { type: { const: youtube }, content: { $ref: '#/components/schemas/YouTubeContent' } }
+      unevaluatedProperties: false
+    LinkedInItem:
+      allOf:
+        - { $ref: '#/components/schemas/ServerFields' }
+        - { $ref: '#/components/schemas/ItemCommon' }
+        - type: object
+          properties: { type: { const: linkedin }, content: { $ref: '#/components/schemas/LinkedInContent' } }
+      unevaluatedProperties: false
+    XItem:
+      allOf:
+        - { $ref: '#/components/schemas/ServerFields' }
+        - { $ref: '#/components/schemas/ItemCommon' }
+        - type: object
+          properties: { type: { const: x }, content: { $ref: '#/components/schemas/XContent' } }
+      unevaluatedProperties: false
+    InstagramItem:
+      allOf:
+        - { $ref: '#/components/schemas/ServerFields' }
+        - { $ref: '#/components/schemas/ItemCommon' }
+        - type: object
+          properties: { type: { const: instagram }, content: { $ref: '#/components/schemas/InstagramContent' } }
+      unevaluatedProperties: false
+    TikTokItem:
+      allOf:
+        - { $ref: '#/components/schemas/ServerFields' }
+        - { $ref: '#/components/schemas/ItemCommon' }
+        - type: object
+          properties: { type: { const: tiktok }, content: { $ref: '#/components/schemas/TikTokContent' } }
+      unevaluatedProperties: false
+    EmailItem:
+      allOf:
+        - { $ref: '#/components/schemas/ServerFields' }
+        - { $ref: '#/components/schemas/ItemCommon' }
+        - type: object
+          properties: { type: { const: email }, content: { $ref: '#/components/schemas/EmailContent' } }
+      unevaluatedProperties: false
+    SubstackItem:
+      allOf:
+        - { $ref: '#/components/schemas/ServerFields' }
+        - { $ref: '#/components/schemas/ItemCommon' }
+        - type: object
+          properties: { type: { const: substack }, content: { $ref: '#/components/schemas/SubstackContent' } }
+      unevaluatedProperties: false
+    ContentItem:
+      oneOf:
+        - { $ref: '#/components/schemas/YouTubeItem' }
+        - { $ref: '#/components/schemas/LinkedInItem' }
+        - { $ref: '#/components/schemas/XItem' }
+        - { $ref: '#/components/schemas/InstagramItem' }
+        - { $ref: '#/components/schemas/TikTokItem' }
+        - { $ref: '#/components/schemas/EmailItem' }
+        - { $ref: '#/components/schemas/SubstackItem' }
+      discriminator: { propertyName: type }
+    ContentSummary:
+      type: object
+      additionalProperties: false
+      required: [id, type, status, working_title, revision, created_at, updated_at, expires_at, asset_counts]
+      properties:
+        id: { $ref: '#/components/schemas/ULID' }
+        type: { $ref: '#/components/schemas/ContentType' }
+        status: { $ref: '#/components/schemas/ContentStatus' }
+        working_title: { type: string }
+        revision: { type: integer, minimum: 1 }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        expires_at: { type: string, format: date-time }
+        archived_at: { type: string, format: date-time }
+        asset_counts: { type: object, additionalProperties: { type: integer, minimum: 0 } }
+    Transcript:
+      type: object
+      additionalProperties: false
+      required: [id, revision, transcript]
+      properties:
+        id: { $ref: '#/components/schemas/ULID' }
+        revision: { type: integer, minimum: 1 }
+        transcript: { $ref: '#/components/schemas/Text' }
+    MutationResult:
+      type: object
+      additionalProperties: false
+      required: [operation_id, item_ids, revisions, expires_at, status]
+      properties:
+        operation_id: { $ref: '#/components/schemas/OperationID' }
+        item_ids: { type: array, maxItems: 1, items: { $ref: '#/components/schemas/ULID' } }
+        revisions: { type: array, maxItems: 1, items: { type: integer, minimum: 1 } }
+        expires_at: { type: array, maxItems: 1, items: { type: string, format: date-time } }
+        status: { type: string, enum: [created, updated, archived, restored, deleted] }
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error: { type: string }
+        current: { $ref: '#/components/schemas/ContentItem' }
