@@ -71,6 +71,14 @@ func TestProductionRequiresHTTPSPublicOrigin(t *testing.T) {
 	}
 }
 
+func TestProductionRequiresHTTPSOAuthIssuer(t *testing.T) {
+	cfg := productionConfig(t)
+	cfg.OAuthIssuer = "http://accounts.example"
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected plaintext production OAuth issuer to fail")
+	}
+}
+
 func TestAuthenticatedNonProductionOriginMustBeHTTPSOrLoopback(t *testing.T) {
 	cfg := productionConfig(t)
 	cfg.Environment = "staging"

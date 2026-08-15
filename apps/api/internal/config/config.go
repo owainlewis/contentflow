@@ -97,6 +97,10 @@ func (c Config) Validate() error {
 		if err != nil || origin.Scheme != "https" || origin.Host == "" || (origin.Path != "" && origin.Path != "/") || origin.RawQuery != "" || origin.Fragment != "" {
 			return fmt.Errorf("CONTENTFLOW_PUBLIC_ORIGIN must be an HTTPS origin in production")
 		}
+		issuer, err := url.Parse(c.OAuthIssuer)
+		if err != nil || issuer.Scheme != "https" || issuer.Host == "" || issuer.User != nil || issuer.RawQuery != "" || issuer.Fragment != "" {
+			return fmt.Errorf("CONTENTFLOW_OAUTH_ISSUER must use HTTPS in production")
+		}
 	}
 	return nil
 }

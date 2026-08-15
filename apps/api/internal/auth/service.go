@@ -282,10 +282,11 @@ func (s *Service) Authorize(next http.Handler) http.Handler {
 func (s *Service) authenticate(request *http.Request) (Principal, int, string) {
 	authorization := request.Header.Get("Authorization")
 	if authorization != "" {
-		if !strings.HasPrefix(authorization, "Bearer ") || len(strings.TrimSpace(strings.TrimPrefix(authorization, "Bearer "))) == 0 {
+		scheme, credential, found := strings.Cut(authorization, " ")
+		if !found || !strings.EqualFold(scheme, "Bearer") || len(strings.TrimSpace(credential)) == 0 {
 			return Principal{}, http.StatusUnauthorized, "invalid_bearer_token"
 		}
-		raw := strings.TrimSpace(strings.TrimPrefix(authorization, "Bearer "))
+		raw := strings.TrimSpace(credential)
 		hash := sha256.Sum256([]byte(raw))
 		token, err := s.store.TokenByHash(request.Context(), hash)
 		if err != nil {

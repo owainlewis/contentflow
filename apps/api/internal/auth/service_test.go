@@ -344,6 +344,18 @@ func TestEachTokenScopeIsEnforcedIndependently(t *testing.T) {
 	}
 }
 
+func TestBearerAuthenticationSchemeIsCaseInsensitive(t *testing.T) {
+	service, store, _ := newTestService(t, Identity{})
+	_, raw := createToken(t, service, store, `["content:read"]`)
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/content", nil)
+	request.Header.Set("Authorization", "bearer "+raw)
+	response := httptest.NewRecorder()
+	protectedHandler(service).ServeHTTP(response, request)
+	if response.Code != http.StatusNoContent {
+		t.Fatalf("lowercase bearer scheme returned %d: %s", response.Code, response.Body.String())
+	}
+}
+
 func TestAPIClientsAreLimitedTo120RequestsPerMinute(t *testing.T) {
 	service, store, _ := newTestService(t, Identity{})
 	_, raw := createToken(t, service, store, `["content:read"]`)
