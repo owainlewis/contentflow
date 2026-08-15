@@ -3,7 +3,10 @@ package content
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -62,6 +65,116 @@ func TestServicePersistsEveryTypeAndReturnsSummaryOnlySearch(t *testing.T) {
 		if strings.Contains(string(encoded), `"`+forbidden+`"`) {
 			t.Fatalf("summary leaked %s: %s", forbidden, encoded)
 		}
+	}
+}
+
+func TestBatchCreateIsAtomicIdempotentBoundedAndWorkspaceScoped(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryStore()
+	service := NewService(store)
+	now := time.Date(2026, 8, 15, 12, 0, 0, 123456789, time.UTC)
+	service.now = func() time.Time { return now }
+	operationID := testOperationID()
+	items := make([]BatchItemRequest, MaxBatchItems)
+	for index := range items {
+		items[index] = BatchItemRequest{Type: TypeX, WorkingTitle: "Draft", Status: StatusDraft, Content: XContent{Body: "post"}}
+	}
+	request := BatchRequest{OperationID: operationID, Items: items}
+
+	const retryCount = 20
+	results := make([]MutationResult, retryCount)
+	errorsByRetry := make([]error, retryCount)
+	var wait sync.WaitGroup
+	for index := range results {
+		wait.Add(1)
+		go func() {
+			defer wait.Done()
+			results[index], errorsByRetry[index] = service.BatchCreate(ctx, "workspace-a", request, "same-bytes")
+		}()
+	}
+	wait.Wait()
+	for index := range results {
+		if errorsByRetry[index] != nil || !reflect.DeepEqual(results[index], results[0]) {
+			t.Fatalf("retry %d returned %#v, %v; first %#v", index, results[index], errorsByRetry[index], results[0])
+		}
+	}
+	if len(results[0].ItemIDs) != MaxBatchItems || len(results[0].Revisions) != MaxBatchItems || len(results[0].ExpiresAt) != MaxBatchItems {
+		t.Fatalf("batch result is incomplete: %#v", results[0])
+	}
+	for index := range results[0].ItemIDs {
+		if results[0].Revisions[index] != 1 || !results[0].ExpiresAt[index].Equal(now.Truncate(time.Microsecond).Add(ContentLifetime)) {
+			t.Fatalf("result %d has wrong revision or expiry", index)
+		}
+	}
+	listed, err := service.List(ctx, "workspace-a", ListQuery{})
+	if err != nil || len(listed) != MaxBatchItems {
+		t.Fatalf("matching retries created %d items: %v", len(listed), err)
+	}
+
+	_, err = service.BatchCreate(ctx, "workspace-a", request, "different-bytes")
+	assertErrorCode(t, err, "operation_id_conflict")
+	otherWorkspace, err := service.BatchCreate(ctx, "workspace-b", request, "different-bytes")
+	if err != nil || reflect.DeepEqual(otherWorkspace.ItemIDs, results[0].ItemIDs) {
+		t.Fatalf("workspace-scoped key returned %#v, %v", otherWorkspace, err)
+	}
+	if _, err := service.Get(ctx, "workspace-b", results[0].ItemIDs[0]); err == nil {
+		t.Fatal("batch item escaped workspace scope")
+	}
+
+	receipt := store.receipts[memoryKey("workspace-a", operationID)]
+	if !receipt.Expires.Equal(now.Truncate(time.Microsecond).Add(ReceiptLifetime)) {
+		t.Fatalf("receipt expiry is %s", receipt.Expires)
+	}
+	encoded, err := json.Marshal(receipt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, forbidden := range []string{"post", "Draft", "content", "source", "provenance"} {
+		if strings.Contains(strings.ToLower(string(encoded)), strings.ToLower(forbidden)) {
+			t.Fatalf("receipt leaked %q: %s", forbidden, encoded)
+		}
+	}
+	if err := validateReceiptSize(receipt); err != nil {
+		t.Fatalf("50-item receipt exceeded Firestore limit: %v", err)
+	}
+
+	now = receipt.Expires
+	expiredRequest := BatchRequest{OperationID: operationID, Items: []BatchItemRequest{{Type: TypeEmail, WorkingTitle: "After receipt expiry", Status: StatusDraft, Content: EmailContent{Body: "new"}}}}
+	expiredResult, err := service.BatchCreate(ctx, "workspace-a", expiredRequest, "new-bytes-after-expiry")
+	if err != nil || expiredResult.ItemIDs[0] == results[0].ItemIDs[0] {
+		t.Fatalf("expired receipt was not replaceable: %#v, %v", expiredResult, err)
+	}
+}
+
+type failingBatchStore struct{ *MemoryStore }
+
+func (s failingBatchStore) BatchCreate(context.Context, []Item, Receipt) (MutationResult, error) {
+	return MutationResult{}, unavailable(errors.New("transaction failed"))
+}
+
+func TestBatchValidationAndTransactionFailuresCreateNothing(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryStore()
+	service := NewService(store)
+	invalidOperation := testOperationID()
+	invalid := BatchRequest{OperationID: invalidOperation, Items: []BatchItemRequest{
+		{Type: TypeX, WorkingTitle: "Valid", Status: StatusDraft, Content: XContent{Body: "post"}},
+		{Type: TypeX, WorkingTitle: "", Status: StatusDraft, Content: XContent{Body: "invalid"}},
+	}}
+	_, err := service.BatchCreate(ctx, "workspace", invalid, "invalid")
+	assertErrorCode(t, err, "working_title_required")
+	if len(store.items) != 0 || len(store.receipts) != 0 {
+		t.Fatalf("validation failure wrote state: %d items, %d receipts", len(store.items), len(store.receipts))
+	}
+
+	failing := failingBatchStore{MemoryStore: store}
+	service = NewService(failing)
+	operationID := testOperationID()
+	valid := BatchRequest{OperationID: operationID, Items: []BatchItemRequest{{Type: TypeX, WorkingTitle: "Valid", Status: StatusDraft, Content: XContent{Body: "post"}}}}
+	_, err = service.BatchCreate(ctx, "workspace", valid, "valid")
+	assertErrorCode(t, err, "content_unavailable")
+	if len(store.items) != 0 || len(store.receipts) != 0 {
+		t.Fatalf("transaction failure wrote state: %d items, %d receipts", len(store.items), len(store.receipts))
 	}
 }
 

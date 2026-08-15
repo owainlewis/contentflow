@@ -52,6 +52,39 @@ func TestDecodeCreateAcceptsEveryTypedPayloadAndRejectsMismatches(t *testing.T) 
 	}
 }
 
+func TestDecodeBatchEnforcesOneKeyBoundariesAndStandaloneItems(t *testing.T) {
+	operationID := testOperationID()
+	item := `{"type":"x","working_title":"Draft","status":"draft","content":{"body":"post"}}`
+	for _, count := range []int{1, MaxBatchItems} {
+		items := make([]string, count)
+		for index := range items {
+			items[index] = item
+		}
+		request, err := DecodeBatch([]byte(`{"operation_id":"` + operationID + `","items":[` + strings.Join(items, ",") + `]}`))
+		if err != nil || len(request.Items) != count {
+			t.Fatalf("decode %d items: %#v, %v", count, request, err)
+		}
+	}
+
+	tooMany := make([]string, MaxBatchItems+1)
+	for index := range tooMany {
+		tooMany[index] = item
+	}
+	invalid := []struct{ name, raw, code string }{
+		{"empty", `{"operation_id":"` + operationID + `","items":[]}`, "invalid_batch_size"},
+		{"too many", `{"operation_id":"` + operationID + `","items":[` + strings.Join(tooMany, ",") + `]}`, "invalid_batch_size"},
+		{"per-item operation", `{"operation_id":"` + operationID + `","items":[{"type":"x","working_title":"Draft","status":"draft","operation_id":"` + testOperationID() + `","content":{"body":"post"}}]}`, "invalid_request"},
+		{"invalid later item", `{"operation_id":"` + operationID + `","items":[` + item + `,{"type":"x","working_title":"","status":"draft","content":{"body":"post"}}]}`, "working_title_required"},
+		{"youtube sections", `{"operation_id":"` + operationID + `","items":[{"type":"youtube","working_title":"Video","status":"draft","content":{"transcript":"spoken","sections":[{"position":0,"title":"Intro","body":"script"}]}}]}`, "batch_item_not_standalone"},
+	}
+	for _, test := range invalid {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := DecodeBatch([]byte(test.raw))
+			assertErrorCode(t, err, test.code)
+		})
+	}
+}
+
 func TestTextAndEncodedDocumentLimits(t *testing.T) {
 	maxText := strings.Repeat("x", MaxTextBytes)
 	request := CreateRequest{Type: TypeYouTube, WorkingTitle: "Title", Status: StatusDraft, OperationID: testOperationID(), Content: YouTubeContent{Transcript: maxText, Sections: []Section{}}}

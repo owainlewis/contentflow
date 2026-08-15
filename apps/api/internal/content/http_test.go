@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -53,6 +54,14 @@ func performAPI(api http.Handler, token, method, path, body string) *httptest.Re
 	response := httptest.NewRecorder()
 	api.ServeHTTP(response, request)
 	return response
+}
+
+func batchRequestBody(operationID string, count int) string {
+	items := make([]string, count)
+	for index := range items {
+		items[index] = `{"type":"x","working_title":"Draft","status":"draft","content":{"body":"post"}}`
+	}
+	return `{"operation_id":"` + operationID + `","items":[` + strings.Join(items, ",") + `]}`
 }
 
 func TestAuthenticatedHTTPContentContract(t *testing.T) {
@@ -157,6 +166,65 @@ func TestHTTPRejectsDiscriminatorsAndEveryByteLimit(t *testing.T) {
 	response := performAPI(api, token, http.MethodPost, "/api/v1/content", overRequestLimit)
 	if response.Code != http.StatusRequestEntityTooLarge || !strings.Contains(response.Body.String(), "request_too_large") {
 		t.Fatalf("oversized request returned %d: %s", response.Code, response.Body.String())
+	}
+}
+
+func TestHTTPBatchBoundariesAtomicityAndConcurrentByteStableRetries(t *testing.T) {
+	api, token := newContentAPI(t)
+	one := performAPI(api, token, http.MethodPost, "/api/v1/content/batches", batchRequestBody(ulid.Make().String(), 1))
+	if one.Code != http.StatusCreated {
+		t.Fatalf("one-item batch returned %d: %s", one.Code, one.Body.String())
+	}
+
+	operationID := ulid.Make().String()
+	body := batchRequestBody(operationID, content.MaxBatchItems)
+	const retries = 16
+	responses := make([]*httptest.ResponseRecorder, retries)
+	var wait sync.WaitGroup
+	for index := range responses {
+		wait.Add(1)
+		go func() {
+			defer wait.Done()
+			responses[index] = performAPI(api, token, http.MethodPost, "/api/v1/content/batches", body)
+		}()
+	}
+	wait.Wait()
+	firstBody := responses[0].Body.String()
+	for index, response := range responses {
+		if response.Code != http.StatusCreated || response.Body.String() != firstBody {
+			t.Fatalf("retry %d returned %d %s, want byte-stable %s", index, response.Code, response.Body.String(), firstBody)
+		}
+	}
+	var result content.MutationResult
+	if err := json.Unmarshal([]byte(firstBody), &result); err != nil || len(result.ItemIDs) != content.MaxBatchItems {
+		t.Fatalf("50-item result is %#v: %v", result, err)
+	}
+
+	conflict := performAPI(api, token, http.MethodPost, "/api/v1/content/batches", strings.Replace(body, `"body":"post"`, `"body":"changed"`, 1))
+	if conflict.Code != http.StatusConflict || !strings.Contains(conflict.Body.String(), "operation_id_conflict") {
+		t.Fatalf("conflicting reuse returned %d: %s", conflict.Code, conflict.Body.String())
+	}
+	tooMany := performAPI(api, token, http.MethodPost, "/api/v1/content/batches", batchRequestBody(ulid.Make().String(), content.MaxBatchItems+1))
+	if tooMany.Code != http.StatusBadRequest || !strings.Contains(tooMany.Body.String(), "invalid_batch_size") {
+		t.Fatalf("51-item batch returned %d: %s", tooMany.Code, tooMany.Body.String())
+	}
+	invalidOperation := ulid.Make().String()
+	invalidBody := `{"operation_id":"` + invalidOperation + `","items":[{"type":"x","working_title":"Would roll back","status":"draft","content":{"body":"first"}},{"type":"x","working_title":"","status":"draft","content":{"body":"invalid"}}]}`
+	invalid := performAPI(api, token, http.MethodPost, "/api/v1/content/batches", invalidBody)
+	if invalid.Code != http.StatusBadRequest || !strings.Contains(invalid.Body.String(), "working_title_required") {
+		t.Fatalf("invalid batch returned %d: %s", invalid.Code, invalid.Body.String())
+	}
+	perItemKey := performAPI(api, token, http.MethodPost, "/api/v1/content/batches", `{"operation_id":"`+ulid.Make().String()+`","items":[{"type":"x","working_title":"Draft","status":"draft","operation_id":"`+ulid.Make().String()+`","content":{"body":"post"}}]}`)
+	if perItemKey.Code != http.StatusBadRequest || !strings.Contains(perItemKey.Body.String(), "invalid_request") {
+		t.Fatalf("per-item idempotency key returned %d: %s", perItemKey.Code, perItemKey.Body.String())
+	}
+
+	list := performAPI(api, token, http.MethodGet, "/api/v1/content", "")
+	var listed struct {
+		Items []content.Summary `json:"items"`
+	}
+	if list.Code != http.StatusOK || json.NewDecoder(list.Body).Decode(&listed) != nil || len(listed.Items) != content.MaxBatchItems+1 {
+		t.Fatalf("failed batches changed content count: %d %s", list.Code, list.Body.String())
 	}
 }
 

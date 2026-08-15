@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-func TestOpenAPIContainsTypedReplacementAndSummaryContracts(t *testing.T) {
+func TestOpenAPIContainsTypedReplacementSummaryAndBatchContracts(t *testing.T) {
 	path := filepath.Join("..", "..", "..", "..", "openapi", "v1.yaml")
 	contents, err := os.ReadFile(path)
 	if err != nil {
@@ -19,6 +19,9 @@ func TestOpenAPIContainsTypedReplacementAndSummaryContracts(t *testing.T) {
 		"openapi: 3.1.0", "/content/{id}/transcript:", "transcript_missing", "ReplaceContentRequest:",
 		"unevaluatedProperties: false", "x-max-utf8-bytes: 512000", "Summary-only results",
 		"JSON over 1 MiB", "parent document over 900 KiB", "maxItems: 200",
+		"/content/batches:", "BatchCreateRequest:", "BatchMutationResult:", "minItems: 1",
+		"maxItems: 50", "maxItems: 0", "sole idempotency key", "24 hours",
+		"No item or completed receipt is created", "source links, or provenance",
 	} {
 		if !strings.Contains(contract, required) {
 			t.Fatalf("OpenAPI is missing %q", required)
@@ -29,14 +32,22 @@ func TestOpenAPIContainsTypedReplacementAndSummaryContracts(t *testing.T) {
 			t.Fatalf("OpenAPI lacks strict %s discriminator", contentType)
 		}
 	}
-	if strings.Contains(contract, "/content/batches:") {
-		t.Fatal("out-of-scope batch endpoint is documented")
-	}
 	if !strings.Contains(contract, "required: [transcript]") || strings.Contains(contract, "required: [topic, icp, angle, cta, publishing_title, description, transcript, sections]") {
 		t.Fatal("OpenAPI does not match optional YouTube replacement fields")
 	}
 	if !strings.Contains(contract, "required: [position]") || strings.Contains(contract, "required: [position, title, body]") {
 		t.Fatal("OpenAPI does not match optional section text replacement fields")
+	}
+	batchStart := strings.Index(contract, "  /content/batches:")
+	batchEnd := strings.Index(contract[batchStart+1:], "\n  /content/")
+	if batchStart < 0 || batchEnd < 0 {
+		t.Fatal("OpenAPI batch path is not independently defined")
+	}
+	batchPath := contract[batchStart : batchStart+1+batchEnd]
+	for _, required := range []string{"operationId: batchCreateContent", "BatchCreateRequest", "BatchMutationCreated", "'400'", "'401'", "'403'", "'409'", "'413'", "'429'", "'503'", "TooManyRequests"} {
+		if !strings.Contains(batchPath, required) {
+			t.Fatalf("OpenAPI batch path is missing %q", required)
+		}
 	}
 }
 

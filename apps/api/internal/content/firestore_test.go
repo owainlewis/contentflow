@@ -5,6 +5,7 @@ import (
 	"os"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 	"unicode"
@@ -284,4 +285,159 @@ func TestFirestoreContentContract(t *testing.T) {
 	if err != nil || len(items) != 0 {
 		t.Fatalf("expired item remained in search: %#v, %v", items, err)
 	}
+}
+
+func TestFirestoreBatchContract(t *testing.T) {
+	if os.Getenv("FIRESTORE_EMULATOR_HOST") == "" {
+		t.Skip("FIRESTORE_EMULATOR_HOST is not set")
+	}
+	ctx := contentEmulatorContext(t)
+	client, err := firestore.NewClient(ctx, "contentflow-batch-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = client.Close() })
+	store := NewFirestoreStore(client)
+	service := NewService(store)
+	now := time.Date(2026, 8, 15, 12, 0, 0, 123456789, time.UTC)
+	service.now = func() time.Time { return now }
+	workspace := "batch-workspace-" + testOperationID()
+
+	oneOperation := testOperationID()
+	one, err := service.BatchCreate(ctx, workspace, batchRequest(oneOperation, 1, "one"), "one-bytes")
+	if err != nil || len(one.ItemIDs) != 1 {
+		t.Fatalf("one-item boundary: %#v, %v", one, err)
+	}
+	fiftyOperation := testOperationID()
+	fifty, err := service.BatchCreate(ctx, workspace, batchRequest(fiftyOperation, MaxBatchItems, "fifty"), "fifty-bytes")
+	if err != nil || len(fifty.ItemIDs) != MaxBatchItems {
+		t.Fatalf("50-item boundary: %d items, %v", len(fifty.ItemIDs), err)
+	}
+	listed, err := service.List(ctx, workspace, ListQuery{})
+	if err != nil || len(listed) != MaxBatchItems+1 {
+		t.Fatalf("atomic boundaries stored %d items: %v", len(listed), err)
+	}
+
+	fiftyReceipt, err := store.receiptRef(workspace, fiftyOperation).Get(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	receiptData := fiftyReceipt.Data()
+	for _, forbidden := range []string{"content", "transcript", "sections", "body", "source", "provenance", "response"} {
+		if _, present := receiptData[forbidden]; present {
+			t.Fatalf("batch receipt stores forbidden %s: %#v", forbidden, receiptData)
+		}
+	}
+	if size, err := encodedFirestoreSize(receiptData); err != nil || size >= MaxFirestoreBytes {
+		t.Fatalf("50-item receipt is not bounded: %d, %v", size, err)
+	}
+	receiptExpiry := receiptData["expires_at"].(time.Time)
+	if !receiptExpiry.Equal(now.Truncate(time.Microsecond).Add(ReceiptLifetime)) {
+		t.Fatalf("receipt expires at %s", receiptExpiry)
+	}
+
+	invalidOperation := testOperationID()
+	invalid := BatchRequest{OperationID: invalidOperation, Items: []BatchItemRequest{
+		{Type: TypeX, WorkingTitle: "Would roll back", Status: StatusDraft, Content: XContent{Body: "first"}},
+		{Type: TypeX, WorkingTitle: "", Status: StatusDraft, Content: XContent{Body: "invalid"}},
+	}}
+	_, err = service.BatchCreate(ctx, workspace, invalid, "invalid-bytes")
+	assertErrorCode(t, err, "working_title_required")
+	if _, err := store.receiptRef(workspace, invalidOperation).Get(ctx); !firestoreNotFound(err) {
+		t.Fatalf("validation failure created a receipt: %v", err)
+	}
+	tooManyOperation := testOperationID()
+	_, err = service.BatchCreate(ctx, workspace, batchRequest(tooManyOperation, MaxBatchItems+1, "too-many"), "too-many-bytes")
+	assertErrorCode(t, err, "invalid_batch_size")
+	if _, err := store.receiptRef(workspace, tooManyOperation).Get(ctx); !firestoreNotFound(err) {
+		t.Fatalf("51-item rejection created a receipt: %v", err)
+	}
+	listed, err = service.List(ctx, workspace, ListQuery{})
+	if err != nil || len(listed) != MaxBatchItems+1 {
+		t.Fatalf("validation failure changed item count to %d: %v", len(listed), err)
+	}
+
+	concurrentOperation := testOperationID()
+	concurrentRequest := batchRequest(concurrentOperation, 3, "concurrent")
+	const retries = 10
+	results := make([]MutationResult, retries)
+	errorsByRetry := make([]error, retries)
+	var wait sync.WaitGroup
+	for index := range results {
+		wait.Add(1)
+		go func() {
+			defer wait.Done()
+			results[index], errorsByRetry[index] = service.BatchCreate(ctx, workspace, concurrentRequest, "matching-bytes")
+		}()
+	}
+	wait.Wait()
+	for index := range results {
+		if errorsByRetry[index] != nil || !reflect.DeepEqual(results[index], results[0]) {
+			t.Fatalf("concurrent retry %d returned %#v, %v; first %#v", index, results[index], errorsByRetry[index], results[0])
+		}
+	}
+	listed, err = service.List(ctx, workspace, ListQuery{TitlePrefix: "concurrent"})
+	if err != nil || len(listed) != 3 {
+		t.Fatalf("matching retries stored %d items: %v", len(listed), err)
+	}
+	_, err = service.BatchCreate(ctx, workspace, concurrentRequest, "conflicting-bytes")
+	assertErrorCode(t, err, "operation_id_conflict")
+
+	otherWorkspace := workspace + "-other"
+	other, err := service.BatchCreate(ctx, otherWorkspace, concurrentRequest, "conflicting-bytes")
+	if err != nil || reflect.DeepEqual(other.ItemIDs, results[0].ItemIDs) {
+		t.Fatalf("workspace-scoped operation returned %#v, %v", other, err)
+	}
+	if _, err := service.Get(ctx, otherWorkspace, results[0].ItemIDs[0]); err == nil {
+		t.Fatal("batch content escaped workspace scope")
+	}
+
+	now = receiptExpiry
+	afterExpiry := BatchRequest{OperationID: fiftyOperation, Items: []BatchItemRequest{{Type: TypeEmail, WorkingTitle: "After expiry", Status: StatusDraft, Content: EmailContent{Body: "new"}}}}
+	afterExpiryResult, err := service.BatchCreate(ctx, workspace, afterExpiry, "new-bytes-after-expiry")
+	if err != nil || afterExpiryResult.ItemIDs[0] == fifty.ItemIDs[0] {
+		t.Fatalf("expired receipt remained binding: %#v, %v", afterExpiryResult, err)
+	}
+
+	rollbackOperation := testOperationID()
+	firstID := testOperationID()
+	existingID := one.ItemIDs[0]
+	transactionItems := []Item{
+		batchStoredItem(firstID, workspace, "Transaction first", now),
+		batchStoredItem(existingID, workspace, "Collision", now),
+	}
+	rollbackResult := MutationResult{
+		OperationID: rollbackOperation,
+		ItemIDs:     []string{firstID, existingID},
+		Revisions:   []int64{1, 1},
+		ExpiresAt:   []time.Time{transactionItems[0].ExpiresAt, transactionItems[1].ExpiresAt},
+		Status:      "created",
+	}
+	rollbackReceipt := newReceipt(workspace, "rollback-bytes", "batch_create", 201, rollbackResult, now)
+	_, err = store.BatchCreate(ctx, transactionItems, rollbackReceipt)
+	assertErrorCode(t, err, "content_unavailable")
+	if _, err := store.Get(ctx, workspace, firstID, now); err == nil {
+		t.Fatal("failed transaction wrote its first item")
+	}
+	if _, err := store.receiptRef(workspace, rollbackOperation).Get(ctx); !firestoreNotFound(err) {
+		t.Fatalf("failed transaction created a receipt: %v", err)
+	}
+}
+
+func batchRequest(operationID string, count int, title string) BatchRequest {
+	items := make([]BatchItemRequest, count)
+	for index := range items {
+		items[index] = BatchItemRequest{Type: TypeX, WorkingTitle: title, Status: StatusDraft, Content: XContent{Body: "post"}}
+	}
+	return BatchRequest{OperationID: operationID, Items: items}
+}
+
+func batchStoredItem(id, workspace, title string, now time.Time) Item {
+	item := Item{
+		ID: id, WorkspaceID: workspace, Type: TypeX, Status: StatusDraft,
+		WorkingTitle: title, NormalizedWorkingTitle: NormalizeTitle(title), Revision: 1,
+		CreatedAt: now, UpdatedAt: now, ExpiresAt: now.Add(ContentLifetime), Content: XContent{Body: "post"},
+	}
+	item.SearchableWorkingTitle = SearchableTitle(item.NormalizedWorkingTitle)
+	return item
 }

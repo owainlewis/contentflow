@@ -103,6 +103,48 @@ func (s *FirestoreStore) Create(ctx context.Context, item Item, receipt Receipt)
 	return result, nil
 }
 
+func (s *FirestoreStore) BatchCreate(ctx context.Context, items []Item, receipt Receipt) (MutationResult, error) {
+	parents := make([]parentDocument, len(items))
+	for index, item := range items {
+		parent, err := toParentDocument(item)
+		if err != nil {
+			return MutationResult{}, unavailable(err)
+		}
+		parents[index] = parent
+	}
+	var result MutationResult
+	err := s.client.RunTransaction(ctx, func(ctx context.Context, transaction *firestore.Transaction) error {
+		if replay, found, err := s.transactionReceipt(transaction, receipt); found || err != nil {
+			result = replay
+			return err
+		}
+		itemRefs := make([]*firestore.DocumentRef, len(items))
+		for index, item := range items {
+			itemRef := s.client.Collection(contentItemsCollection).Doc(item.ID)
+			if _, err := transaction.Get(itemRef); err == nil {
+				return unavailable(errIDCollision{})
+			} else if !firestoreNotFound(err) {
+				return err
+			}
+			itemRefs[index] = itemRef
+		}
+		for index, itemRef := range itemRefs {
+			if err := transaction.Create(itemRef, parents[index]); err != nil {
+				return err
+			}
+		}
+		if err := transaction.Set(s.receiptRef(receipt.WorkspaceID, receipt.OperationID), receiptToDocument(receipt)); err != nil {
+			return err
+		}
+		result = receipt.MutationResult
+		return nil
+	})
+	if err != nil {
+		return MutationResult{}, translateFirestoreError(err)
+	}
+	return result, nil
+}
+
 func (s *FirestoreStore) Replace(ctx context.Context, item Item, revision int64, receipt Receipt) (MutationResult, error) {
 	parent, err := toParentDocument(item)
 	if err != nil {
