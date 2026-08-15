@@ -168,22 +168,20 @@ func TestFirestoreRateLimitDoesNotOverAdmitDuringConcurrentRetries(t *testing.T)
 	var allowed atomic.Int64
 	var limited atomic.Int64
 	var wait sync.WaitGroup
-	for worker := range 8 {
+	for worker := range 160 {
 		wait.Add(1)
 		go func() {
 			defer wait.Done()
 			<-start
-			for range 20 {
-				accepted, err := stores[worker%len(stores)].AllowTokenRequest(ctx, tokenID, now, 120, time.Minute)
-				if err != nil {
-					errorsChannel <- err
-					continue
-				}
-				if accepted {
-					allowed.Add(1)
-				} else {
-					limited.Add(1)
-				}
+			accepted, err := stores[worker%len(stores)].AllowTokenRequest(ctx, tokenID, now, 120, time.Minute)
+			if err != nil {
+				errorsChannel <- err
+				return
+			}
+			if accepted {
+				allowed.Add(1)
+			} else {
+				limited.Add(1)
 			}
 		}()
 	}
@@ -207,10 +205,11 @@ func TestFirestoreRateLimitDoesNotOverAdmitDuringConcurrentRetries(t *testing.T)
 
 	var document rateLimitDocument
 	snapshot, err := clients[0].Collection(rateLimitsCollection).Doc(tokenID).Get(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := snapshot.DataTo(&document); err != nil {
+	if err == nil {
+		if err := snapshot.DataTo(&document); err != nil {
+			t.Fatal(err)
+		}
+	} else if !firestoreIsNotFound(err) {
 		t.Fatal(err)
 	}
 	if int64(document.Count) != admitted {
