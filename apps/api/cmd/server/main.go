@@ -26,9 +26,11 @@ import (
 )
 
 const (
-	shutdownTimeout      = 10 * time.Second
-	oidcDiscoveryTimeout = 5 * time.Second
-	requestReadTimeout   = 10 * time.Second
+	shutdownTimeout                = 10 * time.Second
+	oidcDiscoveryTimeout           = 5 * time.Second
+	requestReadTimeout             = 10 * time.Second
+	firestoreReadinessCacheTTL     = 5 * time.Second
+	firestoreReadinessCheckTimeout = 2 * time.Second
 )
 
 func main() {
@@ -82,8 +84,8 @@ func run(ctx context.Context, cfg config.Config) error {
 		defer firestoreClient.Close()
 		credentialKey := sha256.Sum256([]byte(cfg.OAuthSecret))
 		firestoreStore := auth.NewFirestoreStore(firestoreClient)
-		checker.FirestoreCheck = firestoreStore.Check
-		checker.DialTimeout = 2 * time.Second
+		checker.FirestoreCheck = health.CacheCheck(firestoreStore.Check, firestoreReadinessCacheTTL, firestoreReadinessCheckTimeout)
+		checker.DialTimeout = firestoreReadinessCheckTimeout
 		authentication, err = auth.New(auth.Config{
 			PublicOrigin: publicOrigin, OwnerIssuer: cfg.OAuthIssuer, OwnerSubject: cfg.OwnerSubject,
 			WorkspaceID: cfg.WorkspaceID, CredentialKey: credentialKey[:],
