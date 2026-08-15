@@ -58,6 +58,7 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '409': { $ref: '#/components/responses/Conflict' }
         '413': { $ref: '#/components/responses/TooLarge' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
         '503': { $ref: '#/components/responses/ServiceUnavailable' }
   /content/{id}:
     parameters:
@@ -169,6 +170,9 @@ components:
       content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
     TooLarge:
       description: JSON over 1 MiB, a text field over 500 KiB, a parent document over 900 KiB, or a Firestore document over its platform limit.
+      content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
+    TooManyRequests:
+      description: The authenticated client exceeded its request rate limit.
       content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
     ServiceUnavailable:
       description: The transaction could not commit. No item or completed receipt is created.

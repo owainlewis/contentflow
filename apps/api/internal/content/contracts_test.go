@@ -44,7 +44,7 @@ func TestOpenAPIContainsTypedReplacementSummaryAndBatchContracts(t *testing.T) {
 		t.Fatal("OpenAPI batch path is not independently defined")
 	}
 	batchPath := contract[batchStart : batchStart+1+batchEnd]
-	for _, required := range []string{"operationId: batchCreateContent", "BatchCreateRequest", "BatchMutationCreated", "'400'", "'401'", "'403'", "'409'", "'413'", "'503'"} {
+	for _, required := range []string{"operationId: batchCreateContent", "BatchCreateRequest", "BatchMutationCreated", "'400'", "'401'", "'403'", "'409'", "'413'", "'429'", "'503'", "TooManyRequests"} {
 		if !strings.Contains(batchPath, required) {
 			t.Fatalf("OpenAPI batch path is missing %q", required)
 		}
