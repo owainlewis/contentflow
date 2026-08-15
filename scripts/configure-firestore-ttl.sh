@@ -9,7 +9,7 @@ fi
 
 project_id=$1
 
-for collection_group in oauth_login_attempts sessions api_token_rate_limits; do
+for collection_group in oauth_login_attempts sessions api_token_rate_limits content_items sections mutation_receipts; do
   gcloud firestore fields ttls update expires_at \
     --collection-group="$collection_group" \
     --database="(default)" \

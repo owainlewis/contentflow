@@ -20,6 +20,7 @@ import (
 	"cloud.google.com/go/firestore"
 	"github.com/owainlewis/contentflow/apps/api/internal/auth"
 	"github.com/owainlewis/contentflow/apps/api/internal/config"
+	"github.com/owainlewis/contentflow/apps/api/internal/content"
 	"github.com/owainlewis/contentflow/apps/api/internal/health"
 	"github.com/owainlewis/contentflow/apps/api/internal/server"
 	webassets "github.com/owainlewis/contentflow/apps/api/web"
@@ -66,6 +67,7 @@ func run(ctx context.Context, cfg config.Config) error {
 		FirestoreHost:  cfg.FirestoreHost,
 	}
 	var authentication *auth.Service
+	var contentHandler *content.HTTPHandler
 	if cfg.AuthEnabled() {
 		publicOrigin, redirectURL, err := authenticationURLs(cfg.PublicOrigin)
 		if err != nil {
@@ -93,8 +95,9 @@ func run(ctx context.Context, cfg config.Config) error {
 		if err != nil {
 			return fmt.Errorf("configure authentication: %w", err)
 		}
+		contentHandler = content.NewHTTPHandler(content.NewService(content.NewFirestoreStore(firestoreClient)))
 	}
-	api := server.NewAPI(checker, authentication)
+	api := server.NewAPIWithContent(checker, authentication, contentHandler)
 	servers := make([]*http.Server, 0, 2)
 
 	publicHandler := server.NewApplication(webassets.Assets(), api)
