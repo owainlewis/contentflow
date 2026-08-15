@@ -265,7 +265,7 @@ func (s *Service) Authorize(next http.Handler) http.Handler {
 			}
 		}
 		if principal.Kind == "token" {
-			if isTokenAdministration(request.URL.Path) {
+			if requiresOwnerSession(request.Method, request.URL.Path) {
 				writeError(response, http.StatusForbidden, "owner_session_required")
 				return
 			}
@@ -454,6 +454,17 @@ func isMutation(method string) bool {
 
 func isTokenAdministration(path string) bool {
 	return path == "/api/v1/tokens" || strings.HasPrefix(path, "/api/v1/tokens/")
+}
+
+func requiresOwnerSession(method, path string) bool {
+	if isTokenAdministration(path) {
+		return true
+	}
+	if method != http.MethodDelete {
+		return false
+	}
+	contentID := strings.TrimPrefix(path, "/api/v1/content/")
+	return contentID != path && contentID != "" && !strings.Contains(contentID, "/")
 }
 
 func requiredScope(method, path string) Scope {

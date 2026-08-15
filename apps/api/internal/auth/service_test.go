@@ -359,6 +359,35 @@ func TestEachTokenScopeIsEnforcedIndependently(t *testing.T) {
 	}
 }
 
+func TestPermanentContentDeletionRequiresOwnerSession(t *testing.T) {
+	service, store, _ := newTestService(t, Identity{})
+	_, raw := createToken(t, service, store, `["content:write","assets:write"]`)
+	handler := protectedHandler(service)
+
+	contentDelete := httptest.NewRequest(http.MethodDelete, "/api/v1/content/01JCONTENT", nil)
+	contentDelete.Header.Set("Authorization", "Bearer "+raw)
+	tokenResponse := httptest.NewRecorder()
+	handler.ServeHTTP(tokenResponse, contentDelete)
+	if tokenResponse.Code != http.StatusForbidden || !strings.Contains(tokenResponse.Body.String(), "owner_session_required") {
+		t.Fatalf("bearer content deletion returned %d: %s", tokenResponse.Code, tokenResponse.Body.String())
+	}
+
+	assetDelete := httptest.NewRequest(http.MethodDelete, "/api/v1/content/01JCONTENT/assets/01JASSET", nil)
+	assetDelete.Header.Set("Authorization", "Bearer "+raw)
+	assetResponse := httptest.NewRecorder()
+	handler.ServeHTTP(assetResponse, assetDelete)
+	if assetResponse.Code != http.StatusNoContent {
+		t.Fatalf("scoped bearer asset deletion returned %d: %s", assetResponse.Code, assetResponse.Body.String())
+	}
+
+	sessionDelete := sessionRequest(t, service, store, http.MethodDelete, "/api/v1/content/01JCONTENT", nil)
+	sessionResponse := httptest.NewRecorder()
+	handler.ServeHTTP(sessionResponse, sessionDelete)
+	if sessionResponse.Code != http.StatusNoContent {
+		t.Fatalf("owner session content deletion returned %d: %s", sessionResponse.Code, sessionResponse.Body.String())
+	}
+}
+
 func TestBearerAuthenticationSchemeIsCaseInsensitive(t *testing.T) {
 	service, store, _ := newTestService(t, Identity{})
 	_, raw := createToken(t, service, store, `["content:read"]`)
