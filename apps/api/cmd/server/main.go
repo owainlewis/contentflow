@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -16,6 +17,8 @@ import (
 	"syscall"
 	"time"
 
+	"cloud.google.com/go/firestore"
+	"github.com/owainlewis/contentflow/apps/api/internal/auth"
 	"github.com/owainlewis/contentflow/apps/api/internal/config"
 	"github.com/owainlewis/contentflow/apps/api/internal/health"
 	"github.com/owainlewis/contentflow/apps/api/internal/server"
@@ -56,7 +59,27 @@ func run(ctx context.Context, cfg config.Config) error {
 		AssetDirectory: cfg.AssetDirectory,
 		FirestoreHost:  cfg.FirestoreHost,
 	}
-	api := server.NewAPI(checker)
+	var authentication *auth.Service
+	if cfg.AuthEnabled() {
+		provider, err := auth.NewOIDCProvider(ctx, cfg.OAuthIssuer, cfg.OAuthClientID, cfg.OAuthSecret, cfg.PublicOrigin+"/api/v1/auth/callback")
+		if err != nil {
+			return err
+		}
+		firestoreClient, err := firestore.NewClient(ctx, cfg.GoogleProject)
+		if err != nil {
+			return fmt.Errorf("connect to Firestore auth store: %w", err)
+		}
+		defer firestoreClient.Close()
+		credentialKey := sha256.Sum256([]byte(cfg.OAuthSecret))
+		authentication, err = auth.New(auth.Config{
+			PublicOrigin: cfg.PublicOrigin, OwnerIssuer: cfg.OAuthIssuer, OwnerSubject: cfg.OwnerSubject,
+			WorkspaceID: cfg.WorkspaceID, SecureCookie: cfg.Environment == "production", CredentialKey: credentialKey[:],
+		}, provider, auth.NewFirestoreStore(firestoreClient))
+		if err != nil {
+			return fmt.Errorf("configure authentication: %w", err)
+		}
+	}
+	api := server.NewAPI(checker, authentication)
 	servers := make([]*http.Server, 0, 2)
 
 	publicHandler := server.NewApplication(webassets.Assets(), api)

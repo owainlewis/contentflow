@@ -2,8 +2,10 @@ package config
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"strconv"
+	"strings"
 )
 
 type Config struct {
@@ -13,6 +15,13 @@ type Config struct {
 	AssetDirectory string
 	FirestoreHost  string
 	LocalProxyAuth bool
+	GoogleProject  string
+	PublicOrigin   string
+	OAuthIssuer    string
+	OAuthClientID  string
+	OAuthSecret    string
+	OwnerSubject   string
+	WorkspaceID    string
 }
 
 func Load() (Config, error) {
@@ -28,6 +37,13 @@ func Load() (Config, error) {
 		AssetDirectory: stringEnv("CONTENTFLOW_ASSET_DIR", "var/assets"),
 		FirestoreHost:  os.Getenv("FIRESTORE_EMULATOR_HOST"),
 		LocalProxyAuth: localProxyAuth,
+		GoogleProject:  os.Getenv("CONTENTFLOW_GOOGLE_PROJECT_ID"),
+		PublicOrigin:   os.Getenv("CONTENTFLOW_PUBLIC_ORIGIN"),
+		OAuthIssuer:    os.Getenv("CONTENTFLOW_OAUTH_ISSUER"),
+		OAuthClientID:  os.Getenv("CONTENTFLOW_OAUTH_CLIENT_ID"),
+		OAuthSecret:    os.Getenv("CONTENTFLOW_OAUTH_CLIENT_SECRET"),
+		OwnerSubject:   os.Getenv("CONTENTFLOW_OWNER_SUBJECT"),
+		WorkspaceID:    os.Getenv("CONTENTFLOW_WORKSPACE_ID"),
 	}
 
 	if err := cfg.Validate(); err != nil {
@@ -49,7 +65,31 @@ func (c Config) Validate() error {
 	if c.LocalProxyAuth && c.PrivateAddress == "" {
 		return fmt.Errorf("CONTENTFLOW_PRIVATE_ADDR is required when local proxy authentication is enabled")
 	}
+	if c.Environment == "production" {
+		required := map[string]string{
+			"CONTENTFLOW_GOOGLE_PROJECT_ID":   c.GoogleProject,
+			"CONTENTFLOW_PUBLIC_ORIGIN":       c.PublicOrigin,
+			"CONTENTFLOW_OAUTH_ISSUER":        c.OAuthIssuer,
+			"CONTENTFLOW_OAUTH_CLIENT_ID":     c.OAuthClientID,
+			"CONTENTFLOW_OAUTH_CLIENT_SECRET": c.OAuthSecret,
+			"CONTENTFLOW_OWNER_SUBJECT":       c.OwnerSubject,
+			"CONTENTFLOW_WORKSPACE_ID":        c.WorkspaceID,
+		}
+		for name, value := range required {
+			if strings.TrimSpace(value) == "" {
+				return fmt.Errorf("%s is required in production", name)
+			}
+		}
+		origin, err := url.Parse(c.PublicOrigin)
+		if err != nil || origin.Scheme != "https" || origin.Host == "" || origin.Path != "" || origin.RawQuery != "" || origin.Fragment != "" {
+			return fmt.Errorf("CONTENTFLOW_PUBLIC_ORIGIN must be an HTTPS origin in production")
+		}
+	}
 	return nil
+}
+
+func (c Config) AuthEnabled() bool {
+	return c.PublicOrigin != "" && c.OAuthIssuer != "" && c.OAuthClientID != "" && c.OAuthSecret != "" && c.OwnerSubject != "" && c.WorkspaceID != "" && c.GoogleProject != ""
 }
 
 func stringEnv(name, fallback string) string {
