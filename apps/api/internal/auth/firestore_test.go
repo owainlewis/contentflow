@@ -4,6 +4,8 @@ import (
 	"context"
 	"crypto/sha256"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"sync"
 	"sync/atomic"
@@ -111,6 +113,59 @@ func TestFirestoreLoginAttemptCanOnlyBeConsumedOnce(t *testing.T) {
 	}
 }
 
+func TestFirestoreLoginAdmissionIsSharedBeforeAttemptCreation(t *testing.T) {
+	if os.Getenv("FIRESTORE_EMULATOR_HOST") == "" {
+		t.Skip("FIRESTORE_EMULATOR_HOST is not set")
+	}
+	ctx := context.Background()
+	firstClient, err := firestore.NewClient(ctx, "contentflow-auth-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer firstClient.Close()
+	secondClient, err := firestore.NewClient(ctx, "contentflow-auth-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer secondClient.Close()
+
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	workspaceID := "login-rate-" + now.Format("20060102150405.000000")
+	newService := func(store Store) *Service {
+		service, err := New(Config{
+			PublicOrigin: "https://contentflow.example", OwnerIssuer: "https://accounts.google.com",
+			OwnerSubject: "owner-subject", WorkspaceID: workspaceID, CredentialKey: make([]byte, 32),
+		}, &fakeProvider{}, store)
+		if err != nil {
+			t.Fatal(err)
+		}
+		service.now = func() time.Time { return now }
+		return service
+	}
+	services := []*Service{newService(NewFirestoreStore(firstClient)), newService(NewFirestoreStore(secondClient))}
+
+	for requestNumber := 1; requestNumber <= loginAttemptRateLimit; requestNumber++ {
+		response := httptest.NewRecorder()
+		services[requestNumber%len(services)].HandleLogin(response, httptest.NewRequest(http.MethodGet, "/api/v1/auth/login", nil))
+		if response.Code != http.StatusFound {
+			t.Fatalf("shared login request %d returned %d: %s", requestNumber, response.Code, response.Body.String())
+		}
+	}
+	response := httptest.NewRecorder()
+	services[0].HandleLogin(response, httptest.NewRequest(http.MethodGet, "/api/v1/auth/login", nil))
+	if response.Code != http.StatusTooManyRequests || len(response.Result().Cookies()) != 0 {
+		t.Fatalf("shared login request %d returned %d with cookies %#v", loginAttemptRateLimit+1, response.Code, response.Result().Cookies())
+	}
+
+	documents, err := firstClient.Collection(loginAttemptsCollection).Where("expires_at", "==", now.Add(10*time.Minute)).Documents(ctx).GetAll()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(documents) != loginAttemptRateLimit {
+		t.Fatalf("shared limiter stored %d login attempts, want %d", len(documents), loginAttemptRateLimit)
+	}
+}
+
 func TestFirestoreRateLimitIsSharedAcrossStoreInstances(t *testing.T) {
 	if os.Getenv("FIRESTORE_EMULATOR_HOST") == "" {
 		t.Skip("FIRESTORE_EMULATOR_HOST is not set")
@@ -130,12 +185,12 @@ func TestFirestoreRateLimitIsSharedAcrossStoreInstances(t *testing.T) {
 	tokenID := "rate-" + time.Now().String()
 	now := time.Now()
 	for index := 0; index < 120; index++ {
-		allowed, err := stores[index%len(stores)].AllowTokenRequest(ctx, tokenID, now, 120, time.Minute)
+		allowed, err := stores[index%len(stores)].AllowRequest(ctx, tokenID, now, 120, time.Minute)
 		if err != nil || !allowed {
 			t.Fatalf("request %d was not allowed: %v", index+1, err)
 		}
 	}
-	allowed, err := stores[1].AllowTokenRequest(ctx, tokenID, now, 120, time.Minute)
+	allowed, err := stores[1].AllowRequest(ctx, tokenID, now, 120, time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -173,7 +228,7 @@ func TestFirestoreRateLimitDoesNotOverAdmitDuringConcurrentRetries(t *testing.T)
 		go func() {
 			defer wait.Done()
 			<-start
-			accepted, err := stores[worker%len(stores)].AllowTokenRequest(ctx, tokenID, now, 120, time.Minute)
+			accepted, err := stores[worker%len(stores)].AllowRequest(ctx, tokenID, now, 120, time.Minute)
 			if err != nil {
 				errorsChannel <- err
 				return
@@ -217,13 +272,13 @@ func TestFirestoreRateLimitDoesNotOverAdmitDuringConcurrentRetries(t *testing.T)
 	}
 
 	for admitted < 120 {
-		accepted, err := stores[0].AllowTokenRequest(ctx, tokenID, now, 120, time.Minute)
+		accepted, err := stores[0].AllowRequest(ctx, tokenID, now, 120, time.Minute)
 		if err != nil || !accepted {
 			t.Fatalf("sequential retry %d was not admitted: accepted=%t error=%v", admitted+1, accepted, err)
 		}
 		admitted++
 	}
-	accepted, err := stores[0].AllowTokenRequest(ctx, tokenID, now, 120, time.Minute)
+	accepted, err := stores[0].AllowRequest(ctx, tokenID, now, 120, time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -246,12 +301,12 @@ func TestFirestoreRateLimitDoesNotResetForOutOfOrderRequestTime(t *testing.T) {
 	tokenID := "out-of-order-rate-" + time.Now().String()
 	newer := time.Now()
 	for request := 1; request <= 120; request++ {
-		allowed, err := store.AllowTokenRequest(ctx, tokenID, newer, 120, time.Minute)
+		allowed, err := store.AllowRequest(ctx, tokenID, newer, 120, time.Minute)
 		if err != nil || !allowed {
 			t.Fatalf("newer request %d was not allowed: %v", request, err)
 		}
 	}
-	allowed, err := store.AllowTokenRequest(ctx, tokenID, newer.Add(-time.Second), 120, time.Minute)
+	allowed, err := store.AllowRequest(ctx, tokenID, newer.Add(-time.Second), 120, time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -41,7 +41,7 @@ type Store interface {
 	SaveToken(context.Context, Token) error
 	TokenByHash(context.Context, [sha256.Size]byte) (Token, error)
 	RevokeToken(context.Context, string, string) error
-	AllowTokenRequest(context.Context, string, time.Time, int, time.Duration) (bool, error)
+	AllowRequest(context.Context, string, time.Time, int, time.Duration) (bool, error)
 }
 
 type MemoryStore struct {
@@ -63,10 +63,10 @@ func NewMemoryStore() *MemoryStore {
 	}
 }
 
-func (s *MemoryStore) AllowTokenRequest(_ context.Context, tokenID string, now time.Time, limit int, window time.Duration) (bool, error) {
+func (s *MemoryStore) AllowRequest(_ context.Context, bucketID string, now time.Time, limit int, window time.Duration) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	item := s.rates[tokenID]
+	item := s.rates[bucketID]
 	if item.start.IsZero() || now.Sub(item.start) >= window {
 		item = rateLimit{start: now}
 	}
@@ -74,7 +74,7 @@ func (s *MemoryStore) AllowTokenRequest(_ context.Context, tokenID string, now t
 		return false, nil
 	}
 	item.count++
-	s.rates[tokenID] = item
+	s.rates[bucketID] = item
 	return true, nil
 }
 

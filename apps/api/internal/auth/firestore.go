@@ -191,8 +191,8 @@ func (s *FirestoreStore) RevokeToken(ctx context.Context, workspaceID, id string
 	return err
 }
 
-func (s *FirestoreStore) AllowTokenRequest(ctx context.Context, tokenID string, now time.Time, limit int, window time.Duration) (bool, error) {
-	ref := s.client.Collection(rateLimitsCollection).Doc(tokenID)
+func (s *FirestoreStore) AllowRequest(ctx context.Context, bucketID string, now time.Time, limit int, window time.Duration) (bool, error) {
+	ref := s.client.Collection(rateLimitsCollection).Doc(bucketID)
 	allowed := false
 	err := s.client.RunTransaction(ctx, func(ctx context.Context, transaction *firestore.Transaction) error {
 		// RunTransaction may retry this callback after a commit conflict.

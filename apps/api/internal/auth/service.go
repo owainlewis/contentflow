@@ -32,8 +32,10 @@ const (
 	ScopeContentWrite Scope = "content:write"
 	ScopeAssetsWrite  Scope = "assets:write"
 
-	loginCookieName   = "contentflow_oauth"
-	sessionCookieName = "contentflow_session"
+	loginCookieName        = "contentflow_oauth"
+	sessionCookieName      = "contentflow_session"
+	loginAttemptRateLimit  = 20
+	loginAttemptRateWindow = time.Minute
 )
 
 var allowedScopes = []Scope{ScopeContentRead, ScopeContentWrite, ScopeAssetsWrite}
@@ -100,6 +102,15 @@ func New(config Config, provider OAuthProvider, store Store) (*Service, error) {
 }
 
 func (s *Service) HandleLogin(response http.ResponseWriter, request *http.Request) {
+	allowed, err := s.store.AllowRequest(request.Context(), s.loginAttemptRateBucket(), s.now(), loginAttemptRateLimit, loginAttemptRateWindow)
+	if err != nil {
+		writeError(response, http.StatusServiceUnavailable, "authentication_unavailable")
+		return
+	}
+	if !allowed {
+		writeError(response, http.StatusTooManyRequests, "login_rate_limit_exceeded")
+		return
+	}
 	attemptID, err := s.randomString(32)
 	if err != nil {
 		writeError(response, http.StatusInternalServerError, "authentication_unavailable")
@@ -303,7 +314,7 @@ func (s *Service) authenticate(request *http.Request) (Principal, int, string) {
 		if !secureEqual(token.WorkspaceID, s.config.WorkspaceID) {
 			return Principal{}, http.StatusUnauthorized, "invalid_bearer_token"
 		}
-		allowed, err := s.store.AllowTokenRequest(request.Context(), token.ID, s.now(), 120, time.Minute)
+		allowed, err := s.store.AllowRequest(request.Context(), token.ID, s.now(), 120, time.Minute)
 		if err != nil {
 			return Principal{}, http.StatusServiceUnavailable, "authentication_unavailable"
 		}
@@ -327,6 +338,10 @@ func (s *Service) authenticate(request *http.Request) (Principal, int, string) {
 		return Principal{}, http.StatusUnauthorized, "authentication_required"
 	}
 	return Principal{WorkspaceID: session.WorkspaceID, Kind: "session", Scopes: slices.Clone(allowedScopes), CSRFToken: session.CSRFToken}, 0, ""
+}
+
+func (s *Service) loginAttemptRateBucket() string {
+	return credentialDocumentID("oauth-login:" + s.config.WorkspaceID)
 }
 
 func PrincipalFromContext(ctx context.Context) (Principal, bool) {

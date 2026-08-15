@@ -78,6 +78,64 @@ func formPostCallback(cookie *http.Cookie, state, code string) *http.Request {
 	return request
 }
 
+func TestLoginAttemptWritesAreRateLimitedBeforeCreation(t *testing.T) {
+	service, store, _ := newTestService(t, Identity{})
+	now := time.Now()
+	service.now = func() time.Time { return now }
+
+	for requestNumber := 1; requestNumber <= loginAttemptRateLimit; requestNumber++ {
+		response := httptest.NewRecorder()
+		service.HandleLogin(response, httptest.NewRequest(http.MethodGet, "/api/v1/auth/login", nil))
+		if response.Code != http.StatusFound {
+			t.Fatalf("login request %d returned %d: %s", requestNumber, response.Code, response.Body.String())
+		}
+	}
+	if got := len(store.attempts); got != loginAttemptRateLimit {
+		t.Fatalf("stored %d login attempts, want %d", got, loginAttemptRateLimit)
+	}
+
+	response := httptest.NewRecorder()
+	service.HandleLogin(response, httptest.NewRequest(http.MethodGet, "/api/v1/auth/login", nil))
+	if response.Code != http.StatusTooManyRequests || !strings.Contains(response.Body.String(), "login_rate_limit_exceeded") {
+		t.Fatalf("limited login returned %d: %s", response.Code, response.Body.String())
+	}
+	if len(response.Result().Cookies()) != 0 {
+		t.Fatal("limited login set an OAuth attempt cookie")
+	}
+	if got := len(store.attempts); got != loginAttemptRateLimit {
+		t.Fatalf("limited login stored an extra attempt: got %d", got)
+	}
+}
+
+type failingAdmissionStore struct {
+	Store
+	err error
+}
+
+func (s failingAdmissionStore) AllowRequest(context.Context, string, time.Time, int, time.Duration) (bool, error) {
+	return false, s.err
+}
+
+func TestLoginAdmissionDependencyFailureDoesNotCreateAttempt(t *testing.T) {
+	memoryStore := NewMemoryStore()
+	service, err := New(Config{
+		PublicOrigin: "https://contentflow.example", OwnerIssuer: "https://accounts.google.com",
+		OwnerSubject: "owner-subject", WorkspaceID: "owner-workspace", CredentialKey: make([]byte, 32),
+	}, &fakeProvider{}, failingAdmissionStore{Store: memoryStore, err: errors.New("rate store unavailable")})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	response := httptest.NewRecorder()
+	service.HandleLogin(response, httptest.NewRequest(http.MethodGet, "/api/v1/auth/login", nil))
+	if response.Code != http.StatusServiceUnavailable || !strings.Contains(response.Body.String(), "authentication_unavailable") {
+		t.Fatalf("failed login admission returned %d: %s", response.Code, response.Body.String())
+	}
+	if len(response.Result().Cookies()) != 0 || len(memoryStore.attempts) != 0 {
+		t.Fatal("failed login admission created OAuth state")
+	}
+}
+
 func TestOwnerSignInUsesPKCEAndSecureHostOnlySession(t *testing.T) {
 	service, store, provider := newTestService(t, Identity{Issuer: "https://accounts.google.com", Subject: "owner-subject"})
 	loginCookie, state := beginLogin(t, service)
