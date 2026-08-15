@@ -68,6 +68,7 @@ func run(ctx context.Context, cfg config.Config) error {
 	}
 	var authentication *auth.Service
 	var contentHandler *content.HTTPHandler
+	localWorkspaceID := ""
 	if cfg.AuthEnabled() {
 		publicOrigin, redirectURL, err := authenticationURLs(cfg.PublicOrigin)
 		if err != nil {
@@ -96,8 +97,19 @@ func run(ctx context.Context, cfg config.Config) error {
 			return fmt.Errorf("configure authentication: %w", err)
 		}
 		contentHandler = content.NewHTTPHandler(content.NewService(content.NewFirestoreStore(firestoreClient)))
+	} else if cfg.LocalProxyAuth && cfg.FirestoreHost != "" {
+		firestoreClient, err := firestore.NewClient(ctx, "contentflow-local")
+		if err != nil {
+			return fmt.Errorf("connect to local Firestore content store: %w", err)
+		}
+		defer firestoreClient.Close()
+		localWorkspaceID = "contentflow-local"
+		contentHandler = content.NewHTTPHandler(content.NewService(content.NewFirestoreStore(firestoreClient)))
 	}
 	api := server.NewAPIWithContent(checker, authentication, contentHandler)
+	if localWorkspaceID != "" {
+		api = server.NewLocalAPIWithContent(checker, contentHandler, localWorkspaceID)
+	}
 	servers := make([]*http.Server, 0, 2)
 
 	publicHandler := server.NewApplication(webassets.Assets(), api)

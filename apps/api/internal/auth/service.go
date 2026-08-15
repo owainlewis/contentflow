@@ -417,6 +417,10 @@ func PrincipalFromContext(ctx context.Context) (Principal, bool) {
 	return principal, ok
 }
 
+func ContextWithPrincipal(ctx context.Context, principal Principal) context.Context {
+	return context.WithValue(ctx, principalKey{}, principal)
+}
+
 func (s *Service) randomString(bytes int) (string, error) {
 	value := make([]byte, bytes)
 	if _, err := s.random(value); err != nil {

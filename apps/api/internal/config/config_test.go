@@ -146,13 +146,54 @@ func TestDevelopmentAcceptsLocalProxyAuthentication(t *testing.T) {
 
 	cfg := Config{
 		Environment:    "development",
+		PublicAddress:  "127.0.0.1:8080",
+		PrivateAddress: ":8081",
+		AssetDirectory: t.TempDir(),
+		LocalProxyAuth: true,
+		FirestoreHost:  "127.0.0.1:8080",
+	}
+
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("expected valid development configuration: %v", err)
+	}
+}
+
+func TestDevelopmentRejectsWildcardLocalProxyAuthentication(t *testing.T) {
+	t.Parallel()
+
+	cfg := Config{
+		Environment: "development", PublicAddress: ":8080", PrivateAddress: ":8081", AssetDirectory: t.TempDir(),
+		LocalProxyAuth: true, FirestoreHost: "127.0.0.1:8787",
+	}
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected wildcard local proxy authentication address to fail")
+	}
+}
+
+func TestContainerPortProxyMayAssertExternalLoopbackBinding(t *testing.T) {
+	t.Parallel()
+
+	cfg := Config{
+		Environment: "development", PublicAddress: ":8080", PrivateAddress: ":8081", AssetDirectory: t.TempDir(),
+		LocalProxyAuth: true, LoopbackPortProxy: true, FirestoreHost: "firestore:8080",
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("externally loopback-bound container proxy failed: %v", err)
+	}
+}
+
+func TestDevelopmentRejectsLocalProxyAuthenticationWithoutFirestoreEmulator(t *testing.T) {
+	t.Parallel()
+
+	cfg := Config{
+		Environment:    "development",
 		PublicAddress:  ":8080",
 		PrivateAddress: ":8081",
 		AssetDirectory: t.TempDir(),
 		LocalProxyAuth: true,
 	}
 
-	if err := cfg.Validate(); err != nil {
-		t.Fatalf("expected valid development configuration: %v", err)
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected local proxy authentication without a Firestore emulator to fail")
 	}
 }

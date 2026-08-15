@@ -12,8 +12,9 @@
     "build:web": "vite build --config apps/web/vite.config.ts",
     "build": "npm run build:web && go build -o bin/contentflow ./apps/api/cmd/server",
     "start": "./bin/contentflow",
-    "test": "npm run build && node --test tests/rendered-html.test.mjs && vitest run --config vitest.config.ts tests/interactions.test.tsx",
-    "lint": "eslint apps/web/src tests"
+    "test": "npm run build && node --test tests/rendered-html.test.mjs && vitest run --config vitest.config.ts",
+    "lint": "eslint apps/web/src tests",
+    "generate:unicode": "go run ./scripts/generate-unicode-normalization.go"
   },
   "dependencies": {
     "@fontsource-variable/geist": "^5.2.8",

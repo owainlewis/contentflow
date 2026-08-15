@@ -1,5 +1,9 @@
 import {
+  AlertTriangle,
+  Archive,
+  ArrowDown,
   ArrowLeft,
+  ArrowUp,
   CalendarDays,
   Camera,
   Check,
@@ -10,6 +14,7 @@ import {
   ImagePlus,
   Inbox,
   Lightbulb,
+  LoaderCircle,
   Mail,
   Menu,
   MoreHorizontal,
@@ -20,9 +25,9 @@ import {
   PanelLeftClose,
   Paperclip,
   Plus,
+  RotateCcw,
   Search,
   Settings,
-  Sparkles,
   SquarePen,
   Sun,
   Target,
@@ -34,219 +39,114 @@ import {
   Zap,
   type LucideIcon,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  ApiError,
+  contentStatuses,
+  contentTypes,
+  createContent,
+  deleteContent,
+  getContent,
+  isSessionRecoveryError,
+  listContent,
+  loadSession,
+  newClientKey,
+  newOperationId,
+  replaceContent,
+  serializeReplacement,
+  setArchived,
+  type ContentDetail,
+  type ContentPayload,
+  type ContentStatus,
+  type ContentSummary,
+  type ContentType,
+  type Section,
+  type YouTubeContent,
+} from "./api";
+import { AutosaveManager, type ConflictView, type SaveState } from "./autosave";
+import { normalizeUnicode15Title } from "./unicode-normalization";
 
-type ContentType = "youtube" | "linkedin" | "x" | "instagram" | "tiktok" | "email" | "substack";
-type ContentStatus = "Idea" | "Draft" | "Ready" | "Published";
 type Theme = "light" | "dark";
+type LifecycleAction = "archive" | "restore" | "delete";
+type PendingLifecycle = { id: string; action: LifecycleAction };
+type LibraryFilters = { query: string; type: ContentType | "all"; status: ContentStatus | "all" };
+type Attachment = { id: string; kind: "image" | "video" | "pdf"; name: string; size: number };
+type ThumbnailPreview = { dataUrl?: string; requestId: string };
 
-type ScriptBlock = {
-  id: string;
-  label: string;
-  text: string;
+const typeMeta: Record<ContentType, { label: string; description: string; icon: LucideIcon; color: string }> = {
+  youtube: { label: "YouTube", description: "Video brief, script, transcript, and assets", icon: Video, color: "var(--platform-icon)" },
+  linkedin: { label: "LinkedIn", description: "Post with an image or PDF", icon: Network, color: "var(--platform-icon)" },
+  x: { label: "X", description: "Post with an optional image", icon: X, color: "var(--platform-icon)" },
+  instagram: { label: "Instagram", description: "Image, Reel, or carousel", icon: Camera, color: "var(--platform-icon)" },
+  tiktok: { label: "TikTok", description: "Script and finished video", icon: Music2, color: "var(--platform-icon)" },
+  email: { label: "Email", description: "Subject line and email body", icon: Mail, color: "var(--platform-icon)" },
+  substack: { label: "Substack", description: "Headline, sub-headline, and article", icon: FileText, color: "var(--platform-icon)" },
 };
 
-type YouTubeBrief = {
-  topic: string;
-  icp: string;
-  angle: string;
-  cta: string;
-  description: string;
-  thumbnailName?: string;
-  thumbnailSize?: number;
-};
+const statusLabels: Record<ContentStatus, string> = { idea: "Idea", draft: "Draft", ready: "Ready", published: "Published" };
 
-type Attachment = {
-  id: string;
-  kind: "image" | "video" | "pdf";
-  name: string;
-  size: number;
-};
+function TypeIcon({ type, size = 16 }: { type: ContentType; size?: number }) {
+  const Icon = typeMeta[type].icon;
+  return <Icon size={size} strokeWidth={1.9} />;
+}
 
-type ThumbnailPreview = {
-  dataUrl?: string;
-  requestId: string;
-};
-
-type ContentItem = {
-  id: string;
-  type: ContentType;
-  title: string;
-  body: string;
-  status: ContentStatus;
-  updated: string;
-  words: number;
-  blocks?: ScriptBlock[];
-  youtube?: YouTubeBrief;
-  subject?: string;
-  subheadline?: string;
-  attachments?: Attachment[];
-};
-
-const typeMeta: Record<ContentType, { label: string; shortLabel: string; icon: LucideIcon; color: string }> = {
-  youtube: { label: "YouTube", shortLabel: "YouTube", icon: Video, color: "var(--platform-icon)" },
-  linkedin: { label: "LinkedIn", shortLabel: "LinkedIn", icon: Network, color: "var(--platform-icon)" },
-  x: { label: "X", shortLabel: "X", icon: X, color: "var(--platform-icon)" },
-  instagram: { label: "Instagram", shortLabel: "Instagram", icon: Camera, color: "var(--platform-icon)" },
-  tiktok: { label: "TikTok", shortLabel: "TikTok", icon: Music2, color: "var(--platform-icon)" },
-  email: { label: "Email", shortLabel: "Email", icon: Mail, color: "var(--platform-icon)" },
-  substack: { label: "Substack", shortLabel: "Substack", icon: FileText, color: "var(--platform-icon)" },
-};
-
-const createDescriptions: Record<ContentType, string> = {
-  youtube: "Video brief, script, and assets",
-  linkedin: "Post with an image or PDF",
-  x: "Post with an optional image",
-  instagram: "Image, Reel, or carousel",
-  tiktok: "Script and finished video",
-  email: "Subject line and email body",
-  substack: "Headline, sub-headline, and article",
-};
-
-const initialItems: ContentItem[] = [
-  {
-    id: "yt-1",
-    type: "youtube",
-    title: "Build an AI content system that actually saves time",
-    body: "",
-    status: "Draft",
-    updated: "12 min ago",
-    words: 1264,
-    attachments: [
-      { id: "yt-video-1", kind: "video", name: "content-system-final-v4.mp4", size: 2_147_483_648 },
-    ],
-    youtube: {
-      topic: "A practical content system for creators using AI",
-      icp: "Solo creators and technical educators publishing every week",
-      angle: "The bottleneck is not ideas. It is losing the value of each good idea after publishing.",
-      cta: "Download the ContentFlow starter workflow",
-      description: "A practical walkthrough of a simple source, shape, and distribute system for turning one strong idea into a useful body of content.",
-      thumbnailName: "content-system-thumbnail-v3.png",
-      thumbnailSize: 2_621_440,
-    },
-    blocks: [
-      {
-        id: "b-1",
-        label: "Intro",
-        text: "Most creators don’t have a content problem. They have a system problem. Ideas live in notes, scripts live in docs, and the best parts of every video disappear after publishing.",
-      },
-      {
-        id: "b-2",
-        label: "The problem",
-        text: "In this video, I’ll show you the simple content system I use to capture one useful idea, develop it into a strong video, and turn it into a week of content without starting from zero each time.",
-      },
-      {
-        id: "b-3",
-        label: "Core lesson",
-        text: "The system has three stages: source, shape, and distribute. Your source is the deepest version of the idea. Shaping adapts the idea to each platform. Distribution gives every piece a clear next step.",
-      },
-      {
-        id: "b-4",
-        label: "Outro",
-        text: "Start with one source this week. Make it useful, keep the system simple, and let every smaller post point back to the main idea.",
-      },
-    ],
-  },
-  {
-    id: "li-1",
-    type: "linkedin",
-    title: "You don’t need more content ideas",
-    body: "You don’t need more content ideas.\n\nYou need a better way to reuse the good ones.\n\nThe strongest creators I know don’t start from scratch every morning. They build one useful idea deeply, then shape it for the places their audience already spends time.",
-    status: "Ready",
-    updated: "1 hr ago",
-    words: 94,
-    attachments: [
-      { id: "li-pdf-1", kind: "pdf", name: "content-system-carousel.pdf", size: 4_823_040 },
-    ],
-  },
-  {
-    id: "x-1",
-    type: "x",
-    title: "The source, shape, distribute framework",
-    body: "A simple content system:\n\n1. Source one useful idea\n2. Shape it for the platform\n3. Distribute with a clear next step\n\nConsistency gets easier when you stop starting from zero.",
-    status: "Draft",
-    updated: "Yesterday",
-    words: 42,
-  },
-  {
-    id: "em-1",
-    type: "email",
-    title: "The system behind my content",
-    body: "Hey,\n\nI used to think consistency meant finding something new to say every day. That approach is exhausting, and it usually leads to weaker work.\n\nNow I build one useful idea deeply and let the format change, not the idea.",
-    status: "Ready",
-    updated: "Yesterday",
-    words: 328,
-    subject: "The system behind my content",
-  },
-  {
-    id: "ss-1",
-    type: "substack",
-    title: "One idea, seven useful pieces of content",
-    body: "The goal of a content system is not to publish everywhere. It is to make the best use of every idea worth sharing.\n\nHere is the workflow I use to turn one long-form source into a small, coherent body of work.",
-    status: "Idea",
-    updated: "2 days ago",
-    words: 812,
-    subheadline: "A practical workflow for getting more value from every strong idea",
-  },
-  {
-    id: "ig-1",
-    type: "instagram",
-    title: "Stop starting from scratch",
-    body: "Hook: If content creation feels exhausting, you’re probably starting from scratch too often.\n\nBeat 1: Pick one strong source idea.\nBeat 2: Pull out the sharpest lesson.\nBeat 3: Rebuild it for one platform.\n\nCTA: Save this and use it for your next post.",
-    status: "Published",
-    updated: "4 days ago",
-    words: 76,
-    attachments: [
-      { id: "ig-video-1", kind: "video", name: "stop-starting-from-scratch-v2.mp4", size: 86_212_608 },
-    ],
-  },
-  {
-    id: "tt-1",
-    type: "tiktok",
-    title: "The three-step content system",
-    body: "Hook: You do not need another list of content ideas.\n\nShow the workflow: one source, one clear lesson, then one version for each platform.\n\nCTA: Try it with your next video.",
-    status: "Draft",
-    updated: "5 days ago",
-    words: 42,
-  },
-  {
-    id: "li-2",
-    type: "linkedin",
-    title: "Why plain text beats a complex editor",
-    body: "A writing tool should get out of the way. Plain text is portable, durable, and almost impossible to break. Your ideas deserve more attention than your formatting toolbar.",
-    status: "Published",
-    updated: "6 days ago",
-    words: 118,
-  },
-];
-
-const statusOptions: ContentStatus[] = ["Idea", "Draft", "Ready", "Published"];
+function AttachmentIcon({ kind }: { kind: Attachment["kind"] }) {
+  if (kind === "image") return <ImagePlus size={16} />;
+  if (kind === "pdf") return <FileText size={16} />;
+  return <FileVideo size={16} />;
+}
 
 function wordCount(value: string) {
   return value.trim() ? value.trim().split(/\s+/).length : 0;
 }
 
-function firstLine(value: string, fallback: string) {
-  const line = value.split("\n").find((part) => part.trim())?.trim();
-  if (!line) return fallback;
-  return line.length > 68 ? `${line.slice(0, 68)}…` : line;
+function normalizeSearchTitle(value: string) {
+  return normalizeUnicode15Title(value);
 }
 
-function displayTitle(item: ContentItem) {
-  if (item.type === "youtube") {
-    const hasTitle = item.title && !item.title.startsWith("Untitled");
-    return hasTitle ? item.title : item.youtube?.topic || "Untitled YouTube video";
+function documentWordCount(detail: ContentDetail) {
+  if (detail.type === "youtube") {
+    const content = detail.content as YouTubeContent;
+    return content.sections.reduce((total, section) => total + wordCount(section.body), 0) + wordCount(content.transcript);
   }
-  if (item.type === "email") return item.subject || "Untitled email";
-  if (item.type === "substack") return item.title || "Untitled Substack post";
-  if (item.type === "linkedin") return firstLine(item.body, "Untitled LinkedIn post");
-  if (item.type === "x") return firstLine(item.body, "Untitled X post");
-  if (item.type === "instagram") return firstLine(item.body, "Untitled Instagram script");
-  return firstLine(item.body, "Untitled TikTok script");
+  if ("body" in detail.content) return wordCount(detail.content.body);
+  if ("script" in detail.content) return wordCount(detail.content.script);
+  return 0;
 }
 
-function uniqueId(prefix: string) {
-  return `${prefix}-${crypto.randomUUID()}`;
+function formatRelativeTime(value: string) {
+  const elapsed = Date.now() - new Date(value).getTime();
+  if (elapsed < 60_000) return "just now";
+  if (elapsed < 3_600_000) return `${Math.floor(elapsed / 60_000)} min ago`;
+  if (elapsed < 86_400_000) return `${Math.floor(elapsed / 3_600_000)} hr ago`;
+  const days = Math.floor(elapsed / 86_400_000);
+  return days === 1 ? "yesterday" : `${days} days ago`;
+}
+
+function expiry(value: string) {
+  const date = new Date(value);
+  const remainingMilliseconds = date.getTime() - Date.now();
+  const expired = remainingMilliseconds <= 0;
+  const days = Math.max(0, Math.ceil(remainingMilliseconds / 86_400_000));
+  return {
+    label: date.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" }),
+    days,
+    summary: expired ? "Expired" : `Expires in ${days} ${days === 1 ? "day" : "days"}`,
+    detail: expired ? "expired" : `${days} ${days === 1 ? "day" : "days"} left`,
+    expired,
+    warning: days <= 7,
+  };
+}
+
+function nextExpiryUpdateDelay(items: ContentSummary[]) {
+  const now = Date.now();
+  const maximumTimerDelay = 2_147_000_000;
+  return Math.min(maximumTimerDelay, ...items.map((item) => {
+    const remaining = new Date(item.expires_at).getTime() - now;
+    if (remaining <= 0) return 0;
+    const displayedDays = Math.ceil(remaining / 86_400_000);
+    return remaining - Math.max(0, displayedDays - 1) * 86_400_000;
+  }));
 }
 
 function formatFileSize(bytes: number) {
@@ -261,71 +161,288 @@ function formatFileSize(bytes: number) {
   return `${value >= 10 ? value.toFixed(0) : value.toFixed(1)} ${unit}`;
 }
 
-function AttachmentIcon({ kind, size = 16 }: { kind: Attachment["kind"]; size?: number }) {
-  if (kind === "image") return <ImagePlus size={size} />;
-  if (kind === "pdf") return <FileText size={size} />;
-  return <FileVideo size={size} />;
+function uniqueId(prefix: string) {
+  return `${prefix}-${crypto.randomUUID()}`;
 }
 
-function TypeIcon({ type, size = 16 }: { type: ContentType; size?: number }) {
-  const Icon = typeMeta[type].icon;
-  return <Icon size={size} strokeWidth={1.9} />;
+function editableSnapshot(detail: ContentDetail) {
+  return { working_title: detail.working_title, status: detail.status, content: detail.content };
+}
+
+function saveLabel(state: SaveState) {
+  switch (state) {
+    case "saving": return "Saving";
+    case "retrying": return "Offline, retrying";
+    case "reauthenticating": return "Sign in to continue saving";
+    case "unsaved": return "Unsaved changes";
+    case "conflict": return "Save conflict";
+    case "error": return "Could not save";
+    default: return "Saved";
+  }
 }
 
 export default function Home() {
-  const [items, setItems] = useState(initialItems);
-  const [selectedId, setSelectedId] = useState(initialItems[0].id);
+  const [summaries, setSummaries] = useState<ContentSummary[]>([]);
+  const [allSummaries, setAllSummaries] = useState<ContentSummary[]>([]);
+  const [selectedId, setSelectedId] = useState("");
+  const [selected, setSelected] = useState<ContentDetail>();
   const [typeFilter, setTypeFilter] = useState<ContentType | "all">("all");
-  const [statusFilter, setStatusFilter] = useState<ContentStatus | "All">("All");
+  const [statusFilter, setStatusFilter] = useState<ContentStatus | "all">("all");
   const [query, setQuery] = useState("");
+  const [csrfToken, setCsrfToken] = useState<string>();
+  const [authState, setAuthState] = useState<"loading" | "ready" | "signed-out" | "error">("loading");
+  const [sessionExpired, setSessionExpired] = useState(false);
+  const [reauthChecking, setReauthChecking] = useState(false);
+  const [reauthError, setReauthError] = useState("");
+  const [pendingSessionCreate, setPendingSessionCreate] = useState<ContentType>();
+  const [pendingSessionLifecycle, setPendingSessionLifecycle] = useState<{ document: ContentDetail; action: LifecycleAction }>();
+  const [loadError, setLoadError] = useState("");
+  const [detailError, setDetailError] = useState("");
+  const [detailReload, setDetailReload] = useState(0);
+  const [detailLoading, setDetailLoading] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
-  const [repurposeOpen, setRepurposeOpen] = useState(false);
-  const [selectedOutputs, setSelectedOutputs] = useState<ContentType[]>(["linkedin", "x", "email"]);
+  const [createPending, setCreatePending] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
   const [libraryOpen, setLibraryOpen] = useState(false);
-  const [savePulse, setSavePulse] = useState(false);
   const [isCompact, setIsCompact] = useState(false);
   const [theme, setTheme] = useState<Theme>("dark");
+  const [saveStates, setSaveStates] = useState<Record<string, SaveState>>({});
+  const [autosaveManager, setAutosaveManager] = useState<AutosaveManager>();
+  const [conflict, setConflict] = useState<ConflictView>();
+  const [pendingLifecycle, setPendingLifecycle] = useState<PendingLifecycle>();
+  const [actionError, setActionError] = useState("");
+  const [filterError, setFilterError] = useState("");
+  const [expiryClock, setExpiryClock] = useState(0);
+  const [attachments, setAttachments] = useState<Record<string, Attachment[]>>({});
   const [thumbnailPreviews, setThumbnailPreviews] = useState<Record<string, ThumbnailPreview>>({});
   const createModalRef = useRef<HTMLElement>(null);
-  const repurposeModalRef = useRef<HTMLElement>(null);
+  const deleteModalRef = useRef<HTMLElement>(null);
+  const libraryPanelRef = useRef<HTMLElement>(null);
+  const mobileLibraryButtonRef = useRef<HTMLButtonElement>(null);
+  const libraryWasOpenRef = useRef(false);
+  const searchRef = useRef<HTMLInputElement>(null);
+  const selectedIdRef = useRef("");
+  const allSummariesRef = useRef<ContentSummary[]>([]);
+  const summariesRef = useRef<ContentSummary[]>([]);
+  const autosaveRef = useRef<AutosaveManager | undefined>(undefined);
+  const csrfTokenRef = useRef("");
+  const createPendingRef = useRef(false);
+  const createOperationIdsRef = useRef(new Map<ContentType, string>());
+  const lifecycleOperationIdsRef = useRef(new Map<string, string>());
+  const lifecycleSynchronizationRef = useRef(0);
+  const pendingLifecycleRef = useRef<PendingLifecycle | undefined>(undefined);
+  const pendingDeletedSelectionRef = useRef(false);
+  const expiryRefreshAfterRef = useRef(0);
+  const refreshLibraryRef = useRef<(filters?: LibraryFilters) => Promise<void>>(async () => undefined);
+  const requestSequence = useRef(0);
+  const sessionGenerationRef = useRef(0);
+  const activeFiltersRef = useRef<LibraryFilters>({ query: "", type: "all", status: "all" });
 
-  const selected = items.find((item) => item.id === selectedId) ?? items[0];
-
-  useEffect(() => {
-    const modal = createOpen ? createModalRef.current : repurposeOpen ? repurposeModalRef.current : null;
-    if (!modal) return;
-
-    const previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    const focusableSelector = 'button:not([disabled]), input, textarea, select, [tabindex]:not([tabindex="-1"])';
-    const focusable = Array.from(modal.querySelectorAll<HTMLElement>(focusableSelector));
-    focusable[0]?.focus();
-
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        setCreateOpen(false);
-        setRepurposeOpen(false);
-        return;
-      }
-      if (event.key !== "Tab" || !focusable.length) return;
-
-      const first = focusable[0];
-      const last = focusable[focusable.length - 1];
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
+  const refreshLibrary = useCallback(async (filtersOverride?: LibraryFilters) => {
+    const sequence = ++requestSequence.current;
+    const currentFilters = filtersOverride ?? { query, type: typeFilter, status: statusFilter };
+    const trimmedQuery = currentFilters.query.trim();
+    const filtered = { q: trimmedQuery || undefined, type: currentFilters.type === "all" ? undefined : currentFilters.type, status: currentFilters.status === "all" ? undefined : currentFilters.status };
+    const hasFilters = Boolean(filtered.q || filtered.type || filtered.status);
+    const [all, visible] = await Promise.all([listContent(), hasFilters ? listContent(filtered) : Promise.resolve(undefined)]);
+    if (sequence !== requestSequence.current) return;
+    const manager = autosaveRef.current;
+    const withDraft = (item: ContentSummary) => {
+      const draft = manager?.getDraft(item.id);
+      return draft ? { ...item, working_title: draft.working_title, status: draft.status } : item;
+    };
+    const mergedAll = all.map(withDraft);
+    const visibleIds = new Set((visible ?? all).map((item) => item.id));
+    const queryPrefix = filtered.q ? normalizeSearchTitle(filtered.q) : undefined;
+    const mergedVisible = hasFilters ? mergedAll.filter((item) => {
+      const draft = manager?.getDraft(item.id);
+      if (!draft) return visibleIds.has(item.id);
+      const titleMatches = !queryPrefix || normalizeSearchTitle(item.working_title).startsWith(queryPrefix);
+      return titleMatches
+        && (!filtered.type || item.type === filtered.type)
+        && (!filtered.status || item.status === filtered.status);
+    }) : mergedAll;
+    allSummariesRef.current = mergedAll;
+    summariesRef.current = mergedVisible;
+    setAllSummaries(mergedAll);
+    setSummaries(mergedVisible);
+    const currentSelectedId = selectedIdRef.current;
+    if (currentSelectedId && !mergedAll.some((item) => item.id === currentSelectedId)) {
+      manager?.discard(currentSelectedId);
+      const replacementId = mergedVisible[0]?.id ?? "";
+      selectedIdRef.current = replacementId;
+      setSelectedId(replacementId);
+      setSelected(undefined);
+      setConflict(undefined);
+      setSaveStates((states) => {
+        const next = { ...states };
+        delete next[currentSelectedId];
+        return next;
+      });
+      setActionError("");
+    }
+    if (pendingDeletedSelectionRef.current) {
+      pendingDeletedSelectionRef.current = false;
+      if (!selectedIdRef.current) {
+        const replacementId = mergedVisible[0]?.id;
+        if (replacementId) {
+          selectedIdRef.current = replacementId;
+          setSelectedId(replacementId);
+        }
       }
     }
+    setFilterError("");
+  }, [query, statusFilter, typeFilter]);
 
-    document.addEventListener("keydown", handleKeyDown);
+  useEffect(() => {
+    selectedIdRef.current = selectedId;
+    if (selectedId) pendingDeletedSelectionRef.current = false;
+  }, [selectedId]);
+  useLayoutEffect(() => {
+    activeFiltersRef.current = { query, type: typeFilter, status: statusFilter };
+    refreshLibraryRef.current = refreshLibrary;
+  }, [query, refreshLibrary, statusFilter, typeFilter]);
+
+  useEffect(() => {
+    let active = true;
+    void (async () => {
+      try {
+        const session = await loadSession();
+        const items = await listContent();
+        if (!active) return;
+        csrfTokenRef.current = session.csrf_token ?? "";
+        setCsrfToken(csrfTokenRef.current);
+        allSummariesRef.current = items;
+        summariesRef.current = items;
+        setAllSummaries(items);
+        setSummaries(items);
+        setSelectedId((current) => current || items[0]?.id || "");
+        setAuthState("ready");
+      } catch (error) {
+        if (!active) return;
+        if (error instanceof ApiError && error.status === 401) setAuthState("signed-out");
+        else {
+          setLoadError("The workspace could not be loaded. Try again in a moment.");
+          setAuthState("error");
+        }
+      }
+    })();
+    return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
+    const manager = new AutosaveManager({
+      serialize: serializeReplacement,
+      send: (id, body, signal) => replaceContent(id, body, csrfTokenRef.current, signal),
+      resolve: (id, signal) => getContent(id, signal),
+      onDocument: (detail) => {
+        if (selectedIdRef.current === detail.id) setSelected(detail);
+        setAllSummaries((items) => items.map((item) => item.id === detail.id ? { ...item, ...detail, asset_counts: item.asset_counts } : item));
+        setSummaries((items) => items.map((item) => item.id === detail.id ? { ...item, ...detail, asset_counts: item.asset_counts } : item));
+      },
+      onState: (id, state) => {
+        if (state === "unsaved") lifecycleSynchronizationRef.current += 1;
+        setSaveStates((states) => ({ ...states, [id]: state }));
+      },
+      onConflict: (id, nextConflict) => { if (selectedIdRef.current === id) setConflict(nextConflict); },
+      onUnauthorized: () => setSessionExpired(true),
+      getSessionGeneration: () => sessionGenerationRef.current,
+      onSaved: (id) => {
+        const refresh = refreshLibraryRef.current();
+        const sequence = requestSequence.current;
+        void refresh.then(() => {
+          if (sequence === requestSequence.current) setActionError((current) => current === "The library could not be refreshed after saving." ? "" : current);
+        }).catch((error) => {
+          if (sequence !== requestSequence.current) return;
+          if (isSessionRecoveryError(error)) {
+            setSessionExpired(true);
+          } else if (selectedIdRef.current === id) {
+            setActionError("The library could not be refreshed after saving.");
+          }
+        });
+      },
+    });
+    autosaveRef.current = manager;
+    setAutosaveManager(manager);
     return () => {
-      document.removeEventListener("keydown", handleKeyDown);
-      previouslyFocused?.focus();
+      manager.dispose();
+      if (autosaveRef.current === manager) autosaveRef.current = undefined;
     };
-  }, [createOpen, repurposeOpen]);
+  }, []);
+
+  useEffect(() => {
+    if (authState !== "ready") return;
+    const timer = window.setTimeout(() => {
+      const refresh = refreshLibrary();
+      const sequence = requestSequence.current;
+      void refresh.then(() => {
+        if (sequence !== requestSequence.current) return;
+        setFilterError("");
+      }).catch((error) => {
+        if (sequence !== requestSequence.current) return;
+        if (isSessionRecoveryError(error)) {
+          setSessionExpired(true);
+        } else {
+          setFilterError("The library filters could not be refreshed.");
+        }
+      });
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [authState, refreshLibrary]);
+
+  useEffect(() => {
+    if (authState !== "ready" || !allSummaries.length) return;
+    const timer = window.setTimeout(() => {
+      const expiredItems = allSummariesRef.current.filter((item) => new Date(item.expires_at).getTime() <= Date.now());
+      if (expiredItems.length) expiryRefreshAfterRef.current = Date.now() + 30_000;
+      setExpiryClock((current) => current + 1);
+      if (!expiredItems.length) return;
+
+      const refresh = refreshLibraryRef.current();
+      const sequence = requestSequence.current;
+      void refresh.then(() => {
+        if (sequence === requestSequence.current && !allSummariesRef.current.some((item) => new Date(item.expires_at).getTime() <= Date.now())) expiryRefreshAfterRef.current = 0;
+      }).catch((error) => {
+        if (sequence !== requestSequence.current) return;
+        if (isSessionRecoveryError(error)) setSessionExpired(true);
+        else setFilterError("The library could not be refreshed after content expired.");
+      });
+    }, Math.max(nextExpiryUpdateDelay(allSummaries) + 25, expiryRefreshAfterRef.current - Date.now()));
+    return () => window.clearTimeout(timer);
+  }, [allSummaries, authState, expiryClock]);
+
+  useEffect(() => {
+    if (!selectedId) return;
+    let active = true;
+    const sessionGeneration = sessionGenerationRef.current;
+    void Promise.resolve().then(async () => {
+      setDetailError("");
+      const manager = autosaveRef.current;
+      const queueVersion = manager?.getVersionStamp(selectedId) ?? "0:0";
+      const draft = manager?.getDraft(selectedId);
+      if (!active) return;
+      setSelected(draft);
+      setConflict(autosaveRef.current?.getConflict(selectedId));
+      setDetailLoading(!draft);
+      try {
+        const detail = await getContent(selectedId);
+        if (!active || (autosaveRef.current?.getVersionStamp(selectedId) ?? "0:0") !== queueVersion || autosaveRef.current?.getDraft(selectedId)) return;
+        setSelected(detail);
+        setDetailError("");
+        setSaveStates((states) => ({ ...states, [selectedId]: "saved" }));
+      } catch (error) {
+        if (!active || sessionGeneration !== sessionGenerationRef.current) return;
+        if (error instanceof ApiError && error.status === 401) {
+          setSessionExpired(true);
+        } else {
+          setDetailError("The selected item could not be loaded.");
+        }
+      } finally {
+        if (active) setDetailLoading(false);
+      }
+    });
+    return () => { active = false; };
+  }, [detailReload, selectedId]);
 
   useEffect(() => {
     if (typeof window.matchMedia !== "function") return;
@@ -337,11 +454,82 @@ export default function Home() {
   }, []);
 
   useEffect(() => {
-    const syncTheme = window.setTimeout(() => {
-      setTheme(document.documentElement.dataset.theme === "light" ? "light" : "dark");
-    }, 0);
-    return () => window.clearTimeout(syncTheme);
+    if (!isCompact) {
+      libraryWasOpenRef.current = false;
+      return;
+    }
+    if (!libraryOpen) {
+      if (libraryWasOpenRef.current) mobileLibraryButtonRef.current?.focus();
+      libraryWasOpenRef.current = false;
+      return;
+    }
+    const panel = libraryPanelRef.current;
+    if (!panel) return;
+    libraryWasOpenRef.current = true;
+    const focusable = Array.from(panel.querySelectorAll<HTMLElement>('button:not([disabled]), input, textarea, select, [tabindex]:not([tabindex="-1"])'));
+    focusable[0]?.focus();
+    function handleKey(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setLibraryOpen(false);
+        return;
+      }
+      if (event.key !== "Tab" || !focusable.length) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+    }
+    document.addEventListener("keydown", handleKey);
+    return () => document.removeEventListener("keydown", handleKey);
+  }, [isCompact, libraryOpen]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setTheme(document.documentElement.dataset.theme === "light" ? "light" : "dark"), 0);
+    return () => window.clearTimeout(timer);
   }, []);
+
+  useEffect(() => {
+    const modal = createOpen ? createModalRef.current : deleteOpen ? deleteModalRef.current : null;
+    if (!modal) return;
+    const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const focusable = Array.from(modal.querySelectorAll<HTMLElement>('button:not([disabled]), input, textarea, select, [tabindex]:not([tabindex="-1"])'));
+    focusable[0]?.focus();
+    function handleKey(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setCreateOpen(false);
+        setDeleteOpen(false);
+      }
+      if (event.key !== "Tab" || !focusable.length) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+    }
+    document.addEventListener("keydown", handleKey);
+    return () => { document.removeEventListener("keydown", handleKey); previous?.focus(); };
+  }, [createOpen, deleteOpen]);
+
+  useEffect(() => {
+    function shortcut(event: KeyboardEvent) {
+      if (createOpen || deleteOpen) return;
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        searchRef.current?.focus();
+      } else if (!event.metaKey && !event.ctrlKey && !event.altKey && event.key.toLowerCase() === "n" && !(event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLSelectElement)) {
+        event.preventDefault();
+        setCreateOpen(true);
+      }
+    }
+    document.addEventListener("keydown", shortcut);
+    return () => document.removeEventListener("keydown", shortcut);
+  }, [createOpen, deleteOpen]);
+
+  const counts = useMemo(() => allSummaries.reduce<Record<ContentType, number>>((result, item) => {
+    result[item.type] += 1;
+    return result;
+  }, { youtube: 0, linkedin: 0, x: 0, instagram: 0, tiktok: 0, email: 0, substack: 0 }), [allSummaries]);
 
   function toggleTheme() {
     const current = document.documentElement.dataset.theme === "light" ? "light" : "dark";
@@ -351,821 +539,501 @@ export default function Home() {
     setTheme(next);
   }
 
-  const filteredItems = useMemo(() => {
-    const normalizedQuery = query.trim().toLowerCase();
-    return items.filter((item) => {
-      const matchesType = typeFilter === "all" || item.type === typeFilter;
-      const matchesStatus = statusFilter === "All" || item.status === statusFilter;
-      const searchableText = [
-        displayTitle(item),
-        item.title,
-        item.subject,
-        item.subheadline,
-        item.body,
-        item.youtube?.topic,
-        item.youtube?.icp,
-        item.youtube?.angle,
-      ].filter(Boolean).join(" ").toLowerCase();
-      const matchesQuery = !normalizedQuery || searchableText.includes(normalizedQuery);
-      return matchesType && matchesStatus && matchesQuery;
-    });
-  }, [items, query, statusFilter, typeFilter]);
-
-  const counts = useMemo(() => {
-    return items.reduce<Record<ContentType, number>>(
-      (all, item) => ({ ...all, [item.type]: all[item.type] + 1 }),
-      { youtube: 0, linkedin: 0, x: 0, instagram: 0, tiktok: 0, email: 0, substack: 0 },
-    );
-  }, [items]);
-
-  function updateSelected(patch: Partial<ContentItem>) {
-    setItems((current) =>
-      current.map((item) => (item.id === selected.id ? { ...item, ...patch, updated: "Just now" } : item)),
-    );
-    setSavePulse(true);
-    window.setTimeout(() => setSavePulse(false), 900);
+  async function resumeExpiredSession() {
+    setReauthChecking(true);
+    setReauthError("");
+    try {
+      const session = await loadSession();
+      requestSequence.current += 1;
+      if (!pendingLifecycleRef.current) lifecycleSynchronizationRef.current += 1;
+      sessionGenerationRef.current += 1;
+      csrfTokenRef.current = session.csrf_token ?? "";
+      setCsrfToken(csrfTokenRef.current);
+      setSessionExpired(false);
+      autosaveRef.current?.resumeUnauthorized();
+      setPendingSessionCreate(undefined);
+      setPendingSessionLifecycle(undefined);
+      if (pendingSessionCreate) void createItem(pendingSessionCreate);
+      if (pendingSessionLifecycle) void performLifecycle(pendingSessionLifecycle.document, pendingSessionLifecycle.action);
+      setDetailReload((current) => current + 1);
+      const refresh = refreshLibraryRef.current();
+      const sequence = requestSequence.current;
+      void refresh.catch((error) => {
+        if (sequence !== requestSequence.current) return;
+        if (isSessionRecoveryError(error)) {
+          setSessionExpired(true);
+        } else {
+          setFilterError("The library filters could not be refreshed.");
+        }
+      });
+    } catch {
+      setReauthError("Your session is still expired. Finish signing in, then try again.");
+    } finally {
+      setReauthChecking(false);
+    }
   }
 
-  function updateYouTubeBrief<Field extends keyof YouTubeBrief>(field: Field, value: YouTubeBrief[Field]) {
-    const youtube = selected.youtube ?? { topic: "", icp: "", angle: "", cta: "", description: "" };
-    updateSelected({ youtube: { ...youtube, [field]: value } });
+  function updateSelected(change: (current: ContentDetail) => ContentDetail) {
+    if (!selected || pendingLifecycle?.id === selected.id) return;
+    const next = change(selected);
+    setSelected(next);
+    setAllSummaries((items) => items.map((item) => item.id === next.id ? { ...item, working_title: next.working_title, status: next.status, updated_at: new Date().toISOString() } : item));
+    setSummaries((items) => items.map((item) => item.id === next.id ? { ...item, working_title: next.working_title, status: next.status, updated_at: new Date().toISOString() } : item));
+    autosaveManager?.enqueue(next);
+  }
+
+  function updateContent(content: ContentPayload) {
+    updateSelected((current) => ({ ...current, content }));
+  }
+
+  function updateYouTubeField<K extends keyof YouTubeContent>(field: K, value: YouTubeContent[K]) {
+    if (!selected || selected.type !== "youtube") return;
+    updateContent({ ...(selected.content as YouTubeContent), [field]: value });
+  }
+
+  function updateYouTubeSections(sections: Section[]) {
+    updateYouTubeField("sections", sections.map((section, position) => ({ ...section, position })));
+  }
+
+  function editYouTubeSection(clientKey: string, patch: Partial<Pick<Section, "title" | "body">>) {
+    if (!selected || selected.type !== "youtube") return;
+    const content = selected.content as YouTubeContent;
+    updateYouTubeSections(content.sections.map((section) => section.clientKey === clientKey ? { ...section, ...patch } : section));
+  }
+
+  function moveYouTubeSection(index: number, direction: -1 | 1) {
+    if (!selected || selected.type !== "youtube") return;
+    const sections = [...(selected.content as YouTubeContent).sections];
+    const target = index + direction;
+    if (target < 0 || target >= sections.length) return;
+    [sections[index], sections[target]] = [sections[target], sections[index]];
+    updateYouTubeSections(sections);
+  }
+
+  function removeYouTubeSection(clientKey: string) {
+    if (!selected || selected.type !== "youtube") return;
+    updateYouTubeSections((selected.content as YouTubeContent).sections.filter((section) => section.clientKey !== clientKey));
+  }
+
+  async function createItem(type: ContentType) {
+    if (csrfToken === undefined || createPendingRef.current) return;
+    lifecycleSynchronizationRef.current += 1;
+    createPendingRef.current = true;
+    setCreatePending(true);
+    setActionError("");
+    const operationId = createOperationIdsRef.current.get(type) ?? newOperationId();
+    createOperationIdsRef.current.set(type, operationId);
+    const mutationSessionGeneration = sessionGenerationRef.current;
+    let retryAfterStaleSession = false;
+    try {
+      const result = await createContent(type, csrfTokenRef.current, operationId);
+      requestSequence.current += 1;
+      setActionError("");
+      createOperationIdsRef.current.delete(type);
+      const clearedFilters: LibraryFilters = { query: "", type: "all", status: "all" };
+      activeFiltersRef.current = clearedFilters;
+      setQuery("");
+      setTypeFilter("all");
+      setStatusFilter("all");
+      setSelectedId(result.item_ids[0]);
+      setCreateOpen(false);
+      setLibraryOpen(false);
+      const refresh = refreshLibraryRef.current(clearedFilters);
+      const refreshSequence = requestSequence.current;
+      try {
+        await refresh;
+      } catch (error) {
+        if (refreshSequence !== requestSequence.current) return;
+        if (isSessionRecoveryError(error)) {
+          setSessionExpired(true);
+        } else {
+          setActionError("The item was created, but the library could not be refreshed.");
+        }
+      }
+    } catch (error) {
+      if (isSessionRecoveryError(error)) {
+        if (mutationSessionGeneration !== sessionGenerationRef.current) retryAfterStaleSession = true;
+        else {
+          setPendingSessionCreate(type);
+          setSessionExpired(true);
+        }
+      }
+      if (error instanceof ApiError && error.status < 500 && !isSessionRecoveryError(error)) createOperationIdsRef.current.delete(type);
+      if (!isSessionRecoveryError(error)) setActionError("The new item could not be created.");
+    } finally {
+      createPendingRef.current = false;
+      setCreatePending(false);
+    }
+    if (retryAfterStaleSession) void createItem(type);
+  }
+
+  async function archiveSelected() {
+    if (!selected || csrfToken === undefined) return;
+    await performLifecycle(selected, selected.archived_at ? "restore" : "archive");
+  }
+
+  async function confirmDelete() {
+    if (!selected || csrfToken === undefined) return;
+    setDeleteOpen(false);
+    await performLifecycle(selected, "delete");
+  }
+
+  async function performLifecycle(document: ContentDetail, action: LifecycleAction) {
+    if (pendingLifecycleRef.current) return;
+    const pending = { id: document.id, action };
+    const operationPrefix = `${document.id}:${action}:`;
+    const operationKey = `${operationPrefix}${document.revision}`;
+    for (const key of lifecycleOperationIdsRef.current.keys()) {
+      if (key.startsWith(operationPrefix) && key !== operationKey) lifecycleOperationIdsRef.current.delete(key);
+    }
+    const operationId = lifecycleOperationIdsRef.current.get(operationKey) ?? newOperationId();
+    lifecycleOperationIdsRef.current.set(operationKey, operationId);
+    const synchronizationGeneration = lifecycleSynchronizationRef.current + 1;
+    lifecycleSynchronizationRef.current = synchronizationGeneration;
+    const mutationSessionGeneration = sessionGenerationRef.current;
+    let retryAfterStaleSession = false;
+    pendingLifecycleRef.current = pending;
+    setPendingLifecycle(pending);
+    setActionError("");
+    try {
+      if (action === "delete") {
+        await deleteContent(document.id, document.revision, csrfTokenRef.current, operationId);
+        requestSequence.current += 1;
+        setActionError("");
+        lifecycleOperationIdsRef.current.delete(operationKey);
+        autosaveRef.current?.discard(document.id);
+        const remaining = allSummariesRef.current.filter((item) => item.id !== document.id);
+        const visibleRemaining = summariesRef.current.filter((item) => item.id !== document.id);
+        allSummariesRef.current = remaining;
+        summariesRef.current = visibleRemaining;
+        setAllSummaries((items) => items.filter((item) => item.id !== document.id));
+        setSummaries((items) => items.filter((item) => item.id !== document.id));
+        const deletedSelection = selectedIdRef.current === document.id;
+        if (deletedSelection) {
+          const activeFilters = activeFiltersRef.current;
+          const immediateReplacementId = !activeFilters.query && activeFilters.type === "all" && activeFilters.status === "all" ? visibleRemaining[0]?.id : undefined;
+          selectedIdRef.current = immediateReplacementId ?? "";
+          setSelectedId(immediateReplacementId ?? "");
+          if (!immediateReplacementId) {
+            pendingDeletedSelectionRef.current = true;
+            setSelected(undefined);
+            setConflict(undefined);
+          }
+        }
+        pendingLifecycleRef.current = undefined;
+        setPendingLifecycle(undefined);
+        const refresh = refreshLibraryRef.current();
+        const refreshSequence = requestSequence.current;
+        try {
+          await refresh;
+          if (refreshSequence !== requestSequence.current || lifecycleSynchronizationRef.current !== synchronizationGeneration) return;
+          if (deletedSelection && !selectedIdRef.current) {
+            const replacementId = summariesRef.current[0]?.id;
+            if (replacementId) {
+              selectedIdRef.current = replacementId;
+              setSelectedId(replacementId);
+            }
+          }
+        } catch (error) {
+          if (refreshSequence !== requestSequence.current || lifecycleSynchronizationRef.current !== synchronizationGeneration) return;
+          if (isSessionRecoveryError(error)) {
+            setSessionExpired(true);
+          } else {
+            setActionError("The item was deleted, but the library could not be refreshed.");
+          }
+        }
+        return;
+      }
+      const result = await setArchived(document.id, document.revision, action === "archive", csrfTokenRef.current, operationId);
+      requestSequence.current += 1;
+      setActionError("");
+      lifecycleOperationIdsRef.current.delete(operationKey);
+      const changedAt = new Date().toISOString();
+      const optimistic = {
+        ...document,
+        revision: result.revisions[0] ?? document.revision + 1,
+        expires_at: result.expires_at[0] ?? document.expires_at,
+        updated_at: changedAt,
+        archived_at: action === "archive" ? changedAt : undefined,
+      };
+      autosaveRef.current?.discard(document.id);
+      if (selectedIdRef.current === document.id) setSelected(optimistic);
+      setAllSummaries((items) => items.map((item) => item.id === document.id ? { ...item, ...optimistic, asset_counts: item.asset_counts } : item));
+      setSummaries((items) => items.map((item) => item.id === document.id ? { ...item, ...optimistic, asset_counts: item.asset_counts } : item));
+      pendingLifecycleRef.current = undefined;
+      setPendingLifecycle(undefined);
+      let synchronizationError = "";
+      const synchronizationVersion = autosaveRef.current?.getVersionStamp(document.id) ?? "0:0";
+      const synchronizationIsCurrent = () => lifecycleSynchronizationRef.current === synchronizationGeneration && (autosaveRef.current?.getVersionStamp(document.id) ?? "0:0") === synchronizationVersion && !autosaveRef.current?.getDraft(document.id);
+      try {
+        const saved = await getContent(document.id);
+        if (selectedIdRef.current === document.id && synchronizationIsCurrent()) setSelected(saved);
+      } catch (error) {
+        if (isSessionRecoveryError(error) && synchronizationIsCurrent()) {
+          setSessionExpired(true);
+        } else if (selectedIdRef.current === document.id && synchronizationIsCurrent()) {
+          synchronizationError = `The item was ${action === "archive" ? "archived" : "restored"}, but its current details could not be refreshed.`;
+        }
+      }
+      const refresh = refreshLibraryRef.current();
+      const refreshSequence = requestSequence.current;
+      try {
+        await refresh;
+      } catch (error) {
+        if (refreshSequence !== requestSequence.current) return;
+        if (isSessionRecoveryError(error) && lifecycleSynchronizationRef.current === synchronizationGeneration) {
+          setSessionExpired(true);
+        } else if (selectedIdRef.current === document.id && lifecycleSynchronizationRef.current === synchronizationGeneration) {
+          synchronizationError ||= `The item was ${action === "archive" ? "archived" : "restored"}, but the library could not be refreshed.`;
+        }
+      }
+      if (synchronizationError && selectedIdRef.current === document.id && lifecycleSynchronizationRef.current === synchronizationGeneration) setActionError(synchronizationError);
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 409 && error.current) {
+        lifecycleOperationIdsRef.current.delete(operationKey);
+        pendingLifecycleRef.current = { id: document.id, action };
+        autosaveRef.current?.beginConflict(document, error.current);
+      } else if (isSessionRecoveryError(error)) {
+        pendingLifecycleRef.current = undefined;
+        setPendingLifecycle(undefined);
+        if (mutationSessionGeneration !== sessionGenerationRef.current) retryAfterStaleSession = true;
+        else {
+          setPendingSessionLifecycle({ document, action });
+          setSessionExpired(true);
+        }
+      } else {
+        if (error instanceof ApiError && error.status < 500) lifecycleOperationIdsRef.current.delete(operationKey);
+        pendingLifecycleRef.current = undefined;
+        setPendingLifecycle(undefined);
+        if (selectedIdRef.current === document.id && lifecycleSynchronizationRef.current === synchronizationGeneration) setActionError(action === "delete" ? "The item could not be deleted." : "The lifecycle action could not be completed.");
+      }
+    }
+    if (retryAfterStaleSession) void performLifecycle(document, action);
+  }
+
+  function resolveSelectedConflict(choice: "server" | "local") {
+    if (!selected) return;
+    autosaveRef.current?.resolveConflict(selected.id, choice);
+  }
+
+  function resolveLifecycleConflict(retry: boolean) {
+    if (!selected) return;
+    const manager = autosaveRef.current;
+    const currentConflict = manager?.getConflict(selected.id);
+    const pending = pendingLifecycleRef.current;
+    manager?.resolveConflict(selected.id, "server");
+    pendingLifecycleRef.current = undefined;
+    setPendingLifecycle(undefined);
+    if (retry && pending?.id === selected.id && currentConflict) void performLifecycle(currentConflict.server, pending.action);
   }
 
   function captureAttachments(files: FileList | null, kind: Attachment["kind"], append = false) {
-    const captured = Array.from(files ?? []).map<Attachment>((file) => ({
-      id: uniqueId("asset"),
-      kind,
-      name: file.name,
-      size: file.size,
-    }));
+    if (!selected) return;
+    const captured = Array.from(files ?? []).map((file) => ({ id: uniqueId("asset"), kind, name: file.name, size: file.size }));
     if (!captured.length) return;
-
-    const existing = append
-      ? (selected.attachments ?? []).filter((attachment) => attachment.kind === kind)
-      : [];
-    updateSelected({ attachments: [...existing, ...captured] });
-  }
-
-  function removeAttachment(attachmentId: string) {
-    updateSelected({ attachments: (selected.attachments ?? []).filter((attachment) => attachment.id !== attachmentId) });
+    setAttachments((current) => {
+      const existing = append ? (current[selected.id] ?? []).filter((item) => item.kind === kind) : [];
+      return { ...current, [selected.id]: [...existing, ...captured] };
+    });
   }
 
   function replaceThumbnailPreview(file: File) {
+    if (!selected) return;
     const contentId = selected.id;
-    const requestId = uniqueId("thumbnail-read");
+    const requestId = uniqueId("thumbnail");
     const reader = new FileReader();
     setThumbnailPreviews((current) => ({ ...current, [contentId]: { requestId } }));
     reader.addEventListener("load", () => {
       if (typeof reader.result !== "string") return;
-      setThumbnailPreviews((current) => {
-        if (current[contentId]?.requestId !== requestId) return current;
-        return { ...current, [contentId]: { requestId, dataUrl: reader.result as string } };
-      });
+      setThumbnailPreviews((current) => current[contentId]?.requestId === requestId ? { ...current, [contentId]: { requestId, dataUrl: reader.result as string } } : current);
     }, { once: true });
     reader.readAsDataURL(file);
   }
 
-  function clearThumbnailPreview(contentId: string) {
-    setThumbnailPreviews((current) => {
-      const nextPreviews = { ...current };
-      delete nextPreviews[contentId];
-      return nextPreviews;
-    });
-  }
-
-  function updateBlock(blockId: string, text: string) {
-    const blocks = selected.blocks?.map((block) => (block.id === blockId ? { ...block, text } : block)) ?? [];
-    const words = blocks.reduce((total, block) => total + wordCount(block.text), 0);
-    updateSelected({ blocks, words });
-  }
-
-  function addBlock() {
-    const nextNumber = (selected.blocks?.length ?? 0) + 1;
-    updateSelected({
-      blocks: [...(selected.blocks ?? []), { id: uniqueId(`${selected.id}-block`), label: `Section ${nextNumber}`, text: "" }],
-    });
-  }
-
-  function createItem(type: ContentType) {
-    const isYoutube = type === "youtube";
-    const item: ContentItem = {
-      id: uniqueId(type),
-      type,
-      title: `Untitled ${typeMeta[type].shortLabel}`,
-      body: "",
-      status: "Idea",
-      updated: "Just now",
-      words: 0,
-      blocks: isYoutube
-        ? [
-            { id: uniqueId("intro"), label: "Intro", text: "" },
-            { id: uniqueId("section"), label: "Main section", text: "" },
-            { id: uniqueId("outro"), label: "Outro", text: "" },
-          ]
-        : undefined,
-      youtube: isYoutube
-        ? { topic: "", icp: "", angle: "", cta: "", description: "" }
-        : undefined,
-      subject: type === "email" ? "" : undefined,
-      subheadline: type === "substack" ? "" : undefined,
-    };
-    setItems((current) => [item, ...current]);
-    setSelectedId(item.id);
-    setTypeFilter("all");
-    setStatusFilter("All");
-    setCreateOpen(false);
-    setLibraryOpen(false);
-  }
-
-  function createRepurposedDrafts() {
-    const sourceTitle = displayTitle(selected);
-    const sourceText = selected.type === "youtube"
-      ? selected.blocks?.map((block) => block.text).filter(Boolean).join("\n\n") ?? ""
-      : selected.body;
-    const drafts = selectedOutputs.map<ContentItem>((type) => {
-      const blocks: ScriptBlock[] | undefined = type === "youtube"
-        ? [
-            { id: uniqueId("intro"), label: "Intro", text: "Open with the strongest claim or practical result." },
-            { id: uniqueId("main"), label: "Main section", text: sourceText },
-            { id: uniqueId("outro"), label: "Outro", text: "Bring the lesson together and give the viewer a clear next step." },
-          ]
-        : undefined;
-      const body = type === "youtube"
-        ? ""
-        : `${sourceText}\n\nShape this idea for ${typeMeta[type].label}.`;
-      return {
-        id: uniqueId(`${type}-repurposed`),
-        type,
-        title: `${sourceTitle} · ${typeMeta[type].shortLabel}`,
-        body,
-        status: "Draft",
-        updated: "Just now",
-        words: blocks ? blocks.reduce((total, block) => total + wordCount(block.text), 0) : wordCount(body),
-        blocks,
-        youtube: type === "youtube"
-          ? {
-              topic: sourceTitle,
-              icp: "",
-              angle: "Turn the core lesson into a clear, practical walkthrough.",
-              cta: "",
-              description: "",
-            }
-          : undefined,
-        subject: type === "email" ? sourceTitle : undefined,
-        subheadline: type === "substack" ? `A practical guide to ${sourceTitle}` : undefined,
-      };
-    });
-    if (drafts.length) {
-      setItems((current) => [...drafts, ...current]);
-      setSelectedId(drafts[0].id);
-      setTypeFilter("all");
-      setStatusFilter("All");
-      setQuery("");
-    }
-    setRepurposeOpen(false);
-  }
-
-  function openRepurpose() {
-    const preferredOutputs: ContentType[] = ["linkedin", "x", "email", "instagram", "tiktok", "substack", "youtube"];
-    setSelectedOutputs(preferredOutputs.filter((type) => type !== selected.type).slice(0, 3));
-    setRepurposeOpen(true);
-  }
-
-  function deleteSelected() {
-    if (items.length === 1) return;
-    clearThumbnailPreview(selected.id);
-    const remaining = items.filter((item) => item.id !== selected.id);
-    setItems(remaining);
-    setSelectedId(remaining[0].id);
-  }
-
-  function renderDocumentHeading() {
-    if (selected.type === "youtube") {
-      return (
-        <div className="document-title-copy">
-          <p className="eyebrow">Video workspace</p>
-          <h1>{displayTitle(selected)}</h1>
-        </div>
-      );
-    }
-
-    if (selected.type === "email") {
-      return (
-        <label className="document-field document-field-large">
-          <span>Subject line</span>
-          <input
-            aria-label="Email subject"
-            value={selected.subject ?? ""}
-            placeholder="Write a subject line…"
-            onChange={(event) => updateSelected({ subject: event.target.value, title: event.target.value })}
-          />
-        </label>
-      );
-    }
-
-    if (selected.type === "substack") {
-      return (
-        <div className="publication-heading">
-          <label className="document-field document-field-large">
-            <span>Headline</span>
-            <input
-              aria-label="Substack headline"
-              value={selected.title}
-              placeholder="Write a headline…"
-              onChange={(event) => updateSelected({ title: event.target.value })}
-            />
-          </label>
-          <label className="document-field document-field-subtitle">
-            <span>Sub-headline</span>
-            <input
-              aria-label="Substack sub-headline"
-              value={selected.subheadline ?? ""}
-              placeholder="Add a short promise or summary…"
-              onChange={(event) => updateSelected({ subheadline: event.target.value })}
-            />
-          </label>
-        </div>
-      );
-    }
-
-    const heading = selected.type === "linkedin"
-      ? "LinkedIn post"
-      : selected.type === "x"
-        ? "X post"
-        : `${typeMeta[selected.type].label} script`;
+  function renderWorkingTitle(label = "Working title") {
+    if (!selected) return null;
     return (
-      <div className="document-title-copy compact">
-        <p className="eyebrow">{typeMeta[selected.type].label}</p>
-        <h1>{heading}</h1>
-      </div>
+      <label className="document-field document-field-large">
+        <span>{label}</span>
+        <input aria-label="Working title" value={selected.working_title} required onChange={(event) => updateSelected((current) => ({ ...current, working_title: event.target.value }))} />
+      </label>
     );
   }
 
   function renderAssetPanel() {
-    type AssetAction = {
-      kind: Attachment["kind"];
-      label: string;
-      accept: string;
-      ariaLabel: string;
-      multiple?: boolean;
-    };
-
+    if (!selected) return null;
+    type Action = { kind: Attachment["kind"]; label: string; accept: string; ariaLabel: string; multiple?: boolean };
     let title = "";
     let description = "";
-    let actions: AssetAction[] = [];
-
+    let actions: Action[] = [];
     if (selected.type === "youtube") {
-      title = "Finished video";
-      description = "Keep the final YouTube upload beside its brief and script.";
+      title = "Finished video"; description = "Keep the final YouTube upload beside its brief and script.";
       actions = [{ kind: "video", label: "Upload video", accept: "video/*", ariaLabel: "Choose YouTube video" }];
     } else if (selected.type === "instagram") {
-      title = "Instagram media";
-      description = "Add one image, a finished Reel, or several Canva slides.";
-      actions = [
-        { kind: "image", label: "Add images", accept: "image/*", ariaLabel: "Choose Instagram images", multiple: true },
-        { kind: "video", label: "Add Reel", accept: "video/*", ariaLabel: "Choose Instagram video" },
-      ];
+      title = "Instagram media"; description = "Add one image, a finished Reel, or several Canva slides.";
+      actions = [{ kind: "image", label: "Add images", accept: "image/*", ariaLabel: "Choose Instagram images", multiple: true }, { kind: "video", label: "Add Reel", accept: "video/*", ariaLabel: "Choose Instagram video" }];
     } else if (selected.type === "tiktok") {
-      title = "Finished video";
-      description = "Keep the final TikTok video beside its script.";
+      title = "Finished video"; description = "Keep the final TikTok video beside its script.";
       actions = [{ kind: "video", label: "Upload video", accept: "video/*", ariaLabel: "Choose TikTok video" }];
     } else if (selected.type === "linkedin") {
-      title = "Post media";
-      description = "Add an image or upload a Canva carousel as a PDF.";
-      actions = [
-        { kind: "image", label: "Add image", accept: "image/*", ariaLabel: "Choose LinkedIn image" },
-        { kind: "pdf", label: "Add PDF", accept: "application/pdf", ariaLabel: "Choose LinkedIn PDF" },
-      ];
+      title = "Post media"; description = "Add an image or upload a Canva carousel as a PDF.";
+      actions = [{ kind: "image", label: "Add image", accept: "image/*", ariaLabel: "Choose LinkedIn image" }, { kind: "pdf", label: "Add PDF", accept: "application/pdf", ariaLabel: "Choose LinkedIn PDF" }];
     } else if (selected.type === "x") {
-      title = "Post image";
-      description = "Add one image to publish with the post.";
+      title = "Post image"; description = "Add one image to publish with the post.";
       actions = [{ kind: "image", label: "Add image", accept: "image/*", ariaLabel: "Choose X image" }];
-    } else {
-      return null;
-    }
-
-    const attachments = selected.attachments ?? [];
-    const instagramSlides = selected.type === "instagram"
-      ? attachments.filter((attachment) => attachment.kind === "image").length
-      : 0;
-
+    } else return null;
+    const files = attachments[selected.id] ?? [];
+    const slides = selected.type === "instagram" ? files.filter((file) => file.kind === "image").length : 0;
     return (
       <section className="asset-panel" aria-label={`${typeMeta[selected.type].label} assets`}>
         <div className="asset-panel-header">
           <span className="asset-panel-icon"><Paperclip size={18} /></span>
-          <div className="asset-panel-copy">
-            <strong>{title}</strong>
-            <small>{description}</small>
-          </div>
+          <div className="asset-panel-copy"><strong>{title}</strong><small>{description}</small></div>
           <div className="asset-actions">
             {actions.map((action) => {
               const inputId = `${selected.id}-${action.kind}-upload`;
-              return (
-                <span className="asset-action" key={action.kind}>
-                  <input
-                    className="visually-hidden"
-                    id={inputId}
-                    type="file"
-                    accept={action.accept}
-                    multiple={action.multiple}
-                    aria-label={action.ariaLabel}
-                    onChange={(event) => {
-                      captureAttachments(event.currentTarget.files, action.kind, Boolean(action.multiple));
-                      event.currentTarget.value = "";
-                    }}
-                  />
-                  <label className="asset-upload-button" htmlFor={inputId}>
-                    <Upload size={14} /> {action.label}
-                  </label>
-                </span>
-              );
+              return <span className="asset-action" key={action.kind}>
+                <input className="visually-hidden" id={inputId} type="file" accept={action.accept} multiple={action.multiple} aria-label={action.ariaLabel} onChange={(event) => { captureAttachments(event.currentTarget.files, action.kind, Boolean(action.multiple)); event.currentTarget.value = ""; }} />
+                <label className="asset-upload-button" htmlFor={inputId}><Upload size={14} /> {action.label}</label>
+              </span>;
             })}
           </div>
         </div>
-
-        {attachments.length > 0 && (
-          <div className="asset-list">
-            {instagramSlides > 1 && (
-              <div className="asset-summary"><ImagePlus size={14} /> Carousel · {instagramSlides} slides</div>
-            )}
-            {attachments.map((attachment, index) => (
-              <div className="asset-file" key={attachment.id}>
-                <span className="asset-file-icon"><AttachmentIcon kind={attachment.kind} /></span>
-                <span className="asset-file-copy">
-                  <strong>{attachment.name}</strong>
-                  <small>
-                    {attachment.kind === "pdf" ? "PDF" : attachment.kind === "video" ? "Video" : "Image"}
-                    {instagramSlides > 1 && attachment.kind === "image" ? ` · Slide ${index + 1}` : ""}
-                    {` · ${formatFileSize(attachment.size)}`}
-                  </small>
-                </span>
-                <button aria-label={`Remove ${attachment.name}`} onClick={() => removeAttachment(attachment.id)}>
-                  <X size={14} />
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
+        {files.length > 0 && <div className="asset-list">
+          {slides > 1 && <div className="asset-summary"><ImagePlus size={14} /> Carousel · {slides} slides</div>}
+          {files.map((file, index) => <div className="asset-file" key={file.id}>
+            <span className="asset-file-icon"><AttachmentIcon kind={file.kind} /></span>
+            <span className="asset-file-copy"><strong>{file.name}</strong><small>{file.kind === "pdf" ? "PDF" : file.kind === "video" ? "Video" : "Image"}{slides > 1 && file.kind === "image" ? ` · Slide ${index + 1}` : ""}{` · ${formatFileSize(file.size)}`}</small></span>
+            <button aria-label={`Remove ${file.name}`} onClick={() => setAttachments((current) => ({ ...current, [selected.id]: (current[selected.id] ?? []).filter((item) => item.id !== file.id) }))}><X size={14} /></button>
+          </div>)}
+        </div>}
         <p className="prototype-note"><Paperclip size={12} /> Mock upload. Files are not persisted and reset on reload.</p>
       </section>
     );
   }
 
+  // These callbacks only run from user events. The refs rule cannot trace that
+  // through this nested renderer without treating them as render-time reads.
   function renderYouTubeEditor() {
-    const youtube = selected.youtube ?? { topic: "", icp: "", angle: "", cta: "", description: "" };
-    const youtubeTitle = selected.title.startsWith("Untitled") ? "" : selected.title;
-    const completed = [youtube.topic, youtube.icp, youtube.angle, youtube.cta, youtubeTitle, youtube.description, youtube.thumbnailName]
-      .filter((value) => value?.trim()).length;
-    const thumbnailInputId = `thumbnail-${selected.id}`;
-    const thumbnailPreview = thumbnailPreviews[selected.id]?.dataUrl;
-
-    return (
-      <div className="youtube-editor">
-        <details className="planning-card" open>
-          <summary>
-            <span className="planning-summary-icon"><Target size={17} /></span>
-            <span className="planning-summary-copy">
-              <strong>Video brief</strong>
-              <small>Decide why this video should exist before writing it.</small>
-            </span>
-            <span className="brief-progress">{completed}/7 complete</span>
-            <ChevronDown className="summary-chevron" size={17} />
-          </summary>
-
-          <div className="planning-content">
-            <div className="planning-section-heading">
-              <span>Strategy</span>
-              <small>Shape the idea before you shape the script.</small>
-            </div>
-            <div className="brief-grid">
-              <label className="brief-field">
-                <span><Lightbulb size={14} /> Topic</span>
-                <textarea
-                  aria-label="YouTube topic"
-                  rows={2}
-                  value={youtube.topic}
-                  placeholder="What is this video really about?"
-                  onChange={(event) => updateYouTubeBrief("topic", event.target.value)}
-                />
-              </label>
-              <label className="brief-field">
-                <span><Users size={14} /> ICP</span>
-                <textarea
-                  aria-label="YouTube ICP"
-                  rows={2}
-                  value={youtube.icp}
-                  placeholder="Who is this specifically for?"
-                  onChange={(event) => updateYouTubeBrief("icp", event.target.value)}
-                />
-              </label>
-              <label className="brief-field brief-field-wide">
-                <span><Sparkles size={14} /> Unique angle</span>
-                <textarea
-                  aria-label="YouTube angle"
-                  rows={2}
-                  value={youtube.angle}
-                  placeholder="Why would someone choose this video over every other one?"
-                  onChange={(event) => updateYouTubeBrief("angle", event.target.value)}
-                />
-              </label>
-              <label className="brief-field brief-field-wide">
-                <span><MousePointerClick size={14} /> CTA</span>
-                <input
-                  aria-label="YouTube CTA"
-                  value={youtube.cta}
-                  placeholder="What should the viewer do next?"
-                  onChange={(event) => updateYouTubeBrief("cta", event.target.value)}
-                />
-              </label>
-            </div>
-
-            <div className="planning-section-heading publishing-heading">
-              <span>Publishing details</span>
-              <small>Capture these here, even if you generate them after the script.</small>
-            </div>
-            <div className="publishing-grid">
-              <div className="publishing-fields">
-                <label className="brief-field">
-                  <span>YouTube title</span>
-                  <input
-                    aria-label="YouTube title"
-                    value={youtubeTitle}
-                    placeholder="Generate or write the final title…"
-                    onChange={(event) => updateSelected({ title: event.target.value })}
-                  />
-                </label>
-                <label className="brief-field">
-                  <span>Description</span>
-                  <textarea
-                    aria-label="YouTube description"
-                    rows={4}
-                    value={youtube.description}
-                    placeholder="Add the final video description…"
-                    onChange={(event) => updateYouTubeBrief("description", event.target.value)}
-                  />
-                </label>
-              </div>
-              <section className="youtube-preview-field" aria-label="YouTube video preview">
-                <span className="attachment-label">Video preview</span>
-                <div className="youtube-preview-card">
-                  <input
-                    className="visually-hidden"
-                    id={thumbnailInputId}
-                    type="file"
-                    accept="image/*"
-                    aria-label="Choose YouTube thumbnail"
-                    onChange={(event) => {
-                      const file = event.target.files?.[0];
-                      if (file) {
-                        updateSelected({ youtube: { ...youtube, thumbnailName: file.name, thumbnailSize: file.size } });
-                        replaceThumbnailPreview(file);
-                        event.currentTarget.value = "";
-                      }
-                    }}
-                  />
-                  <label
-                    className={`youtube-preview-thumbnail ${thumbnailPreview ? "has-preview" : ""}`}
-                    htmlFor={thumbnailInputId}
-                    style={thumbnailPreview ? { backgroundImage: `url("${thumbnailPreview}")` } : undefined}
-                  >
-                    {!thumbnailPreview && (
-                      <span className="youtube-thumbnail-placeholder" aria-hidden="true">
-                        <small>Content system</small>
-                        <strong>One idea.<br />Every format.</strong>
-                        <span>CF</span>
-                      </span>
-                    )}
-                    <span className="youtube-thumbnail-action">
-                      <Upload size={14} /> {youtube.thumbnailName ? "Replace thumbnail" : "Add thumbnail"}
-                    </span>
-                  </label>
-                  <div className="youtube-preview-details">
-                    <span className="youtube-channel-avatar">O</span>
-                    <div>
-                      <h3 aria-label="YouTube preview title">{youtubeTitle || "Your video title will appear here"}</h3>
-                      <small>Owain Lewis <span>·</span> Draft</small>
-                    </div>
-                    <MoreHorizontal size={17} />
-                  </div>
-                </div>
-                <div className="youtube-preview-file">
-                  <span>
-                    {youtube.thumbnailName
-                      ? `${youtube.thumbnailName} · Image · ${formatFileSize(youtube.thumbnailSize ?? 0)}`
-                      : "16:9 thumbnail · PNG, JPG, or WebP"}
-                  </span>
-                  {youtube.thumbnailName && (
-                    <button
-                      aria-label="Remove YouTube thumbnail"
-                      onClick={() => {
-                        clearThumbnailPreview(selected.id);
-                        updateSelected({ youtube: { ...youtube, thumbnailName: undefined, thumbnailSize: undefined } });
-                      }}
-                    >
-                      <X size={13} /> Remove
-                    </button>
-                  )}
-                </div>
-              </section>
-            </div>
+    if (!selected || selected.type !== "youtube") return null;
+    const content = selected.content as YouTubeContent;
+    const thumbnail = thumbnailPreviews[selected.id]?.dataUrl;
+    const thumbnailInput = `thumbnail-${selected.id}`;
+    return <div className="youtube-editor">
+      <details className="planning-card" open>
+        <summary><span className="planning-summary-icon"><Target size={17} /></span><span className="planning-summary-copy"><strong>Video brief</strong><small>Decide why this video should exist before writing it.</small></span><ChevronDown className="summary-chevron" size={17} /></summary>
+        <div className="planning-content">
+          <div className="planning-section-heading"><span>Strategy</span><small>Shape the idea before you shape the script.</small></div>
+          <div className="brief-grid">
+            <label className="brief-field"><span><Lightbulb size={14} /> Topic</span><textarea aria-label="YouTube topic" rows={2} value={content.topic} onChange={(event) => updateYouTubeField("topic", event.target.value)} /></label>
+            <label className="brief-field"><span><Users size={14} /> ICP</span><textarea aria-label="YouTube ICP" rows={2} value={content.icp} onChange={(event) => updateYouTubeField("icp", event.target.value)} /></label>
+            <label className="brief-field brief-field-wide"><span>Unique angle</span><textarea aria-label="YouTube angle" rows={2} value={content.angle} onChange={(event) => updateYouTubeField("angle", event.target.value)} /></label>
+            <label className="brief-field brief-field-wide"><span><MousePointerClick size={14} /> CTA</span><input aria-label="YouTube CTA" value={content.cta} onChange={(event) => updateYouTubeField("cta", event.target.value)} /></label>
           </div>
-        </details>
-
-        {renderAssetPanel()}
-
-        <div className="section-intro">
-          <div><p className="eyebrow">Script structure</p><h2>Build the story, one block at a time</h2></div>
-          <span>{selected.blocks?.length ?? 0} sections</span>
-        </div>
-        {selected.blocks?.map((block, index) => (
-          <section className="script-block" key={block.id}>
-            <div className="block-rail"><span>{String(index + 1).padStart(2, "0")}</span><span className="rail-line" /></div>
-            <div className="block-content">
-              <div className="block-topline">
-                <input
-                  aria-label={`Section ${index + 1} name`}
-                  value={block.label}
-                  placeholder="Name this section"
-                  onChange={(event) => {
-                    const blocks = selected.blocks?.map((current) => current.id === block.id ? { ...current, label: event.target.value } : current);
-                    updateSelected({ blocks });
-                  }}
-                />
-                <button aria-label={`More options for ${block.label || `section ${index + 1}`}`}><MoreHorizontal size={17} /></button>
-              </div>
-              <textarea
-                aria-label={`${block.label || `Section ${index + 1}`} script`}
-                value={block.text}
-                placeholder="Write this part of your script…"
-                onChange={(event) => updateBlock(block.id, event.target.value)}
-                rows={Math.max(3, Math.ceil(block.text.length / 92))}
-              />
-              <span className="block-count">{wordCount(block.text)} words</span>
+          <div className="planning-section-heading publishing-heading"><span>Publishing details</span><small>Keep publishing copy separate from the working title.</small></div>
+          <div className="publishing-grid">
+            <div className="publishing-fields">
+              <label className="brief-field"><span>YouTube title</span><input aria-label="YouTube title" value={content.publishing_title} onChange={(event) => updateYouTubeField("publishing_title", event.target.value)} /></label>
+              <label className="brief-field"><span>Description</span><textarea aria-label="YouTube description" rows={4} value={content.description} onChange={(event) => updateYouTubeField("description", event.target.value)} /></label>
             </div>
-          </section>
-        ))}
-        <button className="add-block-button" onClick={addBlock}><Plus size={17} /> Add section</button>
-      </div>
-    );
+            <section className="youtube-preview-field" aria-label="YouTube video preview">
+              <span className="attachment-label">Video preview</span>
+              <div className="youtube-preview-card">
+                <input className="visually-hidden" id={thumbnailInput} type="file" accept="image/*" aria-label="Choose YouTube thumbnail" onChange={(event) => { const file = event.target.files?.[0]; if (file) replaceThumbnailPreview(file); event.currentTarget.value = ""; }} />
+                <label className={`youtube-preview-thumbnail ${thumbnail ? "has-preview" : ""}`} htmlFor={thumbnailInput} style={thumbnail ? { backgroundImage: `url("${thumbnail}")` } : undefined}>
+                  {!thumbnail && <span className="youtube-thumbnail-placeholder" aria-hidden="true"><small>Content system</small><strong>One idea.<br />Every format.</strong><span>CF</span></span>}
+                  <span className="youtube-thumbnail-action"><Upload size={14} /> {thumbnail ? "Replace thumbnail" : "Add thumbnail"}</span>
+                </label>
+                <div className="youtube-preview-details"><span className="youtube-channel-avatar">O</span><div><h3 aria-label="YouTube preview title">{content.publishing_title || "Your video title will appear here"}</h3><small>Owain Lewis <span>·</span> Draft</small></div><MoreHorizontal size={17} /></div>
+              </div>
+              {thumbnail && <button className="thumbnail-remove" aria-label="Remove YouTube thumbnail" onClick={() => setThumbnailPreviews((current) => { const next = { ...current }; delete next[selected.id]; return next; })}><X size={13} /> Remove thumbnail</button>}
+            </section>
+          </div>
+        </div>
+      </details>
+      {renderAssetPanel()}
+      <section className="transcript-card" aria-labelledby="transcript-heading">
+        <div className="transcript-heading"><div><p className="eyebrow">Recording transcript</p><h2 id="transcript-heading">What was actually said</h2></div><span>Separate from the planned script</span></div>
+        <p>Paste the spoken words here after recording. Editing this transcript never changes the script sections below.</p>
+        <textarea aria-label="YouTube transcript: what was actually said" value={content.transcript} rows={8} placeholder="Paste the words that were actually spoken…" onChange={(event) => updateYouTubeField("transcript", event.target.value)} />
+      </section>
+      <div className="section-intro"><div><p className="eyebrow">Planned script</p><h2>Build the story, one block at a time</h2></div><span>{content.sections.length} sections</span></div>
+      {content.sections.map((section, index) => <section className="script-block" key={section.clientKey}>
+        <div className="block-rail"><span>{String(index + 1).padStart(2, "0")}</span><span className="rail-line" /></div>
+        <div className="block-content">
+          <div className="block-topline"><input aria-label={`Section ${index + 1} name`} value={section.title} onChange={(event) => editYouTubeSection(section.clientKey, { title: event.target.value })} /><span className="section-actions"><button aria-label={`Move ${section.title || `section ${index + 1}`} up`} disabled={index === 0} onClick={() => moveYouTubeSection(index, -1)}><ArrowUp size={15} /></button><button aria-label={`Move ${section.title || `section ${index + 1}`} down`} disabled={index === content.sections.length - 1} onClick={() => moveYouTubeSection(index, 1)}><ArrowDown size={15} /></button><button aria-label={`Remove ${section.title || `section ${index + 1}`}`} onClick={() => removeYouTubeSection(section.clientKey)}><Trash2 size={15} /></button></span></div>
+          <textarea aria-label={`${section.title || `Section ${index + 1}`} script`} value={section.body} rows={Math.max(3, Math.ceil(section.body.length / 92))} onChange={(event) => editYouTubeSection(section.clientKey, { body: event.target.value })} />
+          <span className="block-count">{wordCount(section.body)} words</span>
+        </div>
+      </section>)}
+      <button className="add-block-button" onClick={() => updateYouTubeSections([...content.sections, { clientKey: newClientKey(), position: content.sections.length, title: `Section ${content.sections.length + 1}`, body: "" }])}><Plus size={17} /> Add section</button>
+    </div>;
   }
 
   function renderPlainEditor() {
-    const isScriptContent = selected.type === "instagram" || selected.type === "tiktok";
-    const editorLabel = selected.type === "email"
-      ? "Email"
-      : selected.type === "substack"
-        ? "Article body"
-        : isScriptContent
-          ? `${typeMeta[selected.type].label} script`
-          : `${typeMeta[selected.type].label} post`;
-
-    return (
-      <div className="plain-editor-wrap">
-        {renderAssetPanel()}
-        <div className="plain-editor-label"><SquarePen size={16} /> {editorLabel}</div>
-        <textarea
-          className="plain-editor"
-          aria-label={editorLabel}
-          value={selected.body}
-          placeholder={selected.type === "email"
-            ? "Write the email…"
-            : selected.type === "substack"
-              ? "Start the article…"
-              : isScriptContent
-                ? "Write the script…"
-                : "Write the post…"}
-          onChange={(event) => updateSelected({ body: event.target.value, words: wordCount(event.target.value) })}
-        />
-      </div>
-    );
+    if (!selected || selected.type === "youtube") return null;
+    const label = selected.type === "email" ? "Email body" : selected.type === "substack" ? "Article body" : selected.type === "instagram" || selected.type === "tiktok" ? `${typeMeta[selected.type].label} script` : `${typeMeta[selected.type].label} post`;
+    const content = selected.content;
+    const body = "body" in content ? content.body : "script" in content ? content.script : "";
+    const setBody = (value: string) => updateContent("body" in content ? { ...content, body: value } : { ...content, script: value });
+    return <div className="plain-editor-wrap">
+      {selected.type === "email" && "subject" in content && <label className="brief-field standalone-field"><span>Email subject</span><input aria-label="Email subject" value={content.subject} onChange={(event) => updateContent({ ...content, subject: event.target.value })} /></label>}
+      {selected.type === "substack" && "headline" in content && <div className="publication-fields"><label className="brief-field"><span>Headline</span><input aria-label="Substack headline" value={content.headline} onChange={(event) => updateContent({ ...content, headline: event.target.value })} /></label><label className="brief-field"><span>Sub-headline</span><input aria-label="Substack sub-headline" value={content.subheadline} onChange={(event) => updateContent({ ...content, subheadline: event.target.value })} /></label></div>}
+      {renderAssetPanel()}
+      <div className="plain-editor-label"><SquarePen size={16} /> {label}</div>
+      <textarea className="plain-editor" aria-label={label} value={body} placeholder={selected.type === "email" ? "Write the email…" : selected.type === "substack" ? "Start the article…" : "Write here…"} onChange={(event) => setBody(event.target.value)} />
+    </div>;
   }
 
-  return (
-    <main className="app-shell">
-      <aside className="sidebar" aria-label="Main navigation">
-        <div className="brand-row">
-          <div className="brand-mark"><Zap size={17} fill="currentColor" /></div>
-          <span className="brand-name">ContentFlow</span>
-          <button className="icon-button sidebar-collapse" aria-label="Collapse sidebar"><PanelLeftClose size={17} /></button>
-        </div>
+  if (authState === "loading") return <main className="centered-state"><LoaderCircle className="spin" /><h1>Opening ContentFlow</h1><p>Loading your workspace…</p></main>;
+  if (authState === "signed-out") return <main className="centered-state"><div className="brand-mark"><Zap size={20} fill="currentColor" /></div><h1>ContentFlow</h1><p>Sign in to open your personal content workspace.</p><a className="primary-button" href="/api/v1/auth/login">Sign in with Google</a></main>;
+  if (authState === "error") return <main className="centered-state"><AlertTriangle /><h1>ContentFlow is unavailable</h1><p>{loadError}</p><button className="primary-button" onClick={() => window.location.reload()}>Try again</button></main>;
+  if (sessionExpired) return <main className="centered-state"><AlertTriangle /><h1>Your session expired</h1><p>{pendingSessionLifecycle ? `Your ${pendingSessionLifecycle.action} action for “${pendingSessionLifecycle.document.working_title}” is waiting. Sign in in a new tab, then return here to retry it.` : "Your unsaved changes are still queued. Sign in in a new tab, then return here to continue saving."}</p><a className="primary-button" href="/api/v1/auth/login" target="_blank" rel="noreferrer">Open sign in</a><button className="secondary-button" disabled={reauthChecking} onClick={() => void resumeExpiredSession()}>{reauthChecking ? "Checking…" : "I’ve signed in"}</button>{reauthError && <p className="inline-error" role="alert">{reauthError}</p>}</main>;
 
-        <button className="new-content-button" onClick={() => setCreateOpen(true)}>
-          <Plus size={18} />
-          <span>New content</span>
-          <span className="key-hint">N</span>
-        </button>
+  const currentSaveState = selected ? saveStates[selected.id] ?? "saved" : "saved";
+  const selectedPendingLifecycle = selected && pendingLifecycle?.id === selected.id ? pendingLifecycle : undefined;
+  const foreignPendingLifecycle = selected && pendingLifecycle && pendingLifecycle.id !== selected.id && autosaveManager?.getConflict(pendingLifecycle.id) ? pendingLifecycle : undefined;
+  const foreignPendingLifecycleTitle = foreignPendingLifecycle ? allSummaries.find((item) => item.id === foreignPendingLifecycle.id)?.working_title : undefined;
+  const selectedExpiry = selected ? expiry(selected.expires_at) : undefined;
+  const lifecycleDisabled = currentSaveState !== "saved" || Boolean(pendingLifecycle) || Boolean(selectedExpiry?.expired);
 
-        <nav className="primary-nav">
-          <button className={`nav-item ${typeFilter === "all" ? "active" : ""}`} onClick={() => setTypeFilter("all")}>
-            <Inbox size={18} /> <span>All content</span><span className="nav-count">{items.length}</span>
-          </button>
-          <button className="nav-item"><CalendarDays size={18} /> <span>Calendar</span></button>
-        </nav>
+  return <main className="app-shell">
+    <aside className="sidebar" aria-label="Main navigation">
+      <div className="brand-row"><div className="brand-mark"><Zap size={17} fill="currentColor" /></div><span className="brand-name">ContentFlow</span><button className="icon-button sidebar-collapse" aria-label="Collapse sidebar"><PanelLeftClose size={17} /></button></div>
+      <button className="new-content-button" onClick={() => setCreateOpen(true)}><Plus size={18} /><span>New content</span><span className="key-hint">N</span></button>
+      <nav className="primary-nav"><button className={`nav-item ${typeFilter === "all" ? "active" : ""}`} onClick={() => setTypeFilter("all")}><Inbox size={18} /><span>All content</span><span className="nav-count">{allSummaries.length}</span></button><button className="nav-item"><CalendarDays size={18} /><span>Calendar</span></button></nav>
+      <div className="nav-section"><p className="nav-label">Content types</p>{contentTypes.map((type) => <button key={type} className={`nav-item ${typeFilter === type ? "active" : ""}`} onClick={() => setTypeFilter(type)}><span className="nav-type-icon" style={{ color: typeMeta[type].color }}><TypeIcon type={type} /></span><span>{typeMeta[type].label}</span><span className="nav-count">{counts[type]}</span></button>)}</div>
+      <div className="sidebar-bottom"><button className="nav-item theme-toggle" onClick={toggleTheme} aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}>{theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}<span>{theme === "dark" ? "Light mode" : "Dark mode"}</span></button><button className="nav-item"><Settings size={18} /><span>Settings</span></button><div className="profile-row"><div className="avatar">OL</div><div><strong>Owain Lewis</strong><span>Personal workspace</span></div><MoreHorizontal size={17} /></div></div>
+    </aside>
 
-        <div className="nav-section">
-          <p className="nav-label">Content types</p>
-          {(Object.keys(typeMeta) as ContentType[]).map((type) => (
-            <button
-              key={type}
-              className={`nav-item ${typeFilter === type ? "active" : ""}`}
-              onClick={() => setTypeFilter(type)}
-            >
-              <span className="nav-type-icon" style={{ color: typeMeta[type].color }}><TypeIcon type={type} /></span>
-              <span>{typeMeta[type].label}</span>
-              <span className="nav-count">{counts[type]}</span>
-            </button>
-          ))}
-        </div>
+    <section ref={libraryPanelRef} className={`library-panel ${libraryOpen ? "open" : ""}`} aria-label="Content library" aria-hidden={isCompact && !libraryOpen ? true : undefined} inert={isCompact && !libraryOpen ? true : undefined}>
+      <div className="library-header"><button className="icon-button mobile-close" onClick={() => setLibraryOpen(false)} aria-label="Close library"><ArrowLeft size={19} /></button><div><p className="eyebrow">Workspace</p><h1>{typeFilter === "all" ? "All content" : typeMeta[typeFilter].label}</h1></div><button className="icon-button compact-new" onClick={() => setCreateOpen(true)} aria-label="Create content"><Plus size={19} /></button></div>
+      <label className="search-box"><Search size={17} /><input ref={searchRef} value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search titles" aria-label="Search content titles" /><span className="key-hint">⌘ K</span></label>
+      <div className="filter-row" aria-label="Filter by status"><button className={statusFilter === "all" ? "active" : ""} onClick={() => setStatusFilter("all")}>All</button>{contentStatuses.map((status) => <button key={status} className={statusFilter === status ? "active" : ""} onClick={() => setStatusFilter(status)}>{statusLabels[status]}</button>)}</div>
+      {filterError && <div className="inline-error" role="alert">{filterError}</div>}
+      <div className="library-summary"><span>{summaries.length} {summaries.length === 1 ? "item" : "items"}</span><span>Last edited <ChevronDown size={14} /></span></div>
+      <div className="content-list">
+        {summaries.map((item) => { const itemExpiry = expiry(item.expires_at); return <button className={`content-card ${selectedId === item.id ? "selected" : ""}`} aria-current={selectedId === item.id ? "true" : undefined} key={item.id} onClick={() => { setActionError(""); setSelectedId(item.id); setLibraryOpen(false); }}><span className="card-icon" style={{ color: typeMeta[item.type].color }}><TypeIcon type={item.type} size={17} /></span><span className="card-copy"><strong>{item.working_title}</strong><span className="card-meta"><span className={`status-dot ${item.status}`} />{item.archived_at ? "Archived" : statusLabels[item.status]}<span className="meta-separator">·</span>{formatRelativeTime(item.updated_at)}</span><span className={`expiry-line ${itemExpiry.warning ? "warning" : ""}`}>{itemExpiry.warning ? itemExpiry.summary : `Expires ${itemExpiry.label}`}</span></span><span className="card-arrow">›</span></button>; })}
+        {!summaries.length && <div className="empty-state"><Search size={22} /><strong>{allSummaries.length ? "No content found" : "Your workspace is empty"}</strong><span>{allSummaries.length ? "Try another title or clear your filters." : "Create your first piece of content."}</span>{allSummaries.length ? <button onClick={() => { setQuery(""); setStatusFilter("all"); setTypeFilter("all"); }}>Clear filters</button> : <button onClick={() => setCreateOpen(true)}>New content</button>}</div>}
+      </div>
+    </section>
 
-        <div className="sidebar-bottom">
-          <button
-            className="nav-item theme-toggle"
-            onClick={toggleTheme}
-            aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}
-          >
-            {theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}
-            <span>{theme === "dark" ? "Light mode" : "Dark mode"}</span>
-          </button>
-          <button className="nav-item"><Settings size={18} /> <span>Settings</span></button>
-          <div className="profile-row">
-            <div className="avatar">OL</div>
-            <div><strong>Owain Lewis</strong><span>Personal workspace</span></div>
-            <MoreHorizontal size={17} />
-          </div>
-        </div>
-      </aside>
+    <section className="editor-panel" aria-label="Content editor" aria-hidden={isCompact && libraryOpen ? true : undefined} inert={isCompact && libraryOpen ? true : undefined}>
+      <header className="mobile-app-header"><button ref={mobileLibraryButtonRef} className="icon-button" onClick={() => setLibraryOpen(true)} aria-label="Open content library"><Menu size={20} /></button><div className="brand-mark"><Zap size={15} fill="currentColor" /></div><strong>ContentFlow</strong><button className="icon-button mobile-theme-toggle" onClick={toggleTheme} aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}>{theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}</button><button className="icon-button" onClick={() => setCreateOpen(true)} aria-label="Create content"><Plus size={20} /></button></header>
+      {selected ? <>
+        <div className="editor-toolbar"><div className="editor-context"><span className="type-pill" style={{ color: typeMeta[selected.type].color }}><TypeIcon type={selected.type} />{typeMeta[selected.type].label}</span><span className="toolbar-divider" /><label className="status-select"><span className={`status-dot ${selected.status}`} /><select aria-label="Content status" value={selected.status} disabled={Boolean(selected.archived_at) || Boolean(selectedPendingLifecycle) || Boolean(selectedExpiry?.expired)} onChange={(event) => updateSelected((current) => ({ ...current, status: event.target.value as ContentStatus }))}>{contentStatuses.map((status) => <option value={status} key={status}>{statusLabels[status]}</option>)}</select><ChevronDown size={14} /></label></div><div className="editor-actions"><span className={`saved-state ${currentSaveState}`} aria-live="polite">{currentSaveState === "saving" || currentSaveState === "retrying" ? <LoaderCircle className="spin" size={14} /> : currentSaveState === "conflict" || currentSaveState === "error" ? <AlertTriangle size={14} /> : <Check size={14} />}{saveLabel(currentSaveState)}</span><button className="lifecycle-button" disabled={lifecycleDisabled} onClick={() => void archiveSelected()}>{selected.archived_at ? <RotateCcw size={16} /> : <Archive size={16} />}{selected.archived_at ? "Restore" : "Archive"}</button></div></div>
+        {foreignPendingLifecycle && <div className="inline-error" role="alert">Review the {foreignPendingLifecycle.action} conflict for “{foreignPendingLifecycleTitle ?? "another item"}” before continuing. <button onClick={() => { setActionError(""); setSelectedId(foreignPendingLifecycle.id); setLibraryOpen(false); }}>Review item</button></div>}
+        {actionError && <div className="inline-error" role="alert">{actionError}</div>}
+        <div className="editor-scroll"><article className="editor-document">
+          <div className="document-heading" inert={Boolean(selectedPendingLifecycle) || Boolean(selectedExpiry?.expired)}>{renderWorkingTitle()}<div className="document-meta"><span><Clock3 size={14} /> Edited {formatRelativeTime(selected.updated_at)}</span><span>{documentWordCount(selected).toLocaleString()} words</span><span className={selectedExpiry?.warning ? "expiry-warning" : ""}><CalendarDays size={14} /> Expires {selectedExpiry?.label}{selectedExpiry?.warning ? ` · ${selectedExpiry.detail}` : ""}</span></div></div>
+          {conflict && <section className="conflict-panel" aria-labelledby="conflict-title"><div className="conflict-title"><AlertTriangle size={18} /><div><h2 id="conflict-title">This item changed elsewhere</h2><p>{selectedPendingLifecycle ? `Review the current server version before you retry or cancel ${selectedPendingLifecycle.action}.` : "Compare the saved server version with your unsaved local work. Nothing was overwritten."}</p></div></div><div className="conflict-columns"><div><h3>Server version</h3><pre>{JSON.stringify(editableSnapshot(conflict.server), null, 2)}</pre></div><div><h3>{selectedPendingLifecycle ? "Previous version" : "Your unsaved version"}</h3><pre>{JSON.stringify(editableSnapshot(conflict.local), null, 2)}</pre></div></div><div className="conflict-actions">{selectedPendingLifecycle ? <><button onClick={() => resolveLifecycleConflict(false)}>Cancel action</button><button className="primary-button" onClick={() => resolveLifecycleConflict(true)}>Retry {selectedPendingLifecycle.action}</button></> : <><button onClick={() => resolveSelectedConflict("server")}>Use server version</button><button className="primary-button" onClick={() => resolveSelectedConflict("local")}>Save my version</button></>}</div></section>}
+          <div className="editor-content" inert={Boolean(selectedPendingLifecycle) || Boolean(selectedExpiry?.expired)}>{selected.type === "youtube" ? renderYouTubeEditor() : renderPlainEditor()}</div>
+        </article></div>
+        <footer className="editor-footer"><span>{selected.archived_at ? "Archived item" : typeMeta[selected.type].description}</span><button className="delete-button" disabled={lifecycleDisabled} onClick={() => setDeleteOpen(true)}><Trash2 size={15} /> Delete</button></footer>
+      </> : <div className="editor-empty">{detailLoading ? <><LoaderCircle className="spin" /><p>Loading selected content…</p></> : detailError ? <><AlertTriangle /><h1>Could not open this item</h1><p role="alert">{detailError}</p><button className="primary-button" onClick={() => setDetailReload((value) => value + 1)}>Retry loading item</button></> : <><SquarePen size={28} /><h1>{allSummaries.length ? "Choose an item" : "Start with a new piece"}</h1><p>{allSummaries.length ? "Select content from your library." : "Create one of seven content types to begin."}</p>{actionError && <p className="inline-error" role="alert">{actionError}</p>}<button className="primary-button" onClick={() => setCreateOpen(true)}><Plus size={16} /> New content</button></>}</div>}
+    </section>
 
-      <section
-        className={`library-panel ${libraryOpen ? "open" : ""}`}
-        aria-label="Content library"
-        aria-hidden={isCompact && !libraryOpen ? true : undefined}
-        inert={isCompact && !libraryOpen ? true : undefined}
-      >
-        <div className="library-header">
-          <button className="icon-button mobile-close" onClick={() => setLibraryOpen(false)} aria-label="Close library"><ArrowLeft size={19} /></button>
-          <div>
-            <p className="eyebrow">Workspace</p>
-            <h1>{typeFilter === "all" ? "All content" : typeMeta[typeFilter].label}</h1>
-          </div>
-          <button className="icon-button compact-new" onClick={() => setCreateOpen(true)} aria-label="Create content"><Plus size={19} /></button>
-        </div>
-
-        <label className="search-box">
-          <Search size={17} />
-          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search your content" />
-          <span className="key-hint">⌘ K</span>
-        </label>
-
-        <div className="filter-row" aria-label="Filter by status">
-          {(["All", ...statusOptions] as const).map((status) => (
-            <button key={status} className={statusFilter === status ? "active" : ""} onClick={() => setStatusFilter(status)}>
-              {status}
-            </button>
-          ))}
-        </div>
-
-        <div className="library-summary">
-          <span>{filteredItems.length} {filteredItems.length === 1 ? "item" : "items"}</span>
-          <button>Last edited <ChevronDown size={14} /></button>
-        </div>
-
-        <div className="content-list">
-          {filteredItems.map((item) => (
-            <button
-              className={`content-card ${selected.id === item.id ? "selected" : ""}`}
-              aria-current={selected.id === item.id ? "true" : undefined}
-              key={item.id}
-              onClick={() => { setSelectedId(item.id); setLibraryOpen(false); }}
-            >
-              <span className="card-icon" style={{ color: typeMeta[item.type].color }}><TypeIcon type={item.type} size={17} /></span>
-              <span className="card-copy">
-                <strong>{displayTitle(item)}</strong>
-                <span className="card-meta">
-                  <span className={`status-dot ${item.status.toLowerCase()}`} />
-                  {item.status}<span className="meta-separator">·</span>{item.updated}
-                </span>
-              </span>
-              <span className="card-arrow">›</span>
-            </button>
-          ))}
-          {!filteredItems.length && (
-            <div className="empty-state">
-              <Search size={22} />
-              <strong>No content found</strong>
-              <span>Try another search or clear your filters.</span>
-              <button onClick={() => { setQuery(""); setStatusFilter("All"); }}>Clear filters</button>
-            </div>
-          )}
-        </div>
-      </section>
-
-      <section className="editor-panel" aria-label="Content editor">
-        <header className="mobile-app-header">
-          <button className="icon-button" onClick={() => setLibraryOpen(true)} aria-label="Open content library"><Menu size={20} /></button>
-          <div className="brand-mark"><Zap size={15} fill="currentColor" /></div>
-          <strong>ContentFlow</strong>
-          <button
-            className="icon-button mobile-theme-toggle"
-            onClick={toggleTheme}
-            aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}
-          >
-            {theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}
-          </button>
-          <button className="icon-button" onClick={() => setCreateOpen(true)} aria-label="Create content"><Plus size={20} /></button>
-        </header>
-
-        <div className="editor-toolbar">
-          <div className="editor-context">
-            <span className="type-pill" style={{ color: typeMeta[selected.type].color }}><TypeIcon type={selected.type} />{typeMeta[selected.type].label}</span>
-            <span className="toolbar-divider" />
-            <label className="status-select">
-              <span className={`status-dot ${selected.status.toLowerCase()}`} />
-              <select value={selected.status} onChange={(event) => updateSelected({ status: event.target.value as ContentStatus })}>
-                {statusOptions.map((status) => <option key={status}>{status}</option>)}
-              </select>
-              <ChevronDown size={14} />
-            </label>
-          </div>
-          <div className="editor-actions">
-            <span className={`saved-state ${savePulse ? "pulse" : ""}`}><Check size={14} /> Saved</span>
-            <button className="repurpose-button" onClick={openRepurpose}><Sparkles size={16} /> Repurpose</button>
-            <button className="icon-button" aria-label="More options"><MoreHorizontal size={19} /></button>
-          </div>
-        </div>
-
-        <div className="editor-scroll">
-          <article className="editor-document">
-            <div className="document-heading">
-              {renderDocumentHeading()}
-              <div className="document-meta">
-                <span><Clock3 size={14} /> Edited {selected.updated.toLowerCase()}</span>
-                <span>{selected.words.toLocaleString()} words</span>
-              </div>
-            </div>
-
-            {selected.type === "youtube" ? renderYouTubeEditor() : renderPlainEditor()}
-          </article>
-        </div>
-
-        <footer className="editor-footer">
-          <span>{selected.type === "youtube" ? `${selected.blocks?.length ?? 0} script blocks` : createDescriptions[selected.type]}</span>
-          <button className="delete-button" onClick={deleteSelected}><Trash2 size={15} /> Delete</button>
-        </footer>
-      </section>
-
-      {createOpen && (
-        <div className="modal-backdrop">
-          <section ref={createModalRef} className="modal-card create-modal" role="dialog" aria-modal="true" aria-labelledby="create-title">
-            <div className="modal-header">
-              <div><p className="eyebrow">Create</p><h2 id="create-title">What are you making?</h2><p>Start with the right shape. You can change it later.</p></div>
-              <button className="icon-button" onClick={() => setCreateOpen(false)} aria-label="Close"><X size={19} /></button>
-            </div>
-            <div className="type-grid">
-              {(Object.keys(typeMeta) as ContentType[]).map((type) => (
-                <button key={type} onClick={() => createItem(type)}>
-                  <span className="type-grid-icon" style={{ color: typeMeta[type].color }}><TypeIcon type={type} size={20} /></span>
-                  <span><strong>{typeMeta[type].label}</strong><small>{createDescriptions[type]}</small></span>
-                  <span className="type-arrow">→</span>
-                </button>
-              ))}
-            </div>
-          </section>
-        </div>
-      )}
-
-      {repurposeOpen && (
-        <div className="modal-backdrop">
-          <section ref={repurposeModalRef} className="modal-card repurpose-modal" role="dialog" aria-modal="true" aria-labelledby="repurpose-title">
-            <div className="repurpose-glow" />
-            <div className="modal-header">
-              <div><p className="eyebrow"><Sparkles size={13} /> Repurpose</p><h2 id="repurpose-title">Turn one idea into more</h2><p>Choose the formats you want to create.</p></div>
-              <button className="icon-button" onClick={() => setRepurposeOpen(false)} aria-label="Close"><X size={19} /></button>
-            </div>
-            <p className="output-label">Create drafts for</p>
-            <div className="output-list">
-              {(Object.keys(typeMeta) as ContentType[]).filter((type) => type !== selected.type).map((type) => {
-                const active = selectedOutputs.includes(type);
-                return (
-                  <button
-                    key={type}
-                    className={active ? "active" : ""}
-                    aria-pressed={active}
-                    onClick={() => setSelectedOutputs((current) => active ? current.filter((item) => item !== type) : [...current, type])}
-                  >
-                    <span style={{ color: typeMeta[type].color }}><TypeIcon type={type} /></span>
-                    <strong>{typeMeta[type].label}</strong>
-                    <span className="checkbox">{active && <Check size={13} />}</span>
-                  </button>
-                );
-              })}
-            </div>
-            <div className="modal-footer">
-              <span>{selectedOutputs.length} {selectedOutputs.length === 1 ? "draft" : "drafts"} will be added to your library</span>
-              <button className="primary-button" disabled={!selectedOutputs.length} onClick={createRepurposedDrafts}><Sparkles size={16} /> Create drafts</button>
-            </div>
-          </section>
-        </div>
-      )}
-    </main>
-  );
+    {createOpen && <div className="modal-backdrop"><section ref={createModalRef} className="modal-card" role="dialog" aria-modal="true" aria-labelledby="create-title"><div className="modal-header"><div><p className="eyebrow">New content</p><h2 id="create-title">What are you creating?</h2><p>Choose a format. You can change its status as the work develops.</p></div><button className="icon-button" onClick={() => setCreateOpen(false)} aria-label="Close create dialog"><X size={19} /></button></div><div className="create-grid" aria-busy={createPending}>{contentTypes.map((type) => <button key={type} disabled={createPending} onClick={() => void createItem(type)}><span className="create-icon" style={{ color: typeMeta[type].color }}><TypeIcon type={type} size={19} /></span><span><strong>{typeMeta[type].label}</strong><small>{typeMeta[type].description}</small></span><span className="create-arrow">›</span></button>)}</div>{createPending && <p aria-live="polite">Creating…</p>}{actionError && <p className="inline-error" role="alert">{actionError}</p>}</section></div>}
+    {deleteOpen && selected && <div className="modal-backdrop"><section ref={deleteModalRef} className="modal-card confirm-card" role="alertdialog" aria-modal="true" aria-labelledby="delete-title" aria-describedby="delete-description"><div className="modal-header"><div><p className="eyebrow">Permanent deletion</p><h2 id="delete-title">Delete “{selected.working_title}”?</h2><p id="delete-description">This removes the item immediately and cannot be undone.</p></div></div><div className="confirm-actions"><button onClick={() => setDeleteOpen(false)}>Cancel</button><button className="danger-button" onClick={() => void confirmDelete()}><Trash2 size={15} /> Delete permanently</button></div></section></div>}
+  </main>;
 }
