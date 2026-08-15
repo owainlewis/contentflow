@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"strconv"
 	"time"
 
 	"github.com/coreos/go-oidc/v3/oidc"
@@ -60,18 +61,29 @@ func NewOIDCProvider(ctx context.Context, issuer, clientID, clientSecret, redire
 
 func validateDiscoveredEndpoint(issuer, name, rawURL string) error {
 	issuerURL, issuerErr := url.Parse(issuer)
-	allowLoopbackHTTP := issuerErr == nil && issuerURL.Scheme == "http" && isLoopbackHostname(issuerURL.Hostname())
 	endpoint, err := url.Parse(rawURL)
-	if err != nil || endpoint.Host == "" || endpoint.User != nil {
+	if err != nil || endpoint.Hostname() == "" || endpoint.User != nil || endpoint.Fragment != "" {
 		return fmt.Errorf("valid OAuth %s endpoint is required", name)
 	}
-	if endpoint.Scheme == "https" {
-		return nil
+	if port := endpoint.Port(); port != "" {
+		value, err := strconv.Atoi(port)
+		if err != nil || value < 1 || value > 65535 {
+			return fmt.Errorf("valid OAuth %s endpoint is required", name)
+		}
 	}
-	if allowLoopbackHTTP && endpoint.Scheme == "http" && isLoopbackHostname(endpoint.Hostname()) {
-		return nil
+	if issuerErr == nil && issuerURL.Scheme == "https" {
+		if endpoint.Scheme == "https" {
+			return nil
+		}
+		return fmt.Errorf("OAuth %s endpoint must use HTTPS", name)
 	}
-	return fmt.Errorf("OAuth %s endpoint must use HTTPS", name)
+	if issuerErr == nil && issuerURL.Scheme == "http" && isLoopbackHostname(issuerURL.Hostname()) {
+		if endpoint.Scheme == "http" && isLoopbackHostname(endpoint.Hostname()) {
+			return nil
+		}
+		return fmt.Errorf("OAuth %s endpoint must use loopback HTTP", name)
+	}
+	return fmt.Errorf("valid OAuth issuer is required")
 }
 
 func formPostForRedirect(redirectURL string) (bool, error) {

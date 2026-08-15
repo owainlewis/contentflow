@@ -37,6 +37,10 @@ const (
 	loginAttemptClientRateLimit = 20
 	loginAttemptGlobalRateLimit = 300
 	loginAttemptRateWindow      = time.Minute
+	bearerLookupClientLimit     = 120
+	bearerLookupGlobalLimit     = 1000
+	bearerLookupMaxClients      = 4096
+	bearerLookupRateWindow      = time.Minute
 )
 
 var allowedScopes = []Scope{ScopeContentRead, ScopeContentWrite, ScopeAssetsWrite}
@@ -59,6 +63,7 @@ type Service struct {
 	ulidMu        sync.Mutex
 	sealer        cipher.AEAD
 	secureCookies bool
+	bearerLimiter *lookupLimiter
 }
 
 type Principal struct {
@@ -99,6 +104,7 @@ func New(config Config, provider OAuthProvider, store Store) (*Service, error) {
 	return &Service{
 		config: config, provider: provider, store: store, now: time.Now, random: rand.Read,
 		entropy: ulid.Monotonic(rand.Reader, 0), sealer: sealer, secureCookies: origin.Scheme == "https",
+		bearerLimiter: newLookupLimiter(bearerLookupClientLimit, bearerLookupGlobalLimit, bearerLookupMaxClients, bearerLookupRateWindow),
 	}, nil
 }
 
@@ -304,6 +310,9 @@ func (s *Service) authenticate(request *http.Request) (Principal, int, string) {
 			return Principal{}, http.StatusUnauthorized, "invalid_bearer_token"
 		}
 		raw := strings.TrimSpace(credential)
+		if !s.bearerLimiter.Allow(credentialDocumentID("bearer-client:"+requestClientIdentity(request)), s.now()) {
+			return Principal{}, http.StatusTooManyRequests, "rate_limit_exceeded"
+		}
 		hash := sha256.Sum256([]byte(raw))
 		token, err := s.store.TokenByHash(request.Context(), hash)
 		if err != nil {
@@ -344,7 +353,7 @@ func (s *Service) authenticate(request *http.Request) (Principal, int, string) {
 func (s *Service) allowLoginAttempt(request *http.Request) (bool, error) {
 	buckets := []RateLimitBucket{
 		{
-			ID:    credentialDocumentID("oauth-login-client:" + s.config.WorkspaceID + ":" + loginClientIdentity(request)),
+			ID:    credentialDocumentID("oauth-login-client:" + s.config.WorkspaceID + ":" + requestClientIdentity(request)),
 			Limit: loginAttemptClientRateLimit,
 		},
 		{
@@ -355,7 +364,7 @@ func (s *Service) allowLoginAttempt(request *http.Request) (bool, error) {
 	return s.store.AllowRequests(request.Context(), buckets, s.now(), loginAttemptRateWindow)
 }
 
-func loginClientIdentity(request *http.Request) string {
+func requestClientIdentity(request *http.Request) string {
 	forwarded := strings.Split(request.Header.Get("X-Forwarded-For"), ",")
 	if len(forwarded) >= 2 {
 		// Google load balancers append the observed client IP and then the

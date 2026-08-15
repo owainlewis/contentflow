@@ -139,21 +139,21 @@ func TestLoginAttemptWritesUsePerClientAndGlobalLimits(t *testing.T) {
 	}
 }
 
-func TestLoginClientIdentityIgnoresSpoofedForwardedPrefixes(t *testing.T) {
+func TestRequestClientIdentityIgnoresSpoofedForwardedPrefixes(t *testing.T) {
 	request := httptest.NewRequest(http.MethodGet, "/api/v1/auth/login", nil)
 	request.RemoteAddr = "192.0.2.200:1234"
 	request.Header.Set("X-Forwarded-For", "198.51.100.99, 203.0.113.7, 203.0.113.254")
-	if got := loginClientIdentity(request); got != "203.0.113.7" {
+	if got := requestClientIdentity(request); got != "203.0.113.7" {
 		t.Fatalf("forwarded client identity is %q", got)
 	}
 
 	request.Header.Set("X-Forwarded-For", "spoofed, 2001:db8:abcd:1234::42, 2001:db8::ffff")
-	if got := loginClientIdentity(request); got != "2001:db8:abcd:1234::/64" {
+	if got := requestClientIdentity(request); got != "2001:db8:abcd:1234::/64" {
 		t.Fatalf("IPv6 client identity is %q", got)
 	}
 
 	request.Header.Set("X-Forwarded-For", "spoofed, invalid, 203.0.113.254")
-	if got := loginClientIdentity(request); got != "192.0.2.200" {
+	if got := requestClientIdentity(request); got != "192.0.2.200" {
 		t.Fatalf("invalid forwarded address did not fall back to peer: %q", got)
 	}
 }
@@ -161,6 +161,16 @@ func TestLoginClientIdentityIgnoresSpoofedForwardedPrefixes(t *testing.T) {
 type failingAdmissionStore struct {
 	Store
 	err error
+}
+
+type countingTokenStore struct {
+	Store
+	lookups int
+}
+
+func (s *countingTokenStore) TokenByHash(ctx context.Context, hash [sha256.Size]byte) (Token, error) {
+	s.lookups++
+	return s.Store.TokenByHash(ctx, hash)
 }
 
 func (s failingAdmissionStore) AllowRequests(context.Context, []RateLimitBucket, time.Time, time.Duration) (bool, error) {
@@ -184,6 +194,46 @@ func TestLoginAdmissionDependencyFailureDoesNotCreateAttempt(t *testing.T) {
 	}
 	if len(response.Result().Cookies()) != 0 || len(memoryStore.attempts) != 0 {
 		t.Fatal("failed login admission created OAuth state")
+	}
+}
+
+func TestInvalidBearerLookupsAreBoundedBeforeFirestore(t *testing.T) {
+	service, memoryStore, _ := newTestService(t, Identity{})
+	countingStore := &countingTokenStore{Store: memoryStore}
+	service.store = countingStore
+	now := time.Now()
+	service.now = func() time.Time { return now }
+	handler := service.Authenticate(http.NotFoundHandler())
+
+	for requestNumber := 1; requestNumber <= bearerLookupClientLimit; requestNumber++ {
+		request := httptest.NewRequest(http.MethodGet, "/api/v1/content", nil)
+		request.RemoteAddr = "192.0.2.1:1234"
+		request.Header.Set("Authorization", "Bearer random-"+strconv.Itoa(requestNumber))
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code != http.StatusUnauthorized {
+			t.Fatalf("invalid bearer request %d returned %d", requestNumber, response.Code)
+		}
+	}
+	limitedRequest := httptest.NewRequest(http.MethodGet, "/api/v1/content", nil)
+	limitedRequest.RemoteAddr = "192.0.2.1:5678"
+	limitedRequest.Header.Set("Authorization", "Bearer another-random-token")
+	limitedResponse := httptest.NewRecorder()
+	handler.ServeHTTP(limitedResponse, limitedRequest)
+	if limitedResponse.Code != http.StatusTooManyRequests {
+		t.Fatalf("excess invalid bearer lookup returned %d", limitedResponse.Code)
+	}
+	if countingStore.lookups != bearerLookupClientLimit {
+		t.Fatalf("invalid bearers caused %d store lookups, want %d", countingStore.lookups, bearerLookupClientLimit)
+	}
+
+	otherClient := httptest.NewRequest(http.MethodGet, "/api/v1/content", nil)
+	otherClient.RemoteAddr = "192.0.2.2:1234"
+	otherClient.Header.Set("Authorization", "Bearer other-client-token")
+	otherResponse := httptest.NewRecorder()
+	handler.ServeHTTP(otherResponse, otherClient)
+	if otherResponse.Code != http.StatusUnauthorized || countingStore.lookups != bearerLookupClientLimit+1 {
+		t.Fatalf("different client returned %d after %d lookups", otherResponse.Code, countingStore.lookups)
 	}
 }
 
