@@ -206,7 +206,7 @@ func (s *FirestoreStore) AllowTokenRequest(ctx context.Context, tokenID string, 
 		} else if !firestoreIsNotFound(err) {
 			return err
 		}
-		if now.Sub(document.WindowStartedAt) >= window || now.Before(document.WindowStartedAt) {
+		if now.Sub(document.WindowStartedAt) >= window {
 			document = rateLimitDocument{WindowStartedAt: now, ExpiresAt: now.Add(2 * window)}
 		}
 		if document.Count >= limit {

@@ -191,3 +191,31 @@ func TestFirestoreRateLimitDoesNotOverAdmitDuringConcurrentRetries(t *testing.T)
 		t.Fatalf("concurrent shared limit admitted %d requests, want exactly 120", got)
 	}
 }
+
+func TestFirestoreRateLimitDoesNotResetForOutOfOrderRequestTime(t *testing.T) {
+	if os.Getenv("FIRESTORE_EMULATOR_HOST") == "" {
+		t.Skip("FIRESTORE_EMULATOR_HOST is not set")
+	}
+	ctx := context.Background()
+	client, err := firestore.NewClient(ctx, "contentflow-auth-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+	store := NewFirestoreStore(client)
+	tokenID := "out-of-order-rate-" + time.Now().String()
+	newer := time.Now()
+	for request := 1; request <= 120; request++ {
+		allowed, err := store.AllowTokenRequest(ctx, tokenID, newer, 120, time.Minute)
+		if err != nil || !allowed {
+			t.Fatalf("newer request %d was not allowed: %v", request, err)
+		}
+	}
+	allowed, err := store.AllowTokenRequest(ctx, tokenID, newer.Add(-time.Second), 120, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if allowed {
+		t.Fatal("older request time reset the active rate-limit window")
+	}
+}

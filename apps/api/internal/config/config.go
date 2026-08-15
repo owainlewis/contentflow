@@ -91,7 +91,7 @@ func (c Config) Validate() error {
 			}
 		}
 		origin, err := url.Parse(c.PublicOrigin)
-		if err != nil || origin.Scheme != "https" || origin.Host == "" || origin.Path != "" || origin.RawQuery != "" || origin.Fragment != "" {
+		if err != nil || origin.Scheme != "https" || origin.Host == "" || (origin.Path != "" && origin.Path != "/") || origin.RawQuery != "" || origin.Fragment != "" {
 			return fmt.Errorf("CONTENTFLOW_PUBLIC_ORIGIN must be an HTTPS origin in production")
 		}
 	}

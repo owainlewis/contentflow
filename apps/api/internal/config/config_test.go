@@ -57,6 +57,10 @@ func TestProductionRequiresHTTPSPublicOrigin(t *testing.T) {
 	if err := cfg.Validate(); err == nil {
 		t.Fatal("expected insecure production origin to fail")
 	}
+	cfg.PublicOrigin = "https://contentflow.example/"
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("production origin with a trailing slash failed: %v", err)
+	}
 }
 
 func TestAuthenticatedNonProductionOriginMustBeHTTPSOrLoopback(t *testing.T) {
