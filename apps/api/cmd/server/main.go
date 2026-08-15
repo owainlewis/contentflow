@@ -25,7 +25,10 @@ import (
 	webassets "github.com/owainlewis/contentflow/apps/api/web"
 )
 
-const shutdownTimeout = 10 * time.Second
+const (
+	shutdownTimeout      = 10 * time.Second
+	oidcDiscoveryTimeout = 5 * time.Second
+)
 
 func main() {
 	if len(os.Args) > 1 && os.Args[1] == "healthcheck" {
@@ -65,7 +68,9 @@ func run(ctx context.Context, cfg config.Config) error {
 		if err != nil {
 			return fmt.Errorf("configure authentication origin: %w", err)
 		}
-		provider, err := auth.NewOIDCProvider(ctx, cfg.OAuthIssuer, cfg.OAuthClientID, cfg.OAuthSecret, redirectURL)
+		discoveryContext, cancelDiscovery := context.WithTimeout(ctx, oidcDiscoveryTimeout)
+		provider, err := auth.NewOIDCProvider(discoveryContext, cfg.OAuthIssuer, cfg.OAuthClientID, cfg.OAuthSecret, redirectURL)
+		cancelDiscovery()
 		if err != nil {
 			return err
 		}

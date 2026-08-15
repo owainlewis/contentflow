@@ -1,6 +1,15 @@
 package main
 
-import "testing"
+import (
+	"context"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/owainlewis/contentflow/apps/api/internal/config"
+)
 
 func TestAuthenticationURLsCanonicalizeOAuthRedirect(t *testing.T) {
 	publicOrigin, redirectURL, err := authenticationURLs("https://CONTENTFLOW.EXAMPLE:0443/")
@@ -12,5 +21,26 @@ func TestAuthenticationURLsCanonicalizeOAuthRedirect(t *testing.T) {
 	}
 	if redirectURL != "https://contentflow.example/api/v1/auth/callback" {
 		t.Fatalf("OAuth redirect URL is %q", redirectURL)
+	}
+}
+
+func TestRunBoundsOIDCDiscoveryBeforeStartingServers(t *testing.T) {
+	issuer := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, request *http.Request) {
+		<-request.Context().Done()
+	}))
+	defer issuer.Close()
+
+	cfg := config.Config{
+		Environment: "development", PublicAddress: "127.0.0.1:0", PrivateAddress: "127.0.0.1:0", AssetDirectory: t.TempDir(),
+		GoogleProject: "project", PublicOrigin: "https://contentflow.example", OAuthIssuer: issuer.URL,
+		OAuthClientID: "client", OAuthSecret: "secret", OwnerSubject: "owner", WorkspaceID: "workspace",
+	}
+	started := time.Now()
+	err := run(context.Background(), cfg)
+	if err == nil || !strings.Contains(err.Error(), "discover OAuth issuer") {
+		t.Fatalf("stalled OIDC discovery returned %v", err)
+	}
+	if elapsed := time.Since(started); elapsed > oidcDiscoveryTimeout+2*time.Second {
+		t.Fatalf("stalled OIDC discovery took %s", elapsed)
 	}
 }
