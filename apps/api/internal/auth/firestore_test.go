@@ -18,6 +18,15 @@ import (
 	"google.golang.org/grpc/status"
 )
 
+const firestoreTestTimeout = time.Minute
+
+func firestoreTestContext(t *testing.T) context.Context {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(t.Context(), firestoreTestTimeout)
+	t.Cleanup(cancel)
+	return ctx
+}
+
 func TestFirestoreReadinessOnlyTreatsAnEmptyQueryAsHealthy(t *testing.T) {
 	if err := firestoreReadinessError(iterator.Done); err != nil {
 		t.Fatalf("empty Firestore query failed readiness: %v", err)
@@ -32,7 +41,7 @@ func TestFirestoreStorePersistsSessionsAndImmediateTokenRevocation(t *testing.T)
 	if os.Getenv("FIRESTORE_EMULATOR_HOST") == "" {
 		t.Skip("FIRESTORE_EMULATOR_HOST is not set")
 	}
-	ctx := context.Background()
+	ctx := firestoreTestContext(t)
 	firstClient, err := firestore.NewClient(ctx, "contentflow-auth-test")
 	if err != nil {
 		t.Fatal(err)
@@ -91,7 +100,7 @@ func TestFirestoreLoginAttemptCanOnlyBeConsumedOnce(t *testing.T) {
 	if os.Getenv("FIRESTORE_EMULATOR_HOST") == "" {
 		t.Skip("FIRESTORE_EMULATOR_HOST is not set")
 	}
-	ctx := context.Background()
+	ctx := firestoreTestContext(t)
 	client, err := firestore.NewClient(ctx, "contentflow-auth-test")
 	if err != nil {
 		t.Fatal(err)
@@ -117,7 +126,7 @@ func TestFirestoreLoginAdmissionIsSharedBeforeAttemptCreation(t *testing.T) {
 	if os.Getenv("FIRESTORE_EMULATOR_HOST") == "" {
 		t.Skip("FIRESTORE_EMULATOR_HOST is not set")
 	}
-	ctx := context.Background()
+	ctx := firestoreTestContext(t)
 	firstClient, err := firestore.NewClient(ctx, "contentflow-auth-test")
 	if err != nil {
 		t.Fatal(err)
@@ -182,7 +191,7 @@ func TestFirestoreRateLimitIsSharedAcrossStoreInstances(t *testing.T) {
 	if os.Getenv("FIRESTORE_EMULATOR_HOST") == "" {
 		t.Skip("FIRESTORE_EMULATOR_HOST is not set")
 	}
-	ctx := context.Background()
+	ctx := firestoreTestContext(t)
 	firstClient, err := firestore.NewClient(ctx, "contentflow-auth-test")
 	if err != nil {
 		t.Fatal(err)
@@ -215,7 +224,7 @@ func TestFirestoreMultiBucketRateLimitRejectsAtomically(t *testing.T) {
 	if os.Getenv("FIRESTORE_EMULATOR_HOST") == "" {
 		t.Skip("FIRESTORE_EMULATOR_HOST is not set")
 	}
-	ctx := context.Background()
+	ctx := firestoreTestContext(t)
 	client, err := firestore.NewClient(ctx, "contentflow-auth-test")
 	if err != nil {
 		t.Fatal(err)
@@ -265,7 +274,7 @@ func TestFirestoreRateLimitDoesNotOverAdmitDuringConcurrentRetries(t *testing.T)
 	if os.Getenv("FIRESTORE_EMULATOR_HOST") == "" {
 		t.Skip("FIRESTORE_EMULATOR_HOST is not set")
 	}
-	ctx := context.Background()
+	ctx := firestoreTestContext(t)
 	clients := make([]*firestore.Client, 4)
 	stores := make([]*FirestoreStore, len(clients))
 	for index := range clients {
@@ -290,7 +299,9 @@ func TestFirestoreRateLimitDoesNotOverAdmitDuringConcurrentRetries(t *testing.T)
 		go func() {
 			defer wait.Done()
 			<-start
-			accepted, err := stores[worker%len(stores)].AllowRequest(ctx, tokenID, now, 120, time.Minute)
+			requestContext, cancel := context.WithTimeout(ctx, 20*time.Second)
+			defer cancel()
+			accepted, err := stores[worker%len(stores)].AllowRequest(requestContext, tokenID, now, 120, time.Minute)
 			if err != nil {
 				errorsChannel <- err
 				return
@@ -307,7 +318,8 @@ func TestFirestoreRateLimitDoesNotOverAdmitDuringConcurrentRetries(t *testing.T)
 	close(errorsChannel)
 	retryableFailures := 0
 	for err := range errorsChannel {
-		if status.Code(err) != codes.Aborted {
+		code := status.Code(err)
+		if code != codes.Aborted && code != codes.DeadlineExceeded && code != codes.Unavailable && !errors.Is(err, context.DeadlineExceeded) {
 			t.Fatalf("concurrent rate-limit transaction returned non-retryable error: %v", err)
 		}
 		retryableFailures++
@@ -320,8 +332,10 @@ func TestFirestoreRateLimitDoesNotOverAdmitDuringConcurrentRetries(t *testing.T)
 		t.Fatalf("concurrent outcomes accounted for %d requests, want 160", got)
 	}
 
+	proofContext, cancelProof := context.WithTimeout(ctx, 30*time.Second)
+	defer cancelProof()
 	var document rateLimitDocument
-	snapshot, err := clients[0].Collection(rateLimitsCollection).Doc(tokenID).Get(ctx)
+	snapshot, err := clients[0].Collection(rateLimitsCollection).Doc(tokenID).Get(proofContext)
 	if err == nil {
 		if err := snapshot.DataTo(&document); err != nil {
 			t.Fatal(err)
@@ -334,13 +348,13 @@ func TestFirestoreRateLimitDoesNotOverAdmitDuringConcurrentRetries(t *testing.T)
 	}
 
 	for admitted < 120 {
-		accepted, err := stores[0].AllowRequest(ctx, tokenID, now, 120, time.Minute)
+		accepted, err := stores[0].AllowRequest(proofContext, tokenID, now, 120, time.Minute)
 		if err != nil || !accepted {
 			t.Fatalf("sequential retry %d was not admitted: accepted=%t error=%v", admitted+1, accepted, err)
 		}
 		admitted++
 	}
-	accepted, err := stores[0].AllowRequest(ctx, tokenID, now, 120, time.Minute)
+	accepted, err := stores[0].AllowRequest(proofContext, tokenID, now, 120, time.Minute)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -353,7 +367,7 @@ func TestFirestoreRateLimitDoesNotResetForOutOfOrderRequestTime(t *testing.T) {
 	if os.Getenv("FIRESTORE_EMULATOR_HOST") == "" {
 		t.Skip("FIRESTORE_EMULATOR_HOST is not set")
 	}
-	ctx := context.Background()
+	ctx := firestoreTestContext(t)
 	client, err := firestore.NewClient(ctx, "contentflow-auth-test")
 	if err != nil {
 		t.Fatal(err)

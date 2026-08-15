@@ -163,13 +163,31 @@ type failingAdmissionStore struct {
 	err error
 }
 
-type countingTokenStore struct {
+type countingAuthStore struct {
 	Store
-	lookups int
+	admissions     int
+	attemptLookups int
+	sessionLookups int
+	tokenLookups   int
 }
 
-func (s *countingTokenStore) TokenByHash(ctx context.Context, hash [sha256.Size]byte) (Token, error) {
-	s.lookups++
+func (s *countingAuthStore) AllowRequests(ctx context.Context, buckets []RateLimitBucket, now time.Time, window time.Duration) (bool, error) {
+	s.admissions++
+	return s.Store.AllowRequests(ctx, buckets, now, window)
+}
+
+func (s *countingAuthStore) TakeLoginAttempt(ctx context.Context, id, state string, now time.Time) (LoginAttempt, error) {
+	s.attemptLookups++
+	return s.Store.TakeLoginAttempt(ctx, id, state, now)
+}
+
+func (s *countingAuthStore) Session(ctx context.Context, id string, now time.Time) (Session, error) {
+	s.sessionLookups++
+	return s.Store.Session(ctx, id, now)
+}
+
+func (s *countingAuthStore) TokenByHash(ctx context.Context, hash [sha256.Size]byte) (Token, error) {
+	s.tokenLookups++
 	return s.Store.TokenByHash(ctx, hash)
 }
 
@@ -197,15 +215,122 @@ func TestLoginAdmissionDependencyFailureDoesNotCreateAttempt(t *testing.T) {
 	}
 }
 
-func TestInvalidBearerLookupsAreBoundedBeforeFirestore(t *testing.T) {
+func TestLoginStartFirestoreCallsAreBoundedBeforeAdmission(t *testing.T) {
 	service, memoryStore, _ := newTestService(t, Identity{})
-	countingStore := &countingTokenStore{Store: memoryStore}
+	countingStore := &countingAuthStore{Store: memoryStore}
+	service.store = countingStore
+	now := time.Now()
+	service.now = func() time.Time { return now }
+
+	for requestNumber := 1; requestNumber <= preAuthLookupClientLimit; requestNumber++ {
+		request := httptest.NewRequest(http.MethodGet, "/api/v1/auth/login", nil)
+		request.RemoteAddr = "192.0.2.1:1234"
+		service.HandleLogin(httptest.NewRecorder(), request)
+	}
+	limitedRequest := httptest.NewRequest(http.MethodGet, "/api/v1/auth/login", nil)
+	limitedRequest.RemoteAddr = "192.0.2.1:5678"
+	limitedResponse := httptest.NewRecorder()
+	service.HandleLogin(limitedResponse, limitedRequest)
+	if limitedResponse.Code != http.StatusTooManyRequests {
+		t.Fatalf("excess login start returned %d", limitedResponse.Code)
+	}
+	if countingStore.admissions != preAuthLookupClientLimit {
+		t.Fatalf("login starts caused %d admission calls, want %d", countingStore.admissions, preAuthLookupClientLimit)
+	}
+	if got := len(memoryStore.attempts); got != loginAttemptClientRateLimit {
+		t.Fatalf("login starts stored %d attempts, want distributed cap %d", got, loginAttemptClientRateLimit)
+	}
+
+	otherClient := httptest.NewRequest(http.MethodGet, "/api/v1/auth/login", nil)
+	otherClient.RemoteAddr = "192.0.2.2:1234"
+	otherResponse := httptest.NewRecorder()
+	service.HandleLogin(otherResponse, otherClient)
+	if otherResponse.Code != http.StatusFound || countingStore.admissions != preAuthLookupClientLimit+1 {
+		t.Fatalf("different client returned %d after %d admission calls", otherResponse.Code, countingStore.admissions)
+	}
+}
+
+func TestInvalidCallbackLookupsAreBoundedBeforeFirestore(t *testing.T) {
+	service, memoryStore, _ := newTestService(t, Identity{})
+	countingStore := &countingAuthStore{Store: memoryStore}
+	service.store = countingStore
+	now := time.Now()
+	service.now = func() time.Time { return now }
+
+	callback := func(remoteAddress string) *http.Request {
+		request := formPostCallback(&http.Cookie{Name: loginCookieName, Value: "forged-attempt"}, "forged-state", "forged-code")
+		request.RemoteAddr = remoteAddress
+		return request
+	}
+	for requestNumber := 1; requestNumber <= preAuthLookupClientLimit; requestNumber++ {
+		response := httptest.NewRecorder()
+		service.HandleCallback(response, callback("192.0.2.1:1234"))
+		if response.Code != http.StatusUnauthorized {
+			t.Fatalf("invalid callback %d returned %d", requestNumber, response.Code)
+		}
+	}
+	limitedResponse := httptest.NewRecorder()
+	service.HandleCallback(limitedResponse, callback("192.0.2.1:5678"))
+	if limitedResponse.Code != http.StatusTooManyRequests {
+		t.Fatalf("excess invalid callback returned %d", limitedResponse.Code)
+	}
+	if countingStore.attemptLookups != preAuthLookupClientLimit {
+		t.Fatalf("invalid callbacks caused %d store lookups, want %d", countingStore.attemptLookups, preAuthLookupClientLimit)
+	}
+
+	otherResponse := httptest.NewRecorder()
+	service.HandleCallback(otherResponse, callback("192.0.2.2:1234"))
+	if otherResponse.Code != http.StatusUnauthorized || countingStore.attemptLookups != preAuthLookupClientLimit+1 {
+		t.Fatalf("different callback client returned %d after %d lookups", otherResponse.Code, countingStore.attemptLookups)
+	}
+}
+
+func TestForgedSessionLookupsAreBoundedBeforeFirestore(t *testing.T) {
+	service, memoryStore, _ := newTestService(t, Identity{})
+	countingStore := &countingAuthStore{Store: memoryStore}
 	service.store = countingStore
 	now := time.Now()
 	service.now = func() time.Time { return now }
 	handler := service.Authenticate(http.NotFoundHandler())
 
-	for requestNumber := 1; requestNumber <= bearerLookupClientLimit; requestNumber++ {
+	sessionRequest := func(remoteAddress string) *http.Request {
+		request := httptest.NewRequest(http.MethodGet, "/api/v1/content", nil)
+		request.RemoteAddr = remoteAddress
+		request.AddCookie(&http.Cookie{Name: sessionCookieName, Value: "forged-session"})
+		return request
+	}
+	for requestNumber := 1; requestNumber <= preAuthLookupClientLimit; requestNumber++ {
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, sessionRequest("192.0.2.1:1234"))
+		if response.Code != http.StatusUnauthorized {
+			t.Fatalf("forged session %d returned %d", requestNumber, response.Code)
+		}
+	}
+	limitedResponse := httptest.NewRecorder()
+	handler.ServeHTTP(limitedResponse, sessionRequest("192.0.2.1:5678"))
+	if limitedResponse.Code != http.StatusTooManyRequests {
+		t.Fatalf("excess forged session returned %d", limitedResponse.Code)
+	}
+	if countingStore.sessionLookups != preAuthLookupClientLimit {
+		t.Fatalf("forged sessions caused %d store lookups, want %d", countingStore.sessionLookups, preAuthLookupClientLimit)
+	}
+
+	otherResponse := httptest.NewRecorder()
+	handler.ServeHTTP(otherResponse, sessionRequest("192.0.2.2:1234"))
+	if otherResponse.Code != http.StatusUnauthorized || countingStore.sessionLookups != preAuthLookupClientLimit+1 {
+		t.Fatalf("different session client returned %d after %d lookups", otherResponse.Code, countingStore.sessionLookups)
+	}
+}
+
+func TestInvalidBearerLookupsAreBoundedBeforeFirestore(t *testing.T) {
+	service, memoryStore, _ := newTestService(t, Identity{})
+	countingStore := &countingAuthStore{Store: memoryStore}
+	service.store = countingStore
+	now := time.Now()
+	service.now = func() time.Time { return now }
+	handler := service.Authenticate(http.NotFoundHandler())
+
+	for requestNumber := 1; requestNumber <= preAuthLookupClientLimit; requestNumber++ {
 		request := httptest.NewRequest(http.MethodGet, "/api/v1/content", nil)
 		request.RemoteAddr = "192.0.2.1:1234"
 		request.Header.Set("Authorization", "Bearer random-"+strconv.Itoa(requestNumber))
@@ -223,8 +348,8 @@ func TestInvalidBearerLookupsAreBoundedBeforeFirestore(t *testing.T) {
 	if limitedResponse.Code != http.StatusTooManyRequests {
 		t.Fatalf("excess invalid bearer lookup returned %d", limitedResponse.Code)
 	}
-	if countingStore.lookups != bearerLookupClientLimit {
-		t.Fatalf("invalid bearers caused %d store lookups, want %d", countingStore.lookups, bearerLookupClientLimit)
+	if countingStore.tokenLookups != preAuthLookupClientLimit {
+		t.Fatalf("invalid bearers caused %d store lookups, want %d", countingStore.tokenLookups, preAuthLookupClientLimit)
 	}
 
 	otherClient := httptest.NewRequest(http.MethodGet, "/api/v1/content", nil)
@@ -232,8 +357,8 @@ func TestInvalidBearerLookupsAreBoundedBeforeFirestore(t *testing.T) {
 	otherClient.Header.Set("Authorization", "Bearer other-client-token")
 	otherResponse := httptest.NewRecorder()
 	handler.ServeHTTP(otherResponse, otherClient)
-	if otherResponse.Code != http.StatusUnauthorized || countingStore.lookups != bearerLookupClientLimit+1 {
-		t.Fatalf("different client returned %d after %d lookups", otherResponse.Code, countingStore.lookups)
+	if otherResponse.Code != http.StatusUnauthorized || countingStore.tokenLookups != preAuthLookupClientLimit+1 {
+		t.Fatalf("different client returned %d after %d lookups", otherResponse.Code, countingStore.tokenLookups)
 	}
 }
 

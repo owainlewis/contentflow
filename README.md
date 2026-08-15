@@ -53,7 +53,7 @@ npm start
 
 The self-contained binary listens on `http://localhost:8080`. Client-side routes fall back to the embedded `index.html`; `/api` and `/health` routes never fall through to the SPA.
 
-Production refuses to start unless every authentication value above is present, the public origin is HTTPS, and local proxy authentication is disabled. Any authenticated public origin or OAuth issuer must also use HTTPS unless it uses an explicit loopback address for local development. Cookie security is derived from that validated origin. The OAuth redirect URI is `<public-origin>/api/v1/auth/callback`; HTTPS sign-in uses OIDC `form_post` so authorization codes and state never enter request URLs or platform request logs. OAuth attempts, sessions, distributed token rate limits, and SHA-256 token hashes are stored in Firestore. Raw API tokens are returned only by `POST /api/v1/tokens` and are never stored.
+Production refuses to start unless every authentication value above is present, the public origin is HTTPS, and local proxy authentication is disabled. Any authenticated public origin or OAuth issuer must also use HTTPS unless it uses an explicit loopback address for local development. Cookie security is derived from that validated origin. The OAuth redirect URI is `<public-origin>/api/v1/auth/callback`; an explicitly configured port is retained for exact provider matching. HTTPS sign-in uses OIDC `form_post` so authorization codes and state never enter request URLs or platform request logs. OAuth attempts, sessions, distributed token rate limits, and SHA-256 token hashes are stored in Firestore. Raw API tokens are returned only by `POST /api/v1/tokens` and are never stored.
 
 Before serving production traffic, enable managed deletion for the three expiring authentication collections:
 
@@ -67,6 +67,19 @@ Health endpoints:
 
 - `GET /health/live` reports whether the process is serving requests.
 - `GET /health/ready` checks the writable asset directory and checks Firestore whenever authentication or the Firestore emulator is configured.
+
+Public dependency calls are bounded as follows:
+
+| Public entry point | Firestore or outbound work | Bound |
+| --- | --- | --- |
+| Static files, missing routes, `/health/live` | None | No dependency call |
+| `/health/ready` | Firestore readiness query | Coalesced and cached for 5 seconds, with a 2-second internal deadline |
+| `/api/v1/auth/login` | Distributed admission transaction and OAuth-attempt write | Process-local 120/client and 1,000/instance per minute, then distributed 20/client and 300/workspace per minute |
+| `/api/v1/auth/callback` | OAuth-attempt transaction, OIDC token exchange and signing-key fetch, session write | Same process-local shield; attempts are single-use; outbound calls have a 10-second deadline |
+| Protected `/api/v1/*` with a session or bearer credential | Session or token lookup; distributed token admission | Same process-local shield; tokens also have a distributed 120/minute limit |
+| OIDC discovery | Provider metadata | Startup-only, with a 5-second deadline before listeners start |
+
+The local-development public API proxy only forwards to the loopback private listener. It is disabled in production.
 
 ## Checks
 

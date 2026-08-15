@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"net/url"
 	"strconv"
 	"time"
@@ -21,10 +22,15 @@ type OIDCProvider struct {
 }
 
 func NewOIDCProvider(ctx context.Context, issuer, clientID, clientSecret, redirectURL string) (*OIDCProvider, error) {
+	return newOIDCProvider(ctx, issuer, clientID, clientSecret, redirectURL, oauthExchangeTimeout)
+}
+
+func newOIDCProvider(ctx context.Context, issuer, clientID, clientSecret, redirectURL string, networkTimeout time.Duration) (*OIDCProvider, error) {
 	formPost, err := formPostForRedirect(redirectURL)
 	if err != nil {
 		return nil, err
 	}
+	ctx = boundedOIDCClientContext(ctx, networkTimeout)
 	provider, err := oidc.NewProvider(ctx, issuer)
 	if err != nil {
 		return nil, fmt.Errorf("discover OAuth issuer: %w", err)
@@ -57,6 +63,18 @@ func NewOIDCProvider(ctx context.Context, issuer, clientID, clientSecret, redire
 		verifier: provider.Verifier(&oidc.Config{ClientID: clientID}),
 		formPost: formPost,
 	}, nil
+}
+
+func boundedOIDCClientContext(ctx context.Context, timeout time.Duration) context.Context {
+	client := &http.Client{Timeout: timeout}
+	if configured, ok := ctx.Value(oauth2.HTTPClient).(*http.Client); ok {
+		copy := *configured
+		if copy.Timeout == 0 || copy.Timeout > timeout {
+			copy.Timeout = timeout
+		}
+		client = &copy
+	}
+	return oidc.ClientContext(ctx, client)
 }
 
 func validateDiscoveredEndpoint(issuer, name, rawURL string) error {

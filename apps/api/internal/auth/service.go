@@ -37,10 +37,10 @@ const (
 	loginAttemptClientRateLimit = 20
 	loginAttemptGlobalRateLimit = 300
 	loginAttemptRateWindow      = time.Minute
-	bearerLookupClientLimit     = 120
-	bearerLookupGlobalLimit     = 1000
-	bearerLookupMaxClients      = 4096
-	bearerLookupRateWindow      = time.Minute
+	preAuthLookupClientLimit    = 120
+	preAuthLookupGlobalLimit    = 1000
+	preAuthLookupMaxClients     = 4096
+	preAuthLookupRateWindow     = time.Minute
 )
 
 var allowedScopes = []Scope{ScopeContentRead, ScopeContentWrite, ScopeAssetsWrite}
@@ -54,16 +54,16 @@ type Config struct {
 }
 
 type Service struct {
-	config        Config
-	provider      OAuthProvider
-	store         Store
-	now           func() time.Time
-	random        func([]byte) (int, error)
-	entropy       io.Reader
-	ulidMu        sync.Mutex
-	sealer        cipher.AEAD
-	secureCookies bool
-	bearerLimiter *lookupLimiter
+	config         Config
+	provider       OAuthProvider
+	store          Store
+	now            func() time.Time
+	random         func([]byte) (int, error)
+	entropy        io.Reader
+	ulidMu         sync.Mutex
+	sealer         cipher.AEAD
+	secureCookies  bool
+	preAuthLimiter *lookupLimiter
 }
 
 type Principal struct {
@@ -104,11 +104,15 @@ func New(config Config, provider OAuthProvider, store Store) (*Service, error) {
 	return &Service{
 		config: config, provider: provider, store: store, now: time.Now, random: rand.Read,
 		entropy: ulid.Monotonic(rand.Reader, 0), sealer: sealer, secureCookies: origin.Scheme == "https",
-		bearerLimiter: newLookupLimiter(bearerLookupClientLimit, bearerLookupGlobalLimit, bearerLookupMaxClients, bearerLookupRateWindow),
+		preAuthLimiter: newLookupLimiter(preAuthLookupClientLimit, preAuthLookupGlobalLimit, preAuthLookupMaxClients, preAuthLookupRateWindow),
 	}, nil
 }
 
 func (s *Service) HandleLogin(response http.ResponseWriter, request *http.Request) {
+	if !s.allowPreAuthentication(request) {
+		writeError(response, http.StatusTooManyRequests, "login_rate_limit_exceeded")
+		return
+	}
 	allowed, err := s.allowLoginAttempt(request)
 	if err != nil {
 		writeError(response, http.StatusServiceUnavailable, "authentication_unavailable")
@@ -157,6 +161,10 @@ func (s *Service) HandleCallback(response http.ResponseWriter, request *http.Req
 	code, state, err := s.callbackValues(response, request)
 	if err != nil || code == "" || state == "" {
 		writeError(response, http.StatusUnauthorized, "oauth_state_invalid")
+		return
+	}
+	if !s.allowPreAuthentication(request) {
+		writeError(response, http.StatusTooManyRequests, "rate_limit_exceeded")
 		return
 	}
 	attempt, err := s.store.TakeLoginAttempt(request.Context(), cookie.Value, credentialDocumentID(state), s.now())
@@ -310,7 +318,7 @@ func (s *Service) authenticate(request *http.Request) (Principal, int, string) {
 			return Principal{}, http.StatusUnauthorized, "invalid_bearer_token"
 		}
 		raw := strings.TrimSpace(credential)
-		if !s.bearerLimiter.Allow(credentialDocumentID("bearer-client:"+requestClientIdentity(request)), s.now()) {
+		if !s.allowPreAuthentication(request) {
 			return Principal{}, http.StatusTooManyRequests, "rate_limit_exceeded"
 		}
 		hash := sha256.Sum256([]byte(raw))
@@ -337,6 +345,9 @@ func (s *Service) authenticate(request *http.Request) (Principal, int, string) {
 	if err != nil {
 		return Principal{}, http.StatusUnauthorized, "authentication_required"
 	}
+	if !s.allowPreAuthentication(request) {
+		return Principal{}, http.StatusTooManyRequests, "rate_limit_exceeded"
+	}
 	session, err := s.store.Session(request.Context(), cookie.Value, s.now())
 	if err != nil {
 		if !errors.Is(err, ErrNotFound) {
@@ -362,6 +373,11 @@ func (s *Service) allowLoginAttempt(request *http.Request) (bool, error) {
 		},
 	}
 	return s.store.AllowRequests(request.Context(), buckets, s.now(), loginAttemptRateWindow)
+}
+
+func (s *Service) allowPreAuthentication(request *http.Request) bool {
+	clientID := credentialDocumentID("pre-auth-client:" + requestClientIdentity(request))
+	return s.preAuthLimiter.Allow(clientID, s.now())
 }
 
 func requestClientIdentity(request *http.Request) string {
@@ -524,6 +540,27 @@ func normalizeOrigin(raw string) (string, *url.URL, error) {
 func CanonicalOrigin(raw string) (string, error) {
 	canonical, _, err := normalizeOrigin(raw)
 	return canonical, err
+}
+
+func OAuthRedirectOrigin(raw string) (string, error) {
+	canonical, _, err := normalizeOrigin(raw)
+	if err != nil {
+		return "", err
+	}
+	configured, err := url.Parse(raw)
+	if err != nil || configured.Port() == "" {
+		return canonical, err
+	}
+	port, err := strconv.Atoi(configured.Port())
+	if err != nil {
+		return "", fmt.Errorf("invalid origin port")
+	}
+	redirectOrigin, err := url.Parse(canonical)
+	if err != nil {
+		return "", err
+	}
+	redirectOrigin.Host = net.JoinHostPort(redirectOrigin.Hostname(), strconv.Itoa(port))
+	return redirectOrigin.Scheme + "://" + redirectOrigin.Host, nil
 }
 
 func secureEqual(left, right string) bool {

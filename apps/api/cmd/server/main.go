@@ -158,7 +158,11 @@ func authenticationURLs(configuredOrigin string) (string, string, error) {
 	if err != nil {
 		return "", "", err
 	}
-	return publicOrigin, publicOrigin + "/api/v1/auth/callback", nil
+	redirectOrigin, err := auth.OAuthRedirectOrigin(configuredOrigin)
+	if err != nil {
+		return "", "", err
+	}
+	return publicOrigin, redirectOrigin + "/api/v1/auth/callback", nil
 }
 
 func generateProxySecret() (string, error) {

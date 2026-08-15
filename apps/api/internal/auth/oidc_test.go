@@ -2,6 +2,8 @@ package auth
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -12,6 +14,8 @@ import (
 	"time"
 
 	coreoidc "github.com/coreos/go-oidc/v3/oidc"
+	jose "github.com/go-jose/go-jose/v4"
+	"github.com/go-jose/go-jose/v4/jwt"
 	"golang.org/x/oauth2"
 )
 
@@ -94,6 +98,93 @@ func TestOIDCTokenExchangeHasAnInternalDeadline(t *testing.T) {
 	}
 	if result.elapsed > time.Second {
 		t.Fatalf("stalled OAuth exchange took %s", result.elapsed)
+	}
+}
+
+func TestOIDCJWKSFetchIsBoundedAndCanRecover(t *testing.T) {
+	privateKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	signer, err := jose.NewSigner(
+		jose.SigningKey{Algorithm: jose.RS256, Key: privateKey},
+		(&jose.SignerOptions{}).WithType("JWT").WithHeader("kid", "test-key"),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	firstJWKSStarted := make(chan struct{})
+	firstJWKSCancelled := make(chan struct{})
+	var jwksRequests int
+	var issuer string
+	server := httptest.NewTLSServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/.well-known/openid-configuration":
+			response.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(response).Encode(map[string]any{
+				"issuer": issuer, "authorization_endpoint": issuer + "/authorize",
+				"token_endpoint": issuer + "/token", "jwks_uri": issuer + "/keys",
+				"id_token_signing_alg_values_supported": []string{"RS256"},
+			})
+		case "/token":
+			now := time.Now()
+			rawIDToken, signErr := jwt.Signed(signer).Claims(jwt.Claims{
+				Issuer: issuer, Subject: "owner-subject", Audience: jwt.Audience{"client"},
+				IssuedAt: jwt.NewNumericDate(now), Expiry: jwt.NewNumericDate(now.Add(time.Minute)),
+			}).Serialize()
+			if signErr != nil {
+				t.Error(signErr)
+				return
+			}
+			response.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(response).Encode(map[string]any{
+				"access_token": "access", "token_type": "Bearer", "id_token": rawIDToken,
+			})
+		case "/keys":
+			jwksRequests++
+			if jwksRequests == 1 {
+				close(firstJWKSStarted)
+				<-request.Context().Done()
+				close(firstJWKSCancelled)
+				return
+			}
+			response.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(response).Encode(jose.JSONWebKeySet{Keys: []jose.JSONWebKey{{
+				Key: &privateKey.PublicKey, KeyID: "test-key", Algorithm: string(jose.RS256), Use: "sig",
+			}}})
+		default:
+			http.NotFound(response, request)
+		}
+	}))
+	issuer = server.URL
+	defer server.Close()
+
+	clientContext := coreoidc.ClientContext(context.Background(), server.Client())
+	provider, err := newOIDCProvider(clientContext, issuer, "client", "secret", "https://contentflow.example/api/v1/auth/callback", 50*time.Millisecond)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := provider.exchangeIdentityWithTimeout(clientContext, "code", "verifier", time.Second); err == nil || !strings.Contains(err.Error(), "verify ID token") {
+		t.Fatalf("stalled signing-key request returned %v", err)
+	}
+	select {
+	case <-firstJWKSStarted:
+	default:
+		t.Fatal("signing-key request did not start")
+	}
+	select {
+	case <-firstJWKSCancelled:
+	case <-time.After(time.Second):
+		t.Fatal("stalled signing-key request was not cancelled")
+	}
+
+	identity, err := provider.exchangeIdentityWithTimeout(clientContext, "code", "verifier", time.Second)
+	if err != nil {
+		t.Fatalf("verification did not recover after signing-key timeout: %v", err)
+	}
+	if identity.Issuer != issuer || identity.Subject != "owner-subject" {
+		t.Fatalf("recovered identity is %#v", identity)
 	}
 }
 

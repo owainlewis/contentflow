@@ -11,16 +11,27 @@ import (
 	"github.com/owainlewis/contentflow/apps/api/internal/config"
 )
 
-func TestAuthenticationURLsCanonicalizeOAuthRedirect(t *testing.T) {
-	publicOrigin, redirectURL, err := authenticationURLs("https://CONTENTFLOW.EXAMPLE:0443/")
-	if err != nil {
-		t.Fatal(err)
+func TestAuthenticationURLsPreserveExplicitOAuthRedirectPorts(t *testing.T) {
+	tests := []struct {
+		configuredOrigin string
+		publicOrigin     string
+		redirectURL      string
+	}{
+		{"https://CONTENTFLOW.EXAMPLE:0443/", "https://contentflow.example", "https://contentflow.example:443/api/v1/auth/callback"},
+		{"https://CONTENTFLOW.EXAMPLE/", "https://contentflow.example", "https://contentflow.example/api/v1/auth/callback"},
+		{"https://CONTENTFLOW.EXAMPLE:008080/", "https://contentflow.example:8080", "https://contentflow.example:8080/api/v1/auth/callback"},
 	}
-	if publicOrigin != "https://contentflow.example" {
-		t.Fatalf("canonical public origin is %q", publicOrigin)
-	}
-	if redirectURL != "https://contentflow.example/api/v1/auth/callback" {
-		t.Fatalf("OAuth redirect URL is %q", redirectURL)
+	for _, test := range tests {
+		publicOrigin, redirectURL, err := authenticationURLs(test.configuredOrigin)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if publicOrigin != test.publicOrigin {
+			t.Fatalf("canonical public origin for %q is %q", test.configuredOrigin, publicOrigin)
+		}
+		if redirectURL != test.redirectURL {
+			t.Fatalf("OAuth redirect URL for %q is %q", test.configuredOrigin, redirectURL)
+		}
 	}
 }
 
