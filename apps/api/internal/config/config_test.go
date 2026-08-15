@@ -72,10 +72,12 @@ func TestProductionRequiresHTTPSPublicOrigin(t *testing.T) {
 }
 
 func TestProductionRequiresHTTPSOAuthIssuer(t *testing.T) {
-	cfg := productionConfig(t)
-	cfg.OAuthIssuer = "http://accounts.example"
-	if err := cfg.Validate(); err == nil {
-		t.Fatal("expected plaintext production OAuth issuer to fail")
+	for _, issuer := range []string{"http://accounts.example", "http://localhost:5556/oidc"} {
+		cfg := productionConfig(t)
+		cfg.OAuthIssuer = issuer
+		if err := cfg.Validate(); err == nil {
+			t.Fatalf("expected plaintext production OAuth issuer %q to fail", issuer)
+		}
 	}
 }
 
@@ -95,6 +97,22 @@ func TestAuthenticatedNonProductionOriginMustBeHTTPSOrLoopback(t *testing.T) {
 	cfg.PublicOrigin = "http://127.0.0.1:3000"
 	if err := cfg.Validate(); err != nil {
 		t.Fatalf("explicit loopback HTTP development origin failed: %v", err)
+	}
+}
+
+func TestAuthenticatedNonProductionOAuthIssuerMustBeHTTPSOrLoopback(t *testing.T) {
+	cfg := productionConfig(t)
+	cfg.Environment = "staging"
+	cfg.OAuthIssuer = "http://accounts.example"
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected authenticated staging to reject a remote plaintext OAuth issuer")
+	}
+
+	cfg.Environment = "development"
+	cfg.PublicOrigin = "http://localhost:3000"
+	cfg.OAuthIssuer = "http://127.0.0.1:5556/oidc"
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("explicit loopback HTTP OAuth issuer failed: %v", err)
 	}
 }
 

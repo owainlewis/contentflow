@@ -77,6 +77,13 @@ func (c Config) Validate() error {
 		if origin.Scheme == "http" && !loopbackHostname(origin.Hostname()) {
 			return fmt.Errorf("authenticated HTTP origins are allowed only on loopback")
 		}
+		issuer, err := url.Parse(c.OAuthIssuer)
+		if err != nil || issuer.Host == "" || (issuer.Scheme != "http" && issuer.Scheme != "https") || issuer.User != nil || issuer.RawQuery != "" || issuer.Fragment != "" {
+			return fmt.Errorf("CONTENTFLOW_OAUTH_ISSUER must be an HTTP or HTTPS URL")
+		}
+		if issuer.Scheme == "http" && !loopbackHostname(issuer.Hostname()) {
+			return fmt.Errorf("plaintext OAuth issuers are allowed only on loopback")
+		}
 	}
 	if c.Environment == "production" {
 		required := map[string]string{
