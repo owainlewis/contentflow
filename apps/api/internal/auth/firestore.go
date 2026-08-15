@@ -89,6 +89,9 @@ func (s *FirestoreStore) TakeLoginAttempt(ctx context.Context, id, state string,
 		if err := snapshot.DataTo(&document); err != nil {
 			return err
 		}
+		if !secureEqual(document.State, state) || !document.ExpiresAt.After(now) {
+			return ErrNotFound
+		}
 		if err := transaction.Delete(ref); err != nil {
 			return err
 		}
@@ -100,9 +103,6 @@ func (s *FirestoreStore) TakeLoginAttempt(ctx context.Context, id, state string,
 			return LoginAttempt{}, ErrNotFound
 		}
 		return LoginAttempt{}, err
-	}
-	if !secureEqual(attempt.State, state) || !attempt.ExpiresAt.After(now) {
-		return LoginAttempt{}, ErrNotFound
 	}
 	return attempt, nil
 }

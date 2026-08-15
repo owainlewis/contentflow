@@ -100,8 +100,11 @@ func TestFirestoreLoginAttemptCanOnlyBeConsumedOnce(t *testing.T) {
 	if err := store.SaveLoginAttempt(ctx, attempt); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := store.TakeLoginAttempt(ctx, attempt.ID, "wrong-state", time.Now()); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("mismatched OAuth state returned %v", err)
+	}
 	if _, err := store.TakeLoginAttempt(ctx, attempt.ID, attempt.State, time.Now()); err != nil {
-		t.Fatal(err)
+		t.Fatalf("mismatched OAuth state consumed the pending attempt: %v", err)
 	}
 	if _, err := store.TakeLoginAttempt(ctx, attempt.ID, attempt.State, time.Now()); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("consumed OAuth attempt was reusable: %v", err)

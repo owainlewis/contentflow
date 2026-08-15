@@ -89,10 +89,10 @@ func (s *MemoryStore) TakeLoginAttempt(_ context.Context, id, state string, now 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	attempt, ok := s.attempts[id]
-	delete(s.attempts, id)
 	if !ok || attempt.State != state || !attempt.ExpiresAt.After(now) {
 		return LoginAttempt{}, ErrNotFound
 	}
+	delete(s.attempts, id)
 	return attempt, nil
 }
 

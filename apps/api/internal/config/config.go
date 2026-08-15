@@ -69,6 +69,16 @@ func (c Config) Validate() error {
 	if c.LocalProxyAuth && c.PrivateAddress == "" {
 		return fmt.Errorf("CONTENTFLOW_PRIVATE_ADDR is required when local proxy authentication is enabled")
 	}
+	authValues := c.authenticationValues()
+	configuredAuthValues := 0
+	for _, value := range authValues {
+		if strings.TrimSpace(value) != "" {
+			configuredAuthValues++
+		}
+	}
+	if configuredAuthValues != 0 && configuredAuthValues != len(authValues) {
+		return fmt.Errorf("authentication configuration must be either complete or empty")
+	}
 	if c.AuthEnabled() {
 		origin, err := url.Parse(c.PublicOrigin)
 		if err != nil || origin.Host == "" || (origin.Scheme != "http" && origin.Scheme != "https") || origin.User != nil || (origin.Path != "" && origin.Path != "/") || origin.RawQuery != "" || origin.Fragment != "" {
@@ -121,7 +131,16 @@ func loopbackHostname(hostname string) bool {
 }
 
 func (c Config) AuthEnabled() bool {
-	return c.PublicOrigin != "" && c.OAuthIssuer != "" && c.OAuthClientID != "" && c.OAuthSecret != "" && c.OwnerSubject != "" && c.WorkspaceID != "" && c.GoogleProject != ""
+	for _, value := range c.authenticationValues() {
+		if strings.TrimSpace(value) == "" {
+			return false
+		}
+	}
+	return true
+}
+
+func (c Config) authenticationValues() []string {
+	return []string{c.GoogleProject, c.PublicOrigin, c.OAuthIssuer, c.OAuthClientID, c.OAuthSecret, c.OwnerSubject, c.WorkspaceID}
 }
 
 func stringEnv(name, fallback string) string {

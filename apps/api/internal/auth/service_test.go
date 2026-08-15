@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -154,6 +155,20 @@ func TestDifferentOwnerIssuerOrSubjectIsForbidden(t *testing.T) {
 		if response.Code != http.StatusForbidden || !strings.Contains(response.Body.String(), "owner_mismatch") {
 			t.Fatalf("owner mismatch returned %d: %s", response.Code, response.Body.String())
 		}
+	}
+}
+
+func TestMismatchedOAuthStateDoesNotConsumePendingAttempt(t *testing.T) {
+	store := NewMemoryStore()
+	attempt := LoginAttempt{ID: "attempt", State: "correct-state", CodeVerifier: "verifier", ExpiresAt: time.Now().Add(time.Minute)}
+	if err := store.SaveLoginAttempt(context.Background(), attempt); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.TakeLoginAttempt(context.Background(), attempt.ID, "wrong-state", time.Now()); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("mismatched OAuth state returned %v", err)
+	}
+	if _, err := store.TakeLoginAttempt(context.Background(), attempt.ID, attempt.State, time.Now()); err != nil {
+		t.Fatalf("mismatched OAuth state consumed the pending attempt: %v", err)
 	}
 }
 

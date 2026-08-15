@@ -116,6 +116,31 @@ func TestAuthenticatedNonProductionOAuthIssuerMustBeHTTPSOrLoopback(t *testing.T
 	}
 }
 
+func TestNonProductionRejectsPartialAuthenticationConfiguration(t *testing.T) {
+	fields := []struct {
+		name  string
+		clear func(*Config)
+	}{
+		{"project", func(c *Config) { c.GoogleProject = "" }},
+		{"origin", func(c *Config) { c.PublicOrigin = "" }},
+		{"issuer", func(c *Config) { c.OAuthIssuer = "" }},
+		{"client id", func(c *Config) { c.OAuthClientID = "" }},
+		{"client secret", func(c *Config) { c.OAuthSecret = "" }},
+		{"owner", func(c *Config) { c.OwnerSubject = "" }},
+		{"workspace", func(c *Config) { c.WorkspaceID = "" }},
+	}
+	for _, field := range fields {
+		t.Run(field.name, func(t *testing.T) {
+			cfg := productionConfig(t)
+			cfg.Environment = "staging"
+			field.clear(&cfg)
+			if err := cfg.Validate(); err == nil {
+				t.Fatal("expected partial non-production authentication configuration to fail")
+			}
+		})
+	}
+}
+
 func TestDevelopmentAcceptsLocalProxyAuthentication(t *testing.T) {
 	t.Parallel()
 
