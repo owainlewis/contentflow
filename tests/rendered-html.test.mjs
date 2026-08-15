@@ -1,40 +1,25 @@
 import assert from "node:assert/strict";
-import { access, readFile } from "node:fs/promises";
+import { access, readFile, readdir } from "node:fs/promises";
 import test from "node:test";
 
-const previewRoot = new URL("../app/_sites-preview/", import.meta.url);
-
-async function render() {
-  const workerUrl = new URL("../dist/server/index.js", import.meta.url);
-  workerUrl.searchParams.set("test", `${process.pid}-${Date.now()}`);
-  const { default: worker } = await import(workerUrl.href);
-
-  return worker.fetch(
-    new Request("http://localhost/", { headers: { accept: "text/html" } }),
-    { ASSETS: { fetch: async () => new Response("Not found", { status: 404 }) } },
-    { waitUntil() {}, passThroughOnException() {} },
-  );
-}
-
-test("server-renders the ContentFlow workspace", async () => {
-  const response = await render();
-  assert.equal(response.status, 200);
-  assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
-
-  const html = await response.text();
+test("builds the ContentFlow client application", async () => {
+  const buildRoot = new URL("../apps/api/web/dist/", import.meta.url);
+  const html = await readFile(new URL("index.html", buildRoot), "utf8");
   assert.match(html, /ContentFlow/);
-  assert.match(html, /All content/);
-  assert.match(html, /Build an AI content system that actually saves time/);
-  assert.match(html, /Script structure/);
-  assert.match(html, /Repurpose/);
   assert.match(html, /ContentFlow · Your content, in one place/);
-  assert.doesNotMatch(html, /codex-preview|Your site is taking shape|react-loading-skeleton/);
+  assert.match(html, /contentflow-theme/);
+  assert.equal((html.match(/__CONTENTFLOW_SOCIAL_IMAGE__/g) ?? []).length, 2);
+  assert.match(html, /<div id="root"><\/div>/);
+
+  const assets = await readdir(new URL("assets/", buildRoot));
+  assert.ok(assets.some((name) => name.endsWith(".js")), "Vite build should contain JavaScript");
+  assert.ok(assets.some((name) => name.endsWith(".css")), "Vite build should contain CSS");
 });
 
 test("ships the final product surface without starter artifacts", async () => {
-  const [page, layout, packageJson] = await Promise.all([
-    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
-    readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
+  const [page, html, packageJson] = await Promise.all([
+    readFile(new URL("../apps/web/src/App.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../apps/web/index.html", import.meta.url), "utf8"),
     readFile(new URL("../package.json", import.meta.url), "utf8"),
   ]);
 
@@ -44,9 +29,9 @@ test("ships the final product surface without starter artifacts", async () => {
   assert.match(page, /function createRepurposedDrafts/);
   assert.match(page, /className="plain-editor"/);
   assert.match(page, /className="script-block"/);
-  assert.match(layout, /og\.png/);
+  assert.equal((html.match(/__CONTENTFLOW_SOCIAL_IMAGE__/g) ?? []).length, 2);
+  assert.doesNotMatch(packageJson, /vinext|react-server-dom-webpack|wrangler/);
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);
 
-  await access(new URL("../public/og.png", import.meta.url));
-  await assert.rejects(access(previewRoot));
+  await access(new URL("../apps/web/public/og.png", import.meta.url));
 });

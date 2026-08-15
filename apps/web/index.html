@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="A focused workspace for writing, organising, and repurposing content." />
+    <meta property="og:title" content="ContentFlow" />
+    <meta property="og:description" content="Your content, in one place" />
+    <meta property="og:type" content="website" />
+    <meta property="og:image" content="__CONTENTFLOW_SOCIAL_IMAGE__" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="ContentFlow" />
+    <meta name="twitter:description" content="Your content, in one place" />
+    <meta name="twitter:image" content="__CONTENTFLOW_SOCIAL_IMAGE__" />
+    <script>
+      try {
+        document.documentElement.dataset.theme = localStorage.getItem("contentflow-theme") === "light" ? "light" : "dark";
+      } catch {
+        document.documentElement.dataset.theme = "dark";
+      }
+    </script>
+    <title>ContentFlow · Your content, in one place</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
