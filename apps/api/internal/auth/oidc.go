@@ -4,10 +4,13 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"time"
 
 	"github.com/coreos/go-oidc/v3/oidc"
 	"golang.org/x/oauth2"
 )
+
+const oauthExchangeTimeout = 10 * time.Second
 
 type OIDCProvider struct {
 	issuer   string
@@ -60,7 +63,14 @@ func (p *OIDCProvider) AuthorizationURL(state, codeChallenge string) string {
 }
 
 func (p *OIDCProvider) ExchangeIdentity(ctx context.Context, code, codeVerifier string) (Identity, error) {
-	token, err := p.oauth.Exchange(ctx, code, oauth2.SetAuthURLParam("code_verifier", codeVerifier))
+	return p.exchangeIdentityWithTimeout(ctx, code, codeVerifier, oauthExchangeTimeout)
+}
+
+func (p *OIDCProvider) exchangeIdentityWithTimeout(ctx context.Context, code, codeVerifier string, timeout time.Duration) (Identity, error) {
+	exchangeContext, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	token, err := p.oauth.Exchange(exchangeContext, code, oauth2.SetAuthURLParam("code_verifier", codeVerifier))
 	if err != nil {
 		return Identity{}, fmt.Errorf("exchange authorization code: %w", err)
 	}
@@ -68,7 +78,7 @@ func (p *OIDCProvider) ExchangeIdentity(ctx context.Context, code, codeVerifier 
 	if !ok || rawIDToken == "" {
 		return Identity{}, fmt.Errorf("OAuth response omitted ID token")
 	}
-	idToken, err := p.verifier.Verify(ctx, rawIDToken)
+	idToken, err := p.verifier.Verify(exchangeContext, rawIDToken)
 	if err != nil {
 		return Identity{}, fmt.Errorf("verify ID token: %w", err)
 	}

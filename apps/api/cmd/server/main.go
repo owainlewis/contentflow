@@ -28,6 +28,7 @@ import (
 const (
 	shutdownTimeout      = 10 * time.Second
 	oidcDiscoveryTimeout = 5 * time.Second
+	requestReadTimeout   = 10 * time.Second
 )
 
 func main() {
@@ -100,11 +101,7 @@ func run(ctx context.Context, cfg config.Config) error {
 		if err != nil {
 			return fmt.Errorf("generate local proxy secret: %w", err)
 		}
-		privateServer := &http.Server{
-			Addr:              cfg.PrivateAddress,
-			Handler:           server.RequireProxySecret(api, secret),
-			ReadHeaderTimeout: 5 * time.Second,
-		}
+		privateServer := newHTTPServer(cfg.PrivateAddress, server.RequireProxySecret(api, secret))
 		servers = append(servers, privateServer)
 
 		privateURL, err := url.Parse("http://" + loopbackAddress(cfg.PrivateAddress))
@@ -114,11 +111,7 @@ func run(ctx context.Context, cfg config.Config) error {
 		publicHandler = server.NewLocalPublicApplication(webassets.Assets(), privateURL, secret)
 	}
 
-	publicServer := &http.Server{
-		Addr:              cfg.PublicAddress,
-		Handler:           publicHandler,
-		ReadHeaderTimeout: 5 * time.Second,
-	}
+	publicServer := newHTTPServer(cfg.PublicAddress, publicHandler)
 	servers = append(servers, publicServer)
 
 	errorChannel := make(chan error, len(servers))
@@ -147,6 +140,15 @@ func run(ctx context.Context, cfg config.Config) error {
 		}
 	}
 	return runErr
+}
+
+func newHTTPServer(address string, handler http.Handler) *http.Server {
+	return &http.Server{
+		Addr:              address,
+		Handler:           handler,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       requestReadTimeout,
+	}
 }
 
 func authenticationURLs(configuredOrigin string) (string, string, error) {

@@ -24,6 +24,16 @@ func TestAuthenticationURLsCanonicalizeOAuthRedirect(t *testing.T) {
 	}
 }
 
+func TestHTTPServerBoundsRequestHeadersAndBodies(t *testing.T) {
+	httpServer := newHTTPServer("127.0.0.1:0", http.NotFoundHandler())
+	if httpServer.ReadHeaderTimeout <= 0 {
+		t.Fatal("HTTP server has no header read deadline")
+	}
+	if httpServer.ReadTimeout != requestReadTimeout {
+		t.Fatalf("HTTP server read timeout is %s, want %s", httpServer.ReadTimeout, requestReadTimeout)
+	}
+}
+
 func TestRunBoundsOIDCDiscoveryBeforeStartingServers(t *testing.T) {
 	issuer := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, request *http.Request) {
 		<-request.Context().Done()

@@ -17,7 +17,7 @@ func TestFirestoreTTLScriptConfiguresEveryExpiringAuthCollection(t *testing.T) {
 	}
 
 	script := filepath.Join("..", "..", "..", "..", "scripts", "configure-firestore-ttl.sh")
-	command := exec.Command("bash", script, "test-project", "test-database")
+	command := exec.Command("bash", script, "test-project")
 	command.Env = append(os.Environ(), "PATH="+temporaryDirectory+string(os.PathListSeparator)+os.Getenv("PATH"), "GCLOUD_TEST_LOG="+logPath)
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("configure Firestore TTL: %v: %s", err, output)
@@ -35,7 +35,7 @@ func TestFirestoreTTLScriptConfiguresEveryExpiringAuthCollection(t *testing.T) {
 		for _, argument := range []string{
 			"firestore fields ttls update expires_at",
 			"--collection-group=" + collection,
-			"--database=test-database",
+			"--database=(default)",
 			"--project=test-project",
 			"--enable-ttl",
 		} {
@@ -43,5 +43,10 @@ func TestFirestoreTTLScriptConfiguresEveryExpiringAuthCollection(t *testing.T) {
 				t.Fatalf("TTL command %q does not contain %q", lines[index], argument)
 			}
 		}
+	}
+
+	command = exec.Command("bash", script, "test-project", "unsupported-database")
+	if err := command.Run(); err == nil {
+		t.Fatal("TTL script accepted a database the service cannot use")
 	}
 }
