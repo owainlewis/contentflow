@@ -1,0 +1,20 @@
+ID: 01J00000000000000000000001
+Type: youtube
+Status: draft
+Working title: "A useful\ntitle\x1b[31mred"
+Revision: 2
+Created at: 2026-08-15T09:00:00Z
+Updated at: 2026-08-15T10:00:00.123456Z
+Expires at: 2026-10-10T09:00:00Z
+Archived at: -
+Content:
+{
+  "topic": "Topic",
+  "icp": "ICP",
+  "angle": "Angle",
+  "cta": "CTA",
+  "publishing_title": "Published title",
+  "description": "Description",
+  "sections": [],
+  "transcript": "Exact transcript"
+}
