@@ -26,9 +26,11 @@ test("ships the final product surface without starter artifacts", async () => {
   for (const label of ["YouTube", "LinkedIn", "Instagram", "TikTok", "Email", "Substack"]) {
     assert.match(page, new RegExp(label));
   }
-  assert.match(page, /function createRepurposedDrafts/);
+  assert.match(page, /YouTube transcript: what was actually said/);
+  assert.match(page, /AutosaveManager/);
   assert.match(page, /className="plain-editor"/);
   assert.match(page, /className="script-block"/);
+  assert.doesNotMatch(page, /Repurpose|createRepurposedDrafts/);
   assert.equal((html.match(/__CONTENTFLOW_SOCIAL_IMAGE__/g) ?? []).length, 2);
   assert.doesNotMatch(packageJson, /vinext|react-server-dom-webpack|wrangler/);
   assert.doesNotMatch(packageJson, /react-loading-skeleton/);

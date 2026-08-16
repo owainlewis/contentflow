@@ -23,10 +23,12 @@ services:
       CONTENTFLOW_ADDR: :8080
       CONTENTFLOW_PRIVATE_ADDR: :8081
       CONTENTFLOW_LOCAL_PROXY_AUTH: "true"
+      # The published port below is the public loopback boundary for this container listener.
+      CONTENTFLOW_LOOPBACK_PORT_PROXY: "true"
       CONTENTFLOW_ASSET_DIR: /var/lib/contentflow/assets
       FIRESTORE_EMULATOR_HOST: firestore:8080
     ports:
-      - "3000:8080"
+      - "127.0.0.1:3000:8080"
     expose:
       - "8081"
     volumes:

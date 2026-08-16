@@ -1,12 +1,14 @@
 package server
 
 import (
+	cryptorand "crypto/rand"
 	"crypto/subtle"
 	"encoding/json"
 	"html"
 	"io/fs"
 	"log/slog"
 	"mime"
+	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -37,6 +39,88 @@ func NewAPI(checker health.Checker, authentication *auth.Service) http.Handler {
 }
 
 func NewAPIWithContent(checker health.Checker, authentication *auth.Service, contentHandler *content.HTTPHandler) http.Handler {
+	router := newRouter(checker)
+	if authentication != nil {
+		service := authentication
+		router.Get("/api/v1/auth/login", service.HandleLogin)
+		router.Get("/api/v1/auth/callback", service.HandleCallback)
+		router.Post("/api/v1/auth/callback", service.HandleCallback)
+		router.Group(func(protected chi.Router) {
+			protected.Use(service.Authenticate, service.Authorize)
+			protected.Get("/api/v1/session", service.HandleSession)
+			protected.Post("/api/v1/tokens", service.HandleCreateToken)
+			protected.Delete("/api/v1/tokens/{tokenID}", func(response http.ResponseWriter, request *http.Request) {
+				service.HandleRevokeToken(response, request, chi.URLParam(request, "tokenID"))
+			})
+			if contentHandler != nil {
+				contentHandler.Register(protected)
+			}
+			protected.Handle("/api/v1/*", http.HandlerFunc(notFound))
+		})
+	}
+	router.NotFound(notFound)
+	return router
+}
+
+func NewLocalAPIWithContent(checker health.Checker, contentHandler *content.HTTPHandler, workspaceID string) http.Handler {
+	router := newRouter(checker)
+	csrfToken := cryptorand.Text()
+	router.Group(func(protected chi.Router) {
+		protected.Use(func(next http.Handler) http.Handler {
+			return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
+				if !trustedLocalHost(request.Host) {
+					writeJSON(response, http.StatusForbidden, errorResponse{Error: "untrusted_local_host"})
+					return
+				}
+				if localMutation(request.Method) && !validLocalCSRF(request, csrfToken) {
+					writeJSON(response, http.StatusForbidden, errorResponse{Error: "csrf_check_failed"})
+					return
+				}
+				principal := auth.Principal{WorkspaceID: workspaceID, Kind: "session", CSRFToken: csrfToken, Scopes: []auth.Scope{auth.ScopeContentRead, auth.ScopeContentWrite, auth.ScopeAssetsWrite}}
+				next.ServeHTTP(response, request.WithContext(auth.ContextWithPrincipal(request.Context(), principal)))
+			})
+		})
+		protected.Get("/api/v1/session", func(response http.ResponseWriter, _ *http.Request) {
+			writeJSON(response, http.StatusOK, map[string]any{"workspace_id": workspaceID, "identity": "local", "csrf_token": csrfToken, "scopes": []auth.Scope{auth.ScopeContentRead, auth.ScopeContentWrite, auth.ScopeAssetsWrite}})
+		})
+		contentHandler.Register(protected)
+		protected.Handle("/api/v1/*", http.HandlerFunc(notFound))
+	})
+	router.NotFound(notFound)
+	return router
+}
+
+func localMutation(method string) bool {
+	return method != http.MethodGet && method != http.MethodHead && method != http.MethodOptions
+}
+
+func trustedLocalHost(hostPort string) bool {
+	parsed, err := url.Parse("//" + hostPort)
+	if err != nil || parsed.User != nil {
+		return false
+	}
+	hostname := strings.ToLower(parsed.Hostname())
+	if hostname == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(hostname)
+	return ip != nil && ip.IsLoopback()
+}
+
+func validLocalCSRF(request *http.Request, csrfToken string) bool {
+	scheme := "http"
+	if request.TLS != nil {
+		scheme = "https"
+	}
+	expectedOrigin, err := auth.CanonicalOrigin(scheme + "://" + request.Host)
+	if err != nil {
+		return false
+	}
+	requestOrigin, err := auth.CanonicalOrigin(request.Header.Get("Origin"))
+	return err == nil && subtle.ConstantTimeCompare([]byte(requestOrigin), []byte(expectedOrigin)) == 1 && subtle.ConstantTimeCompare([]byte(request.Header.Get("X-CSRF-Token")), []byte(csrfToken)) == 1
+}
+
+func newRouter(checker health.Checker) *chi.Mux {
 	router := chi.NewRouter()
 	router.Use(redactedRequestLogger)
 	router.Get("/health/live", func(response http.ResponseWriter, _ *http.Request) {
@@ -57,25 +141,6 @@ func NewAPIWithContent(checker health.Checker, authentication *auth.Service, con
 		}
 		writeJSON(response, status, statusResponse{Status: state, Checks: checks})
 	})
-	if authentication != nil {
-		service := authentication
-		router.Get("/api/v1/auth/login", service.HandleLogin)
-		router.Get("/api/v1/auth/callback", service.HandleCallback)
-		router.Post("/api/v1/auth/callback", service.HandleCallback)
-		router.Group(func(protected chi.Router) {
-			protected.Use(service.Authenticate, service.Authorize)
-			protected.Get("/api/v1/session", service.HandleSession)
-			protected.Post("/api/v1/tokens", service.HandleCreateToken)
-			protected.Delete("/api/v1/tokens/{tokenID}", func(response http.ResponseWriter, request *http.Request) {
-				service.HandleRevokeToken(response, request, chi.URLParam(request, "tokenID"))
-			})
-			if contentHandler != nil {
-				contentHandler.Register(protected)
-			}
-			protected.Handle("/api/v1/*", http.HandlerFunc(notFound))
-		})
-	}
-	router.NotFound(notFound)
 	return router
 }
 

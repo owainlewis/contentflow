@@ -15,7 +15,9 @@ import (
 	"testing/fstest"
 	"time"
 
+	"github.com/oklog/ulid/v2"
 	"github.com/owainlewis/contentflow/apps/api/internal/auth"
+	"github.com/owainlewis/contentflow/apps/api/internal/content"
 )
 
 type fakeChecker map[string]error
@@ -141,6 +143,119 @@ func TestLocalPublicApplicationInjectsProxySecret(t *testing.T) {
 	public.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/health/live", nil))
 	if response.Code != http.StatusOK {
 		t.Fatalf("public proxy returned %d: %s", response.Code, response.Body.String())
+	}
+}
+
+func TestLocalAPIExposesProxyScopedPersistentContent(t *testing.T) {
+	t.Parallel()
+
+	handler := content.NewHTTPHandler(content.NewService(content.NewMemoryStore()))
+	api := NewLocalAPIWithContent(fakeChecker{}, handler, "local-workspace")
+
+	session := httptest.NewRecorder()
+	sessionRequest := httptest.NewRequest(http.MethodGet, "/api/v1/session", nil)
+	sessionRequest.Host = "localhost:3000"
+	api.ServeHTTP(session, sessionRequest)
+	if session.Code != http.StatusOK || !strings.Contains(session.Body.String(), `"workspace_id":"local-workspace"`) {
+		t.Fatalf("local session returned %d: %s", session.Code, session.Body.String())
+	}
+	var sessionBody struct {
+		CSRFToken string `json:"csrf_token"`
+	}
+	if err := json.Unmarshal(session.Body.Bytes(), &sessionBody); err != nil || sessionBody.CSRFToken == "" {
+		t.Fatalf("local session did not return a CSRF token: %v, %s", err, session.Body.String())
+	}
+
+	operationID := ulid.Make().String()
+	create := httptest.NewRecorder()
+	body := `{"type":"x","working_title":"Local draft","status":"draft","operation_id":"` + operationID + `","content":{"body":"persisted"}}`
+	createRequest := httptest.NewRequest(http.MethodPost, "/api/v1/content", strings.NewReader(body))
+	createRequest.Host = "localhost:3000"
+	createRequest.Header.Set("Origin", "http://localhost:3000")
+	createRequest.Header.Set("X-CSRF-Token", sessionBody.CSRFToken)
+	api.ServeHTTP(create, createRequest)
+	if create.Code != http.StatusCreated {
+		t.Fatalf("local create returned %d: %s", create.Code, create.Body.String())
+	}
+
+	list := httptest.NewRecorder()
+	listRequest := httptest.NewRequest(http.MethodGet, "/api/v1/content?q=local", nil)
+	listRequest.Host = "localhost:3000"
+	api.ServeHTTP(list, listRequest)
+	if list.Code != http.StatusOK || !strings.Contains(list.Body.String(), `"working_title":"Local draft"`) {
+		t.Fatalf("local list returned %d: %s", list.Code, list.Body.String())
+	}
+	if strings.Contains(list.Body.String(), `"body"`) || strings.Contains(list.Body.String(), `"content"`) {
+		t.Fatalf("local list leaked detail fields: %s", list.Body.String())
+	}
+}
+
+func TestLocalAPIMutationsRequireSameOriginCSRF(t *testing.T) {
+	t.Parallel()
+
+	handler := content.NewHTTPHandler(content.NewService(content.NewMemoryStore()))
+	api := NewLocalAPIWithContent(fakeChecker{}, handler, "local-workspace")
+	session := httptest.NewRecorder()
+	sessionRequest := httptest.NewRequest(http.MethodGet, "/api/v1/session", nil)
+	sessionRequest.Host = "localhost:3000"
+	api.ServeHTTP(session, sessionRequest)
+	var sessionBody struct {
+		CSRFToken string `json:"csrf_token"`
+	}
+	if err := json.Unmarshal(session.Body.Bytes(), &sessionBody); err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name, origin, token string
+	}{
+		{"missing origin", "", sessionBody.CSRFToken},
+		{"cross-site origin", "https://evil.example", sessionBody.CSRFToken},
+		{"missing token", "http://localhost:3000", ""},
+		{"wrong token", "http://localhost:3000", "wrong"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodPost, "/api/v1/content", strings.NewReader(`{"type":"x","working_title":"Attack","status":"draft","operation_id":"`+ulid.Make().String()+`","content":{"body":"text"}}`))
+			request.Host = "localhost:3000"
+			request.Header.Set("Content-Type", "text/plain")
+			if test.origin != "" {
+				request.Header.Set("Origin", test.origin)
+			}
+			if test.token != "" {
+				request.Header.Set("X-CSRF-Token", test.token)
+			}
+			response := httptest.NewRecorder()
+			api.ServeHTTP(response, request)
+			if response.Code != http.StatusForbidden || !strings.Contains(response.Body.String(), "csrf_check_failed") {
+				t.Fatalf("local mutation returned %d: %s", response.Code, response.Body.String())
+			}
+		})
+	}
+
+	list := httptest.NewRecorder()
+	listRequest := httptest.NewRequest(http.MethodGet, "/api/v1/content", nil)
+	listRequest.Host = "localhost:3000"
+	api.ServeHTTP(list, listRequest)
+	if list.Code != http.StatusOK || !strings.Contains(list.Body.String(), `"items":[]`) {
+		t.Fatalf("rejected local mutations changed content: %d %s", list.Code, list.Body.String())
+	}
+}
+
+func TestLocalAPIRejectsUntrustedHostBeforeExposingSession(t *testing.T) {
+	t.Parallel()
+
+	handler := content.NewHTTPHandler(content.NewService(content.NewMemoryStore()))
+	api := NewLocalAPIWithContent(fakeChecker{}, handler, "local-workspace")
+	for _, host := range []string{"attacker.example", "attacker.example@127.0.0.1:3000"} {
+		request := httptest.NewRequest(http.MethodGet, "/api/v1/session", nil)
+		request.Host = host
+		response := httptest.NewRecorder()
+		api.ServeHTTP(response, request)
+
+		if response.Code != http.StatusForbidden || !strings.Contains(response.Body.String(), "untrusted_local_host") || strings.Contains(response.Body.String(), "csrf_token") {
+			t.Fatalf("untrusted local host %q returned %d: %s", host, response.Code, response.Body.String())
+		}
 	}
 }
 

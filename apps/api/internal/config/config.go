@@ -10,19 +10,20 @@ import (
 )
 
 type Config struct {
-	Environment    string
-	PublicAddress  string
-	PrivateAddress string
-	AssetDirectory string
-	FirestoreHost  string
-	LocalProxyAuth bool
-	GoogleProject  string
-	PublicOrigin   string
-	OAuthIssuer    string
-	OAuthClientID  string
-	OAuthSecret    string
-	OwnerSubject   string
-	WorkspaceID    string
+	Environment       string
+	PublicAddress     string
+	PrivateAddress    string
+	AssetDirectory    string
+	FirestoreHost     string
+	LocalProxyAuth    bool
+	LoopbackPortProxy bool
+	GoogleProject     string
+	PublicOrigin      string
+	OAuthIssuer       string
+	OAuthClientID     string
+	OAuthSecret       string
+	OwnerSubject      string
+	WorkspaceID       string
 }
 
 func Load() (Config, error) {
@@ -30,21 +31,26 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	loopbackPortProxy, err := boolEnv("CONTENTFLOW_LOOPBACK_PORT_PROXY", false)
+	if err != nil {
+		return Config{}, err
+	}
 
 	cfg := Config{
-		Environment:    stringEnv("CONTENTFLOW_ENV", "development"),
-		PublicAddress:  stringEnv("CONTENTFLOW_ADDR", ":8080"),
-		PrivateAddress: stringEnv("CONTENTFLOW_PRIVATE_ADDR", ":8081"),
-		AssetDirectory: stringEnv("CONTENTFLOW_ASSET_DIR", "var/assets"),
-		FirestoreHost:  os.Getenv("FIRESTORE_EMULATOR_HOST"),
-		LocalProxyAuth: localProxyAuth,
-		GoogleProject:  os.Getenv("CONTENTFLOW_GOOGLE_PROJECT_ID"),
-		PublicOrigin:   os.Getenv("CONTENTFLOW_PUBLIC_ORIGIN"),
-		OAuthIssuer:    os.Getenv("CONTENTFLOW_OAUTH_ISSUER"),
-		OAuthClientID:  os.Getenv("CONTENTFLOW_OAUTH_CLIENT_ID"),
-		OAuthSecret:    os.Getenv("CONTENTFLOW_OAUTH_CLIENT_SECRET"),
-		OwnerSubject:   os.Getenv("CONTENTFLOW_OWNER_SUBJECT"),
-		WorkspaceID:    os.Getenv("CONTENTFLOW_WORKSPACE_ID"),
+		Environment:       stringEnv("CONTENTFLOW_ENV", "development"),
+		PublicAddress:     stringEnv("CONTENTFLOW_ADDR", ":8080"),
+		PrivateAddress:    stringEnv("CONTENTFLOW_PRIVATE_ADDR", ":8081"),
+		AssetDirectory:    stringEnv("CONTENTFLOW_ASSET_DIR", "var/assets"),
+		FirestoreHost:     os.Getenv("FIRESTORE_EMULATOR_HOST"),
+		LocalProxyAuth:    localProxyAuth,
+		LoopbackPortProxy: loopbackPortProxy,
+		GoogleProject:     os.Getenv("CONTENTFLOW_GOOGLE_PROJECT_ID"),
+		PublicOrigin:      os.Getenv("CONTENTFLOW_PUBLIC_ORIGIN"),
+		OAuthIssuer:       os.Getenv("CONTENTFLOW_OAUTH_ISSUER"),
+		OAuthClientID:     os.Getenv("CONTENTFLOW_OAUTH_CLIENT_ID"),
+		OAuthSecret:       os.Getenv("CONTENTFLOW_OAUTH_CLIENT_SECRET"),
+		OwnerSubject:      os.Getenv("CONTENTFLOW_OWNER_SUBJECT"),
+		WorkspaceID:       os.Getenv("CONTENTFLOW_WORKSPACE_ID"),
 	}
 
 	if err := cfg.Validate(); err != nil {
@@ -68,6 +74,15 @@ func (c Config) Validate() error {
 	}
 	if c.LocalProxyAuth && c.PrivateAddress == "" {
 		return fmt.Errorf("CONTENTFLOW_PRIVATE_ADDR is required when local proxy authentication is enabled")
+	}
+	if c.LocalProxyAuth && strings.TrimSpace(c.FirestoreHost) == "" {
+		return fmt.Errorf("FIRESTORE_EMULATOR_HOST is required when local proxy authentication is enabled")
+	}
+	if c.LocalProxyAuth && !loopbackAddress(c.PublicAddress) && !c.LoopbackPortProxy {
+		return fmt.Errorf("CONTENTFLOW_ADDR must bind to loopback when local proxy authentication is enabled")
+	}
+	if c.LoopbackPortProxy && !c.LocalProxyAuth {
+		return fmt.Errorf("CONTENTFLOW_LOOPBACK_PORT_PROXY requires local proxy authentication")
 	}
 	authValues := c.authenticationValues()
 	configuredAuthValues := 0
@@ -128,6 +143,11 @@ func loopbackHostname(hostname string) bool {
 	}
 	ip := net.ParseIP(hostname)
 	return ip != nil && ip.IsLoopback()
+}
+
+func loopbackAddress(address string) bool {
+	host, _, err := net.SplitHostPort(address)
+	return err == nil && host != "" && loopbackHostname(host)
 }
 
 func (c Config) AuthEnabled() bool {
