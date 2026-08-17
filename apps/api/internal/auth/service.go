@@ -142,7 +142,7 @@ func (s *Service) HandleLogin(response http.ResponseWriter, request *http.Reques
 		writeError(response, http.StatusInternalServerError, "authentication_unavailable")
 		return
 	}
-	attempt := LoginAttempt{ID: attemptID, State: credentialDocumentID(state), CodeVerifier: sealedVerifier, ExpiresAt: s.now().Add(10 * time.Minute)}
+	attempt := LoginAttempt{ID: attemptID, State: credentialKey(state), CodeVerifier: sealedVerifier, ExpiresAt: s.now().Add(10 * time.Minute)}
 	if err := s.store.SaveLoginAttempt(request.Context(), attempt); err != nil {
 		writeError(response, http.StatusServiceUnavailable, "authentication_unavailable")
 		return
@@ -167,7 +167,7 @@ func (s *Service) HandleCallback(response http.ResponseWriter, request *http.Req
 		writeError(response, http.StatusTooManyRequests, "rate_limit_exceeded")
 		return
 	}
-	attempt, err := s.store.TakeLoginAttempt(request.Context(), cookie.Value, credentialDocumentID(state), s.now())
+	attempt, err := s.store.TakeLoginAttempt(request.Context(), cookie.Value, credentialKey(state), s.now())
 	if err != nil {
 		if !errors.Is(err, ErrNotFound) {
 			writeError(response, http.StatusServiceUnavailable, "authentication_unavailable")
@@ -364,11 +364,11 @@ func (s *Service) authenticate(request *http.Request) (Principal, int, string) {
 func (s *Service) allowLoginAttempt(request *http.Request) (bool, error) {
 	buckets := []RateLimitBucket{
 		{
-			ID:    credentialDocumentID("oauth-login-client:" + s.config.WorkspaceID + ":" + requestClientIdentity(request)),
+			ID:    credentialKey("oauth-login-client:" + s.config.WorkspaceID + ":" + requestClientIdentity(request)),
 			Limit: loginAttemptClientRateLimit,
 		},
 		{
-			ID:    credentialDocumentID("oauth-login-global:" + s.config.WorkspaceID),
+			ID:    credentialKey("oauth-login-global:" + s.config.WorkspaceID),
 			Limit: loginAttemptGlobalRateLimit,
 		},
 	}
@@ -376,7 +376,7 @@ func (s *Service) allowLoginAttempt(request *http.Request) (bool, error) {
 }
 
 func (s *Service) allowPreAuthentication(request *http.Request) bool {
-	clientID := credentialDocumentID("pre-auth-client:" + requestClientIdentity(request))
+	clientID := credentialKey("pre-auth-client:" + requestClientIdentity(request))
 	return s.preAuthLimiter.Allow(clientID, s.now())
 }
 

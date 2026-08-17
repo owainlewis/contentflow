@@ -92,34 +92,6 @@ func (s *MemoryStore) Replace(_ context.Context, item Item, revision int64, rece
 	return cloneResult(receipt.MutationResult), nil
 }
 
-func (s *MemoryStore) SetArchived(_ context.Context, workspaceID, id string, revision int64, archived bool, now time.Time, receipt Receipt) (MutationResult, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if result, found, err := s.receiptLocked(receipt); found || err != nil {
-		return result, err
-	}
-	key := memoryKey(workspaceID, id)
-	current, found := s.items[key]
-	if !found || !current.ExpiresAt.After(now) {
-		return MutationResult{}, notFound()
-	}
-	if current.Revision != revision {
-		current = cloneItem(current)
-		return MutationResult{}, conflict(current)
-	}
-	current.Revision++
-	current.UpdatedAt = now
-	if archived {
-		archivedAt := now
-		current.ArchivedAt = &archivedAt
-	} else {
-		current.ArchivedAt = nil
-	}
-	s.items[key] = current
-	s.receipts[memoryKey(receipt.WorkspaceID, receipt.OperationID)] = cloneReceipt(receipt)
-	return cloneResult(receipt.MutationResult), nil
-}
-
 func (s *MemoryStore) Delete(_ context.Context, workspaceID, id string, revision int64, now time.Time, receipt Receipt) (MutationResult, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -218,9 +190,9 @@ func validateSectionReplacement(current, replacement Item) error {
 
 func cloneItem(item Item) Item {
 	copy := item
-	if item.ArchivedAt != nil {
-		archived := *item.ArchivedAt
-		copy.ArchivedAt = &archived
+	if item.ScheduledAt != nil {
+		scheduled := *item.ScheduledAt
+		copy.ScheduledAt = &scheduled
 	}
 	if youtube, ok := item.Content.(YouTubeContent); ok {
 		youtube.Sections = append([]Section(nil), youtube.Sections...)

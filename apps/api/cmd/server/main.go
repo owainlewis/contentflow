@@ -17,10 +17,10 @@ import (
 	"syscall"
 	"time"
 
-	"cloud.google.com/go/firestore"
 	"github.com/owainlewis/contentflow/apps/api/internal/auth"
 	"github.com/owainlewis/contentflow/apps/api/internal/config"
 	"github.com/owainlewis/contentflow/apps/api/internal/content"
+	"github.com/owainlewis/contentflow/apps/api/internal/database"
 	"github.com/owainlewis/contentflow/apps/api/internal/health"
 	"github.com/owainlewis/contentflow/apps/api/internal/server"
 	webassets "github.com/owainlewis/contentflow/apps/api/web"
@@ -30,8 +30,8 @@ const (
 	shutdownTimeout                = 10 * time.Second
 	oidcDiscoveryTimeout           = 5 * time.Second
 	requestReadTimeout             = 10 * time.Second
-	firestoreReadinessCacheTTL     = 5 * time.Second
-	firestoreReadinessCheckTimeout = 2 * time.Second
+	databaseReadinessCacheTTL     = 5 * time.Second
+	databaseReadinessCheckTimeout = 2 * time.Second
 )
 
 func main() {
@@ -62,49 +62,52 @@ func main() {
 }
 
 func run(ctx context.Context, cfg config.Config) error {
-	checker := health.Dependencies{
-		AssetDirectory: cfg.AssetDirectory,
-		FirestoreHost:  cfg.FirestoreHost,
-	}
-	var authentication *auth.Service
-	var contentHandler *content.HTTPHandler
-	localWorkspaceID := ""
+	// Identity discovery is a bounded outbound call, so it runs before the
+	// database connection: a misconfigured issuer fails fast and clearly.
+	var provider *auth.OIDCProvider
+	var publicOrigin string
 	if cfg.AuthEnabled() {
-		publicOrigin, redirectURL, err := authenticationURLs(cfg.PublicOrigin)
+		origin, redirectURL, err := authenticationURLs(cfg.PublicOrigin)
 		if err != nil {
 			return fmt.Errorf("configure authentication origin: %w", err)
 		}
+		publicOrigin = origin
 		discoveryContext, cancelDiscovery := context.WithTimeout(ctx, oidcDiscoveryTimeout)
-		provider, err := auth.NewOIDCProvider(discoveryContext, cfg.OAuthIssuer, cfg.OAuthClientID, cfg.OAuthSecret, redirectURL)
+		provider, err = auth.NewOIDCProvider(discoveryContext, cfg.OAuthIssuer, cfg.OAuthClientID, cfg.OAuthSecret, redirectURL)
 		cancelDiscovery()
 		if err != nil {
 			return err
 		}
-		firestoreClient, err := firestore.NewClient(ctx, cfg.GoogleProject)
-		if err != nil {
-			return fmt.Errorf("connect to Firestore auth store: %w", err)
-		}
-		defer firestoreClient.Close()
+	}
+
+	pool, err := database.Open(ctx, cfg.DatabaseURL)
+	if err != nil {
+		return fmt.Errorf("connect to PostgreSQL: %w", err)
+	}
+	defer pool.Close()
+
+	checker := health.Dependencies{
+		AssetDirectory: cfg.AssetDirectory,
+		DatabaseCheck:  health.CacheCheck(func(ctx context.Context) error { return pool.Ping(ctx) }, databaseReadinessCacheTTL, databaseReadinessCheckTimeout),
+		DialTimeout:    databaseReadinessCheckTimeout,
+	}
+	contentStore := content.NewPostgresStore(pool)
+	var authentication *auth.Service
+	var contentHandler *content.HTTPHandler
+	localWorkspaceID := ""
+	if cfg.AuthEnabled() {
 		credentialKey := sha256.Sum256([]byte(cfg.OAuthSecret))
-		firestoreStore := auth.NewFirestoreStore(firestoreClient)
-		checker.FirestoreCheck = health.CacheCheck(firestoreStore.Check, firestoreReadinessCacheTTL, firestoreReadinessCheckTimeout)
-		checker.DialTimeout = firestoreReadinessCheckTimeout
 		authentication, err = auth.New(auth.Config{
 			PublicOrigin: publicOrigin, OwnerIssuer: cfg.OAuthIssuer, OwnerSubject: cfg.OwnerSubject,
 			WorkspaceID: cfg.WorkspaceID, CredentialKey: credentialKey[:],
-		}, provider, firestoreStore)
+		}, provider, auth.NewPostgresStore(pool))
 		if err != nil {
 			return fmt.Errorf("configure authentication: %w", err)
 		}
-		contentHandler = content.NewHTTPHandler(content.NewService(content.NewFirestoreStore(firestoreClient)))
-	} else if cfg.LocalProxyAuth && cfg.FirestoreHost != "" {
-		firestoreClient, err := firestore.NewClient(ctx, "contentflow-local")
-		if err != nil {
-			return fmt.Errorf("connect to local Firestore content store: %w", err)
-		}
-		defer firestoreClient.Close()
+		contentHandler = content.NewHTTPHandler(content.NewService(contentStore))
+	} else if cfg.LocalProxyAuth {
 		localWorkspaceID = "contentflow-local"
-		contentHandler = content.NewHTTPHandler(content.NewService(content.NewFirestoreStore(firestoreClient)))
+		contentHandler = content.NewHTTPHandler(content.NewService(contentStore))
 	}
 	api := server.NewAPIWithContent(checker, authentication, contentHandler)
 	if localWorkspaceID != "" {

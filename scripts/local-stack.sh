@@ -2,4 +2,4 @@
 set -eu
 
 docker compose up --build --wait
-printf '%s\n' 'ContentFlow is ready at http://localhost:3000'
+printf '%s\n' 'ContentFlow is ready at http://127.0.0.1:3100'

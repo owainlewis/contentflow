@@ -155,8 +155,6 @@ func (r runner) run(ctx context.Context, command string, arguments []string) int
 		return r.writeContent(ctx, http.MethodPost, "/api/v1/content", arguments, false)
 	case "update":
 		return r.update(ctx, arguments)
-	case "archive", "restore":
-		return r.revisionMutation(ctx, command, arguments)
 	case "batch-create":
 		return r.writeContent(ctx, http.MethodPost, "/api/v1/content/batches", arguments, true)
 	default:
@@ -747,47 +745,6 @@ func setTranscript(object map[string]json.RawMessage, transcript string) error {
 	return nil
 }
 
-func (r runner) revisionMutation(ctx context.Context, command string, arguments []string) int {
-	parsed, err := parseArguments(arguments, map[string]flagKind{"json": booleanFlag, "revision": valueFlag, "operation-id": valueFlag})
-	if err != nil || len(parsed.positionals) != 1 {
-		return r.usageError(firstError(err, command+" requires one content ID"))
-	}
-	contentID, err := canonicalContentID(parsed.positionals[0])
-	if err != nil {
-		return r.usageError(err.Error())
-	}
-	revision, err := strconv.ParseInt(parsed.values["revision"], 10, 64)
-	if err != nil || revision < 1 {
-		return r.usageError("--revision must be a positive integer")
-	}
-	operationID := parsed.values["operation-id"]
-	if operationID == "" {
-		operationID, err = r.newOperationID()
-		if err != nil {
-			return r.usageError("could not generate operation ID")
-		}
-	}
-	operationID, err = validateOperationID(operationID)
-	if err != nil {
-		return r.usageError(err.Error())
-	}
-	body, _ := json.Marshal(map[string]any{"operation_id": operationID, "revision": revision})
-	path := "/api/v1/content/" + url.PathEscape(contentID) + "/" + command
-	response, requestErr := r.client.mutate(ctx, http.MethodPost, path, body)
-	status := "archived"
-	if command == "restore" {
-		status = "restored"
-	}
-	return r.finishMutation(response, requestErr, parsed.booleans["json"], mutationExpectation{
-		operationID: operationID,
-		httpStatus:  http.StatusOK,
-		status:      status,
-		itemCount:   1,
-		itemID:      contentID,
-		revision:    revision + 1,
-	})
-}
-
 func (r runner) readInput(ctx context.Context, path string) ([]byte, bool, error) {
 	var reader io.Reader
 	var closeReader io.Closer
@@ -1129,7 +1086,7 @@ func validErrorCode(value string) bool {
 		"invalid_query", "invalid_request", "invalid_revision", "invalid_section_id", "invalid_section_order", "invalid_status", "invalid_status_filter",
 		"invalid_title_prefix", "invalid_type_filter", "operation_id_conflict", "receipt_document_too_large", "request_too_large", "revision_conflict",
 		"section_document_too_large", "section_id_not_allowed", "text_field_too_large", "too_many_sections", "transcript_missing",
-		"transcript_not_supported", "transcript_required", "unknown_section_id", "working_title_required":
+		"transcript_not_supported", "transcript_required", "unknown_section_id":
 		return true
 	default:
 		return false
@@ -1218,8 +1175,6 @@ Usage:
   flow content transcript ID [--json]
   flow content create --file PATH [--transcript-file PATH|- | --clear-transcript] [--operation-id ID] [--replay-metadata PATH | --replay-before UNIX] [--json]
   flow content update ID --file PATH [--transcript-file PATH|- | --clear-transcript] [--operation-id ID] [--replay-metadata PATH | --replay-before UNIX] [--json]
-  flow content archive ID --revision N [--operation-id ID] [--json]
-  flow content restore ID --revision N [--operation-id ID] [--json]
   flow content batch-create --file PATH [--operation-id ID] [--replay-metadata PATH | --replay-before UNIX] [--json]
 
 Configuration:

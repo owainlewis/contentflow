@@ -309,7 +309,7 @@ export class AutosaveManager {
 
 export function mergeServerState(latest: ContentDetail, server: ContentDetail, frozen: ContentDetail): ContentDetail | undefined {
   if (latest.type !== "youtube" || server.type !== "youtube" || frozen.type !== "youtube") {
-    return { ...latest, revision: server.revision, updated_at: server.updated_at, expires_at: server.expires_at, archived_at: server.archived_at };
+    return { ...latest, revision: server.revision, updated_at: server.updated_at, expires_at: server.expires_at };
   }
   const serverContent = server.content as YouTubeContent;
   const frozenContent = frozen.content as YouTubeContent;
@@ -333,7 +333,6 @@ export function mergeServerState(latest: ContentDetail, server: ContentDetail, f
     revision: server.revision,
     updated_at: server.updated_at,
     expires_at: server.expires_at,
-    archived_at: server.archived_at,
     content: {
       ...latestContent,
       sections: latestContent.sections.map((section, position) => ({
@@ -368,6 +367,5 @@ function mergeMetadata(local: ContentDetail, server: ContentDetail): ContentDeta
     revision: server.revision,
     updated_at: server.updated_at,
     expires_at: server.expires_at,
-    archived_at: server.archived_at,
   };
 }
