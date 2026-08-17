@@ -463,7 +463,8 @@ button, select { cursor: pointer; }
 .planning-section-heading { display: flex; align-items: baseline; gap: 12px; margin: 0 2px 8px; }
 .planning-section-heading > span { color: var(--text-strong); font-size: var(--font-label); font-weight: 730; text-transform: uppercase; letter-spacing: .07em; }
 .planning-section-heading small { color: var(--text-muted); font-size: var(--font-label); }
-.publishing-heading { margin-top: 20px; padding-top: 17px; border-top: 1px solid var(--line-soft); }
+/* The last brief field already draws a rule, so the heading adds space rather than a second line. */
+.publishing-heading { margin-top: 26px; }
 .brief-grid { display: grid; grid-template-columns: 1fr 1fr; column-gap: 26px; row-gap: 0; }
 .brief-field { display: grid; align-content: start; gap: 6px; padding: 12px 0 11px; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; background: transparent; }
 .brief-field:focus-within { border-color: var(--accent); background: transparent; }
