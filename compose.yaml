@@ -1,16 +1,15 @@
 services:
-  firestore:
-    image: gcr.io/google.com/cloudsdktool/google-cloud-cli:emulators
-    command:
-      - gcloud
-      - beta
-      - emulators
-      - firestore
-      - start
-      - --host-port=0.0.0.0:8080
-      - --project=contentflow-local
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_USER: contentflow
+      POSTGRES_PASSWORD: contentflow
+      POSTGRES_DB: contentflow
+    volumes:
+      # Postgres 18 images want the parent directory mounted, not data/.
+      - contentflow-postgres:/var/lib/postgresql
     healthcheck:
-      test: ["CMD-SHELL", "timeout 2 bash -c '</dev/tcp/127.0.0.1/8080'"]
+      test: ["CMD-SHELL", "pg_isready -U contentflow -d contentflow"]
       interval: 2s
       timeout: 3s
       retries: 30
@@ -26,15 +25,15 @@ services:
       # The published port below is the public loopback boundary for this container listener.
       CONTENTFLOW_LOOPBACK_PORT_PROXY: "true"
       CONTENTFLOW_ASSET_DIR: /var/lib/contentflow/assets
-      FIRESTORE_EMULATOR_HOST: firestore:8080
+      CONTENTFLOW_DATABASE_URL: postgres://contentflow:contentflow@postgres:5432/contentflow?sslmode=disable
     ports:
-      - "127.0.0.1:3000:8080"
+      - "127.0.0.1:3100:8080"
     expose:
       - "8081"
     volumes:
       - contentflow-assets:/var/lib/contentflow/assets
     depends_on:
-      firestore:
+      postgres:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "/contentflow", "healthcheck", "http://127.0.0.1:8080/health/ready"]
@@ -45,3 +44,4 @@ services:
 
 volumes:
   contentflow-assets:
+  contentflow-postgres:

@@ -133,7 +133,7 @@ func TestLoginAttemptWritesUsePerClientAndGlobalLimits(t *testing.T) {
 	if globalResponse.Code != http.StatusTooManyRequests || len(globalStore.attempts) != loginAttemptGlobalRateLimit {
 		t.Fatalf("global login cap returned %d after storing %d attempts", globalResponse.Code, len(globalStore.attempts))
 	}
-	blockedClientBucket := credentialDocumentID("oauth-login-client:owner-workspace:2001:db8:ffff::/64")
+	blockedClientBucket := credentialKey("oauth-login-client:owner-workspace:2001:db8:ffff::/64")
 	if _, exists := globalStore.rates[blockedClientBucket]; exists {
 		t.Fatal("globally rejected login committed a new per-client rate record")
 	}
@@ -215,7 +215,7 @@ func TestLoginAdmissionDependencyFailureDoesNotCreateAttempt(t *testing.T) {
 	}
 }
 
-func TestLoginStartFirestoreCallsAreBoundedBeforeAdmission(t *testing.T) {
+func TestLoginStartStoreCallsAreBoundedBeforeAdmission(t *testing.T) {
 	service, memoryStore, _ := newTestService(t, Identity{})
 	countingStore := &countingAuthStore{Store: memoryStore}
 	service.store = countingStore
@@ -250,7 +250,7 @@ func TestLoginStartFirestoreCallsAreBoundedBeforeAdmission(t *testing.T) {
 	}
 }
 
-func TestInvalidCallbackLookupsAreBoundedBeforeFirestore(t *testing.T) {
+func TestInvalidCallbackLookupsAreBoundedBeforeTheStore(t *testing.T) {
 	service, memoryStore, _ := newTestService(t, Identity{})
 	countingStore := &countingAuthStore{Store: memoryStore}
 	service.store = countingStore
@@ -285,7 +285,7 @@ func TestInvalidCallbackLookupsAreBoundedBeforeFirestore(t *testing.T) {
 	}
 }
 
-func TestForgedSessionLookupsAreBoundedBeforeFirestore(t *testing.T) {
+func TestForgedSessionLookupsAreBoundedBeforeTheStore(t *testing.T) {
 	service, memoryStore, _ := newTestService(t, Identity{})
 	countingStore := &countingAuthStore{Store: memoryStore}
 	service.store = countingStore
@@ -322,7 +322,7 @@ func TestForgedSessionLookupsAreBoundedBeforeFirestore(t *testing.T) {
 	}
 }
 
-func TestInvalidBearerLookupsAreBoundedBeforeFirestore(t *testing.T) {
+func TestInvalidBearerLookupsAreBoundedBeforeTheStore(t *testing.T) {
 	service, memoryStore, _ := newTestService(t, Identity{})
 	countingStore := &countingAuthStore{Store: memoryStore}
 	service.store = countingStore

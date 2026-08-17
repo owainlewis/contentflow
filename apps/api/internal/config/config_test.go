@@ -18,11 +18,11 @@ func TestProductionRejectsLocalProxyAuthentication(t *testing.T) {
 	}
 }
 
-func TestProductionRejectsFirestoreEmulator(t *testing.T) {
+func TestConfigurationRequiresADatabaseURL(t *testing.T) {
 	cfg := productionConfig(t)
-	cfg.FirestoreHost = "127.0.0.1:8787"
+	cfg.DatabaseURL = ""
 	if err := cfg.Validate(); err == nil {
-		t.Fatal("expected production configuration to reject the Firestore emulator")
+		t.Fatal("expected configuration without CONTENTFLOW_DATABASE_URL to be rejected")
 	}
 }
 
@@ -30,7 +30,7 @@ func productionConfig(t *testing.T) Config {
 	t.Helper()
 	return Config{
 		Environment: "production", PublicAddress: ":8080", PrivateAddress: ":8081", AssetDirectory: t.TempDir(),
-		GoogleProject: "project", PublicOrigin: "https://contentflow.example", OAuthIssuer: "https://accounts.google.com",
+		DatabaseURL: "postgres://localhost/contentflow", PublicOrigin: "https://contentflow.example", OAuthIssuer: "https://accounts.google.com",
 		OAuthClientID: "client", OAuthSecret: "secret", OwnerSubject: "owner", WorkspaceID: "workspace",
 	}
 }
@@ -40,8 +40,7 @@ func TestProductionRequiresCompleteAuthenticationConfiguration(t *testing.T) {
 		name  string
 		clear func(*Config)
 	}{
-		{"project", func(c *Config) { c.GoogleProject = "" }},
-		{"origin", func(c *Config) { c.PublicOrigin = "" }},
+				{"origin", func(c *Config) { c.PublicOrigin = "" }},
 		{"issuer", func(c *Config) { c.OAuthIssuer = "" }},
 		{"client id", func(c *Config) { c.OAuthClientID = "" }},
 		{"client secret", func(c *Config) { c.OAuthSecret = "" }},
@@ -121,8 +120,7 @@ func TestNonProductionRejectsPartialAuthenticationConfiguration(t *testing.T) {
 		name  string
 		clear func(*Config)
 	}{
-		{"project", func(c *Config) { c.GoogleProject = "" }},
-		{"origin", func(c *Config) { c.PublicOrigin = "" }},
+				{"origin", func(c *Config) { c.PublicOrigin = "" }},
 		{"issuer", func(c *Config) { c.OAuthIssuer = "" }},
 		{"client id", func(c *Config) { c.OAuthClientID = "" }},
 		{"client secret", func(c *Config) { c.OAuthSecret = "" }},
@@ -150,7 +148,7 @@ func TestDevelopmentAcceptsLocalProxyAuthentication(t *testing.T) {
 		PrivateAddress: ":8081",
 		AssetDirectory: t.TempDir(),
 		LocalProxyAuth: true,
-		FirestoreHost:  "127.0.0.1:8080",
+		DatabaseURL:    "postgres://localhost/contentflow",
 	}
 
 	if err := cfg.Validate(); err != nil {
@@ -163,7 +161,7 @@ func TestDevelopmentRejectsWildcardLocalProxyAuthentication(t *testing.T) {
 
 	cfg := Config{
 		Environment: "development", PublicAddress: ":8080", PrivateAddress: ":8081", AssetDirectory: t.TempDir(),
-		LocalProxyAuth: true, FirestoreHost: "127.0.0.1:8787",
+		LocalProxyAuth: true, DatabaseURL: "postgres://localhost/contentflow",
 	}
 	if err := cfg.Validate(); err == nil {
 		t.Fatal("expected wildcard local proxy authentication address to fail")
@@ -175,14 +173,14 @@ func TestContainerPortProxyMayAssertExternalLoopbackBinding(t *testing.T) {
 
 	cfg := Config{
 		Environment: "development", PublicAddress: ":8080", PrivateAddress: ":8081", AssetDirectory: t.TempDir(),
-		LocalProxyAuth: true, LoopbackPortProxy: true, FirestoreHost: "firestore:8080",
+		LocalProxyAuth: true, LoopbackPortProxy: true, DatabaseURL: "postgres://db/contentflow",
 	}
 	if err := cfg.Validate(); err != nil {
 		t.Fatalf("externally loopback-bound container proxy failed: %v", err)
 	}
 }
 
-func TestDevelopmentRejectsLocalProxyAuthenticationWithoutFirestoreEmulator(t *testing.T) {
+func TestDevelopmentRejectsLocalProxyAuthenticationWithoutADatabase(t *testing.T) {
 	t.Parallel()
 
 	cfg := Config{
@@ -194,6 +192,6 @@ func TestDevelopmentRejectsLocalProxyAuthenticationWithoutFirestoreEmulator(t *t
 	}
 
 	if err := cfg.Validate(); err == nil {
-		t.Fatal("expected local proxy authentication without a Firestore emulator to fail")
+		t.Fatal("expected configuration without a database URL to fail")
 	}
 }

@@ -109,30 +109,6 @@ paths:
         '409':
           description: The transcript contains only Unicode whitespace.
           content: { application/json: { schema: { $ref: '#/components/schemas/Error' }, examples: { missing: { value: { error: transcript_missing } } } } }
-  /content/{id}/archive:
-    parameters:
-      - { $ref: '#/components/parameters/ContentID' }
-    post:
-      operationId: archiveContent
-      requestBody:
-        required: true
-        content: { application/json: { schema: { $ref: '#/components/schemas/RevisionMutationRequest' } } }
-      responses:
-        '200': { $ref: '#/components/responses/MutationOK' }
-        '404': { $ref: '#/components/responses/NotFound' }
-        '409': { $ref: '#/components/responses/Conflict' }
-  /content/{id}/restore:
-    parameters:
-      - { $ref: '#/components/parameters/ContentID' }
-    post:
-      operationId: restoreContent
-      requestBody:
-        required: true
-        content: { application/json: { schema: { $ref: '#/components/schemas/RevisionMutationRequest' } } }
-      responses:
-        '200': { $ref: '#/components/responses/MutationOK' }
-        '404': { $ref: '#/components/responses/NotFound' }
-        '409': { $ref: '#/components/responses/Conflict' }
 components:
   securitySchemes:
     bearerToken: { type: http, scheme: bearer }
@@ -338,6 +314,7 @@ components:
         type: { $ref: '#/components/schemas/ContentType' }
         working_title: { $ref: '#/components/schemas/Text' }
         status: { $ref: '#/components/schemas/ContentStatus' }
+        scheduled_at: { type: string, format: date-time, description: Optional planned publish date. Omitting it on replace clears it. }
     BatchYouTubeCreate:
       allOf:
         - { $ref: '#/components/schemas/BatchItemCommon' }
@@ -469,7 +446,7 @@ components:
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
         expires_at: { type: string, format: date-time, description: Server-owned and fixed at creation plus 56 days. }
-        archived_at: { type: string, format: date-time }
+        scheduled_at: { type: string, format: date-time, description: Optional planned publish date. Omitting it on replace clears it. }
     ItemCommon:
       type: object
       required: [type, working_title, status, content]
@@ -549,7 +526,7 @@ components:
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
         expires_at: { type: string, format: date-time }
-        archived_at: { type: string, format: date-time }
+        scheduled_at: { type: string, format: date-time, description: Optional planned publish date. }
         asset_counts: { type: object, additionalProperties: { type: integer, minimum: 0 } }
     Transcript:
       type: object
@@ -568,7 +545,7 @@ components:
         item_ids: { type: array, maxItems: 1, items: { $ref: '#/components/schemas/ULID' } }
         revisions: { type: array, maxItems: 1, items: { type: integer, minimum: 1 } }
         expires_at: { type: array, maxItems: 1, items: { type: string, format: date-time } }
-        status: { type: string, enum: [created, updated, archived, restored, deleted] }
+        status: { type: string, enum: [created, updated, deleted] }
     BatchMutationResult:
       type: object
       additionalProperties: false

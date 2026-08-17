@@ -1,11 +1,9 @@
 import {
   AlertTriangle,
-  Archive,
   ArrowDown,
   ArrowLeft,
   ArrowUp,
   CalendarDays,
-  Camera,
   Check,
   ChevronDown,
   Clock3,
@@ -15,19 +13,16 @@ import {
   Inbox,
   Lightbulb,
   LoaderCircle,
-  Mail,
   Menu,
   MoreHorizontal,
   MousePointerClick,
-  Music2,
-  Network,
   Moon,
   PanelLeftClose,
+  PanelLeftOpen,
   Paperclip,
   Plus,
-  RotateCcw,
   Search,
-  Settings,
+  Settings as SettingsIcon,
   SquarePen,
   Sun,
   Target,
@@ -35,9 +30,7 @@ import {
   Upload,
   Users,
   X,
-  Video,
   Zap,
-  type LucideIcon,
 } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
@@ -54,7 +47,6 @@ import {
   newOperationId,
   replaceContent,
   serializeReplacement,
-  setArchived,
   type ContentDetail,
   type ContentPayload,
   type ContentStatus,
@@ -63,31 +55,56 @@ import {
   type Section,
   type YouTubeContent,
 } from "./api";
+import AutoTextarea from "./AutoTextarea";
+import Calendar from "./Calendar";
+import Settings from "./Settings";
+import { TypeIcon, displayTitle, statusLabels, typeMeta } from "./content-meta";
 import { AutosaveManager, type ConflictView, type SaveState } from "./autosave";
 import { normalizeUnicode15Title } from "./unicode-normalization";
 
 type Theme = "light" | "dark";
-type LifecycleAction = "archive" | "restore" | "delete";
+type View = "workspace" | "calendar" | "settings";
+
+// The server serves index.html for any extensionless path, so views are real
+// URLs: deep links and the browser back button both work.
+function viewFromPath(pathname: string): View {
+  if (pathname.startsWith("/calendar")) return "calendar";
+  if (pathname.startsWith("/settings")) return "settings";
+  return "workspace";
+}
+
+const viewPaths: Record<View, string> = { workspace: "/", calendar: "/calendar", settings: "/settings" };
+type LifecycleAction = "delete";
 type PendingLifecycle = { id: string; action: LifecycleAction };
 type LibraryFilters = { query: string; type: ContentType | "all"; status: ContentStatus | "all" };
 type Attachment = { id: string; kind: "image" | "video" | "pdf"; name: string; size: number };
 type ThumbnailPreview = { dataUrl?: string; requestId: string };
 
-const typeMeta: Record<ContentType, { label: string; description: string; icon: LucideIcon; color: string }> = {
-  youtube: { label: "YouTube", description: "Video brief, script, transcript, and assets", icon: Video, color: "var(--platform-icon)" },
-  linkedin: { label: "LinkedIn", description: "Post with an image or PDF", icon: Network, color: "var(--platform-icon)" },
-  x: { label: "X", description: "Post with an optional image", icon: X, color: "var(--platform-icon)" },
-  instagram: { label: "Instagram", description: "Image, Reel, or carousel", icon: Camera, color: "var(--platform-icon)" },
-  tiktok: { label: "TikTok", description: "Script and finished video", icon: Music2, color: "var(--platform-icon)" },
-  email: { label: "Email", description: "Subject line and email body", icon: Mail, color: "var(--platform-icon)" },
-  substack: { label: "Substack", description: "Headline, sub-headline, and article", icon: FileText, color: "var(--platform-icon)" },
-};
+const enabledTypesKey = "contentflow-enabled-types";
+const sidebarCollapsedKey = "contentflow-sidebar-collapsed";
 
-const statusLabels: Record<ContentStatus, string> = { idea: "Idea", draft: "Draft", ready: "Ready", published: "Published" };
+// Preferences live in localStorage beside the theme. They are per-browser, not
+// per-account, because the API has no settings resource to store them in.
+function readEnabledTypes(): ContentType[] {
+  try {
+    const stored = window.localStorage.getItem(enabledTypesKey);
+    if (!stored) return [...contentTypes];
+    const parsed: unknown = JSON.parse(stored);
+    if (!Array.isArray(parsed)) return [...contentTypes];
+    const kept = contentTypes.filter((type) => parsed.includes(type));
+    // Never leave the workspace with nothing to create.
+    return kept.length ? kept : [...contentTypes];
+  } catch {
+    return [...contentTypes];
+  }
+}
 
-function TypeIcon({ type, size = 16 }: { type: ContentType; size?: number }) {
-  const Icon = typeMeta[type].icon;
-  return <Icon size={size} strokeWidth={1.9} />;
+function readSidebarCollapsed(): boolean {
+  try {
+    return window.localStorage.getItem(sidebarCollapsedKey) === "true";
+  } catch {
+    return false;
+  }
 }
 
 function AttachmentIcon({ kind }: { kind: Attachment["kind"] }) {
@@ -194,6 +211,10 @@ export default function Home() {
   const [sessionExpired, setSessionExpired] = useState(false);
   const [reauthChecking, setReauthChecking] = useState(false);
   const [reauthError, setReauthError] = useState("");
+  const [signInEmail, setSignInEmail] = useState("");
+  const [signInPassword, setSignInPassword] = useState("");
+  const [signInError, setSignInError] = useState("");
+  const [signInPending, setSignInPending] = useState(false);
   const [pendingSessionCreate, setPendingSessionCreate] = useState<ContentType>();
   const [pendingSessionLifecycle, setPendingSessionLifecycle] = useState<{ document: ContentDetail; action: LifecycleAction }>();
   const [loadError, setLoadError] = useState("");
@@ -201,6 +222,11 @@ export default function Home() {
   const [detailReload, setDetailReload] = useState(0);
   const [detailLoading, setDetailLoading] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
+  const [view, setView] = useState<View>(() => viewFromPath(window.location.pathname));
+  const [calendarError, setCalendarError] = useState("");
+  const [workspaceId, setWorkspaceId] = useState<string>();
+  const [enabledTypes, setEnabledTypes] = useState<ContentType[]>(readEnabledTypes);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(readSidebarCollapsed);
   const [createPending, setCreatePending] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [libraryOpen, setLibraryOpen] = useState(false);
@@ -312,6 +338,7 @@ export default function Home() {
         if (!active) return;
         csrfTokenRef.current = session.csrf_token ?? "";
         setCsrfToken(csrfTokenRef.current);
+        setWorkspaceId(session.workspace_id);
         allSummariesRef.current = items;
         summariesRef.current = items;
         setAllSummaries(items);
@@ -445,6 +472,12 @@ export default function Home() {
   }, [detailReload, selectedId]);
 
   useEffect(() => {
+    const sync = () => setView(viewFromPath(window.location.pathname));
+    window.addEventListener("popstate", sync);
+    return () => window.removeEventListener("popstate", sync);
+  }, []);
+
+  useEffect(() => {
     if (typeof window.matchMedia !== "function") return;
     const media = window.matchMedia("(max-width: 900px)");
     const sync = () => setIsCompact(media.matches);
@@ -519,6 +552,7 @@ export default function Home() {
         searchRef.current?.focus();
       } else if (!event.metaKey && !event.ctrlKey && !event.altKey && event.key.toLowerCase() === "n" && !(event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLSelectElement)) {
         event.preventDefault();
+        // Mirrors the sidebar button this shortcut is labelled on: always ask.
         setCreateOpen(true);
       }
     }
@@ -530,6 +564,76 @@ export default function Home() {
     result[item.type] += 1;
     return result;
   }, { youtube: 0, linkedin: 0, x: 0, instagram: 0, tiktok: 0, email: 0, substack: 0 }), [allSummaries]);
+
+  function navigate(next: View) {
+    if (window.location.pathname !== viewPaths[next]) window.history.pushState({}, "", viewPaths[next]);
+    setView(next);
+    setLibraryOpen(false);
+  }
+
+  async function submitPasswordSignIn(event: React.FormEvent) {
+    event.preventDefault();
+    if (signInPending) return;
+    setSignInPending(true);
+    setSignInError("");
+    try {
+      const response = await fetch("/api/v1/auth/password", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: signInEmail, password: signInPassword }),
+      });
+      if (response.ok) {
+        window.location.reload();
+        return;
+      }
+      const problem = await response.json().catch(() => ({})) as { error?: string };
+      setSignInError(problem.error === "rate_limit_exceeded"
+        ? "Too many attempts. Wait a moment and try again."
+        : "That email and password did not match.");
+    } catch {
+      setSignInError("Could not reach the server. Try again.");
+    } finally {
+      setSignInPending(false);
+    }
+  }
+
+  function persistEnabledTypes(next: ContentType[]) {
+    setEnabledTypes(next);
+    try {
+      window.localStorage.setItem(enabledTypesKey, JSON.stringify(next));
+    } catch {
+      // A browser with storage disabled still gets the change for this session.
+    }
+  }
+
+  function toggleType(type: ContentType) {
+    const isOn = enabledTypes.includes(type);
+    // The last enabled type cannot be turned off; an empty menu has no way back.
+    if (isOn && enabledTypes.length === 1) return;
+    persistEnabledTypes(contentTypes.filter((candidate) => isOn ? candidate !== type && enabledTypes.includes(candidate) : candidate === type || enabledTypes.includes(candidate)));
+    // Hiding the type currently being filtered would leave the library filtered
+    // by something no longer reachable from the menu.
+    if (isOn && typeFilter === type) setTypeFilter("all");
+  }
+
+  function toggleSidebar() {
+    setSidebarCollapsed((current) => {
+      const next = !current;
+      try {
+        window.localStorage.setItem(sidebarCollapsedKey, String(next));
+      } catch {
+        // Collapse still applies for this session.
+      }
+      return next;
+    });
+  }
+
+  function setThemeChoice(next: Theme) {
+    document.documentElement.dataset.theme = next;
+    window.localStorage.setItem("contentflow-theme", next);
+    setTheme(next);
+  }
 
   function toggleTheme() {
     const current = document.documentElement.dataset.theme === "light" ? "light" : "dark";
@@ -630,10 +734,13 @@ export default function Home() {
       requestSequence.current += 1;
       setActionError("");
       createOperationIdsRef.current.delete(type);
-      const clearedFilters: LibraryFilters = { query: "", type: "all", status: "all" };
+      // Stay in the section the item was created from; clearing to "all" would
+      // bounce the writer out of the type they deliberately filtered to.
+      const retainedType = typeFilter === type ? type : "all";
+      const clearedFilters: LibraryFilters = { query: "", type: retainedType, status: "all" };
       activeFiltersRef.current = clearedFilters;
       setQuery("");
-      setTypeFilter("all");
+      setTypeFilter(retainedType);
       setStatusFilter("all");
       setSelectedId(result.item_ids[0]);
       setCreateOpen(false);
@@ -667,9 +774,29 @@ export default function Home() {
     if (retryAfterStaleSession) void createItem(type);
   }
 
-  async function archiveSelected() {
-    if (!selected || csrfToken === undefined) return;
-    await performLifecycle(selected, selected.archived_at ? "restore" : "archive");
+  // A type section is already an answer to "what are you creating?", so skip the
+  // picker there and only ask when the writer is in All content.
+  // Scheduling is a plain replacement of the whole item, so it goes straight to
+  // the API rather than through the selected-document autosave queue.
+  async function rescheduleItem(id: string, day: string | undefined) {
+    if (csrfToken === undefined) return;
+    setCalendarError("");
+    try {
+      const detail = await getContent(id);
+      const scheduled = day ? new Date(`${day}T09:00:00`).toISOString() : undefined;
+      const body = serializeReplacement({ ...detail, scheduled_at: scheduled }, newOperationId());
+      await replaceContent(id, body, csrfTokenRef.current);
+      requestSequence.current += 1;
+      await refreshLibraryRef.current();
+    } catch (error) {
+      if (isSessionRecoveryError(error)) setSessionExpired(true);
+      else setCalendarError("That item could not be rescheduled. Try again.");
+    }
+  }
+
+  function startCreate() {
+    if (typeFilter !== "all") void createItem(typeFilter);
+    else setCreateOpen(true);
   }
 
   async function confirmDelete() {
@@ -744,50 +871,6 @@ export default function Home() {
         }
         return;
       }
-      const result = await setArchived(document.id, document.revision, action === "archive", csrfTokenRef.current, operationId);
-      requestSequence.current += 1;
-      setActionError("");
-      lifecycleOperationIdsRef.current.delete(operationKey);
-      const changedAt = new Date().toISOString();
-      const optimistic = {
-        ...document,
-        revision: result.revisions[0] ?? document.revision + 1,
-        expires_at: result.expires_at[0] ?? document.expires_at,
-        updated_at: changedAt,
-        archived_at: action === "archive" ? changedAt : undefined,
-      };
-      autosaveRef.current?.discard(document.id);
-      if (selectedIdRef.current === document.id) setSelected(optimistic);
-      setAllSummaries((items) => items.map((item) => item.id === document.id ? { ...item, ...optimistic, asset_counts: item.asset_counts } : item));
-      setSummaries((items) => items.map((item) => item.id === document.id ? { ...item, ...optimistic, asset_counts: item.asset_counts } : item));
-      pendingLifecycleRef.current = undefined;
-      setPendingLifecycle(undefined);
-      let synchronizationError = "";
-      const synchronizationVersion = autosaveRef.current?.getVersionStamp(document.id) ?? "0:0";
-      const synchronizationIsCurrent = () => lifecycleSynchronizationRef.current === synchronizationGeneration && (autosaveRef.current?.getVersionStamp(document.id) ?? "0:0") === synchronizationVersion && !autosaveRef.current?.getDraft(document.id);
-      try {
-        const saved = await getContent(document.id);
-        if (selectedIdRef.current === document.id && synchronizationIsCurrent()) setSelected(saved);
-      } catch (error) {
-        if (isSessionRecoveryError(error) && synchronizationIsCurrent()) {
-          setSessionExpired(true);
-        } else if (selectedIdRef.current === document.id && synchronizationIsCurrent()) {
-          synchronizationError = `The item was ${action === "archive" ? "archived" : "restored"}, but its current details could not be refreshed.`;
-        }
-      }
-      const refresh = refreshLibraryRef.current();
-      const refreshSequence = requestSequence.current;
-      try {
-        await refresh;
-      } catch (error) {
-        if (refreshSequence !== requestSequence.current) return;
-        if (isSessionRecoveryError(error) && lifecycleSynchronizationRef.current === synchronizationGeneration) {
-          setSessionExpired(true);
-        } else if (selectedIdRef.current === document.id && lifecycleSynchronizationRef.current === synchronizationGeneration) {
-          synchronizationError ||= `The item was ${action === "archive" ? "archived" : "restored"}, but the library could not be refreshed.`;
-        }
-      }
-      if (synchronizationError && selectedIdRef.current === document.id && lifecycleSynchronizationRef.current === synchronizationGeneration) setActionError(synchronizationError);
     } catch (error) {
       if (error instanceof ApiError && error.status === 409 && error.current) {
         lifecycleOperationIdsRef.current.delete(operationKey);
@@ -805,7 +888,7 @@ export default function Home() {
         if (error instanceof ApiError && error.status < 500) lifecycleOperationIdsRef.current.delete(operationKey);
         pendingLifecycleRef.current = undefined;
         setPendingLifecycle(undefined);
-        if (selectedIdRef.current === document.id && lifecycleSynchronizationRef.current === synchronizationGeneration) setActionError(action === "delete" ? "The item could not be deleted." : "The lifecycle action could not be completed.");
+        if (selectedIdRef.current === document.id && lifecycleSynchronizationRef.current === synchronizationGeneration) setActionError("The item could not be deleted.");
       }
     }
     if (retryAfterStaleSession) void performLifecycle(document, action);
@@ -855,7 +938,7 @@ export default function Home() {
     return (
       <label className="document-field document-field-large">
         <span>{label}</span>
-        <input aria-label="Working title" value={selected.working_title} required onChange={(event) => updateSelected((current) => ({ ...current, working_title: event.target.value }))} />
+        <input aria-label="Working title" value={selected.working_title} placeholder="Untitled video" onChange={(event) => updateSelected((current) => ({ ...current, working_title: event.target.value }))} />
       </label>
     );
   }
@@ -925,16 +1008,16 @@ export default function Home() {
         <div className="planning-content">
           <div className="planning-section-heading"><span>Strategy</span><small>Shape the idea before you shape the script.</small></div>
           <div className="brief-grid">
-            <label className="brief-field"><span><Lightbulb size={14} /> Topic</span><textarea aria-label="YouTube topic" rows={2} value={content.topic} onChange={(event) => updateYouTubeField("topic", event.target.value)} /></label>
-            <label className="brief-field"><span><Users size={14} /> ICP</span><textarea aria-label="YouTube ICP" rows={2} value={content.icp} onChange={(event) => updateYouTubeField("icp", event.target.value)} /></label>
-            <label className="brief-field brief-field-wide"><span>Unique angle</span><textarea aria-label="YouTube angle" rows={2} value={content.angle} onChange={(event) => updateYouTubeField("angle", event.target.value)} /></label>
+            <label className="brief-field"><span><Lightbulb size={14} /> Topic</span><AutoTextarea aria-label="YouTube topic" minRows={2} value={content.topic} onChange={(event) => updateYouTubeField("topic", event.target.value)} /></label>
+            <label className="brief-field"><span><Users size={14} /> ICP</span><AutoTextarea aria-label="YouTube ICP" minRows={2} value={content.icp} onChange={(event) => updateYouTubeField("icp", event.target.value)} /></label>
+            <label className="brief-field brief-field-wide"><span>Unique angle</span><AutoTextarea aria-label="YouTube angle" minRows={2} value={content.angle} onChange={(event) => updateYouTubeField("angle", event.target.value)} /></label>
             <label className="brief-field brief-field-wide"><span><MousePointerClick size={14} /> CTA</span><input aria-label="YouTube CTA" value={content.cta} onChange={(event) => updateYouTubeField("cta", event.target.value)} /></label>
           </div>
           <div className="planning-section-heading publishing-heading"><span>Publishing details</span><small>Keep publishing copy separate from the working title.</small></div>
           <div className="publishing-grid">
             <div className="publishing-fields">
               <label className="brief-field"><span>YouTube title</span><input aria-label="YouTube title" value={content.publishing_title} onChange={(event) => updateYouTubeField("publishing_title", event.target.value)} /></label>
-              <label className="brief-field"><span>Description</span><textarea aria-label="YouTube description" rows={4} value={content.description} onChange={(event) => updateYouTubeField("description", event.target.value)} /></label>
+              <label className="brief-field"><span>Description</span><AutoTextarea aria-label="YouTube description" minRows={3} value={content.description} onChange={(event) => updateYouTubeField("description", event.target.value)} /></label>
             </div>
             <section className="youtube-preview-field" aria-label="YouTube video preview">
               <span className="attachment-label">Video preview</span>
@@ -955,14 +1038,14 @@ export default function Home() {
       <section className="transcript-card" aria-labelledby="transcript-heading">
         <div className="transcript-heading"><div><p className="eyebrow">Recording transcript</p><h2 id="transcript-heading">What was actually said</h2></div><span>Separate from the planned script</span></div>
         <p>Paste the spoken words here after recording. Editing this transcript never changes the script sections below.</p>
-        <textarea aria-label="YouTube transcript: what was actually said" value={content.transcript} rows={8} placeholder="Paste the words that were actually spoken…" onChange={(event) => updateYouTubeField("transcript", event.target.value)} />
+        <AutoTextarea aria-label="YouTube transcript: what was actually said" value={content.transcript} minRows={6} placeholder="Paste the words that were actually spoken…" onChange={(event) => updateYouTubeField("transcript", event.target.value)} />
       </section>
       <div className="section-intro"><div><p className="eyebrow">Planned script</p><h2>Build the story, one block at a time</h2></div><span>{content.sections.length} sections</span></div>
       {content.sections.map((section, index) => <section className="script-block" key={section.clientKey}>
         <div className="block-rail"><span>{String(index + 1).padStart(2, "0")}</span><span className="rail-line" /></div>
         <div className="block-content">
           <div className="block-topline"><input aria-label={`Section ${index + 1} name`} value={section.title} onChange={(event) => editYouTubeSection(section.clientKey, { title: event.target.value })} /><span className="section-actions"><button aria-label={`Move ${section.title || `section ${index + 1}`} up`} disabled={index === 0} onClick={() => moveYouTubeSection(index, -1)}><ArrowUp size={15} /></button><button aria-label={`Move ${section.title || `section ${index + 1}`} down`} disabled={index === content.sections.length - 1} onClick={() => moveYouTubeSection(index, 1)}><ArrowDown size={15} /></button><button aria-label={`Remove ${section.title || `section ${index + 1}`}`} onClick={() => removeYouTubeSection(section.clientKey)}><Trash2 size={15} /></button></span></div>
-          <textarea aria-label={`${section.title || `Section ${index + 1}`} script`} value={section.body} rows={Math.max(3, Math.ceil(section.body.length / 92))} onChange={(event) => editYouTubeSection(section.clientKey, { body: event.target.value })} />
+          <AutoTextarea aria-label={`${section.title || `Section ${index + 1}`} script`} value={section.body} minRows={3} onChange={(event) => editYouTubeSection(section.clientKey, { body: event.target.value })} />
           <span className="block-count">{wordCount(section.body)} words</span>
         </div>
       </section>)}
@@ -979,61 +1062,81 @@ export default function Home() {
     return <div className="plain-editor-wrap">
       {selected.type === "email" && "subject" in content && <label className="brief-field standalone-field"><span>Email subject</span><input aria-label="Email subject" value={content.subject} onChange={(event) => updateContent({ ...content, subject: event.target.value })} /></label>}
       {selected.type === "substack" && "headline" in content && <div className="publication-fields"><label className="brief-field"><span>Headline</span><input aria-label="Substack headline" value={content.headline} onChange={(event) => updateContent({ ...content, headline: event.target.value })} /></label><label className="brief-field"><span>Sub-headline</span><input aria-label="Substack sub-headline" value={content.subheadline} onChange={(event) => updateContent({ ...content, subheadline: event.target.value })} /></label></div>}
-      {renderAssetPanel()}
       <div className="plain-editor-label"><SquarePen size={16} /> {label}</div>
       <textarea className="plain-editor" aria-label={label} value={body} placeholder={selected.type === "email" ? "Write the email…" : selected.type === "substack" ? "Start the article…" : "Write here…"} onChange={(event) => setBody(event.target.value)} />
+      {renderAssetPanel()}
     </div>;
   }
 
   if (authState === "loading") return <main className="centered-state"><LoaderCircle className="spin" /><h1>Opening ContentFlow</h1><p>Loading your workspace…</p></main>;
-  if (authState === "signed-out") return <main className="centered-state"><div className="brand-mark"><Zap size={20} fill="currentColor" /></div><h1>ContentFlow</h1><p>Sign in to open your personal content workspace.</p><a className="primary-button" href="/api/v1/auth/login">Sign in with Google</a></main>;
+  if (authState === "signed-out") return <main className="centered-state sign-in-state">
+    <div className="brand-mark"><Zap size={20} fill="currentColor" /></div>
+    <h1>ContentFlow</h1>
+    <p>Sign in to open your content workspace.</p>
+    <form className="sign-in-form" onSubmit={(event) => void submitPasswordSignIn(event)}>
+      <label>Email<input type="email" autoComplete="username" required value={signInEmail} onChange={(event) => setSignInEmail(event.target.value)} /></label>
+      <label>Password<input type="password" autoComplete="current-password" required value={signInPassword} onChange={(event) => setSignInPassword(event.target.value)} /></label>
+      {signInError && <p className="inline-error" role="alert">{signInError}</p>}
+      <button className="primary-button" type="submit" disabled={signInPending}>{signInPending ? "Signing in…" : "Sign in"}</button>
+    </form>
+    <div className="sign-in-divider"><span>or</span></div>
+    <a className="secondary-button" href="/api/v1/auth/login">Sign in with Google</a>
+  </main>;
   if (authState === "error") return <main className="centered-state"><AlertTriangle /><h1>ContentFlow is unavailable</h1><p>{loadError}</p><button className="primary-button" onClick={() => window.location.reload()}>Try again</button></main>;
-  if (sessionExpired) return <main className="centered-state"><AlertTriangle /><h1>Your session expired</h1><p>{pendingSessionLifecycle ? `Your ${pendingSessionLifecycle.action} action for “${pendingSessionLifecycle.document.working_title}” is waiting. Sign in in a new tab, then return here to retry it.` : "Your unsaved changes are still queued. Sign in in a new tab, then return here to continue saving."}</p><a className="primary-button" href="/api/v1/auth/login" target="_blank" rel="noreferrer">Open sign in</a><button className="secondary-button" disabled={reauthChecking} onClick={() => void resumeExpiredSession()}>{reauthChecking ? "Checking…" : "I’ve signed in"}</button>{reauthError && <p className="inline-error" role="alert">{reauthError}</p>}</main>;
+  if (sessionExpired) return <main className="centered-state"><AlertTriangle /><h1>Your session expired</h1><p>{pendingSessionLifecycle ? `Your ${pendingSessionLifecycle.action} action for “${displayTitle(pendingSessionLifecycle.document)}” is waiting. Sign in in a new tab, then return here to retry it.` : "Your unsaved changes are still queued. Sign in in a new tab, then return here to continue saving."}</p><a className="primary-button" href="/api/v1/auth/login" target="_blank" rel="noreferrer">Open sign in</a><button className="secondary-button" disabled={reauthChecking} onClick={() => void resumeExpiredSession()}>{reauthChecking ? "Checking…" : "I’ve signed in"}</button>{reauthError && <p className="inline-error" role="alert">{reauthError}</p>}</main>;
 
+  const createLabel = typeFilter === "all" ? "New content" : `New ${typeMeta[typeFilter].label}`;
   const currentSaveState = selected ? saveStates[selected.id] ?? "saved" : "saved";
   const selectedPendingLifecycle = selected && pendingLifecycle?.id === selected.id ? pendingLifecycle : undefined;
   const foreignPendingLifecycle = selected && pendingLifecycle && pendingLifecycle.id !== selected.id && autosaveManager?.getConflict(pendingLifecycle.id) ? pendingLifecycle : undefined;
-  const foreignPendingLifecycleTitle = foreignPendingLifecycle ? allSummaries.find((item) => item.id === foreignPendingLifecycle.id)?.working_title : undefined;
+  const foreignPendingLifecycleItem = foreignPendingLifecycle ? allSummaries.find((item) => item.id === foreignPendingLifecycle.id) : undefined;
+  const foreignPendingLifecycleTitle = foreignPendingLifecycleItem ? displayTitle(foreignPendingLifecycleItem) : undefined;
   const selectedExpiry = selected ? expiry(selected.expires_at) : undefined;
   const lifecycleDisabled = currentSaveState !== "saved" || Boolean(pendingLifecycle) || Boolean(selectedExpiry?.expired);
 
-  return <main className="app-shell">
+  return <main className={`app-shell ${sidebarCollapsed ? "sidebar-is-collapsed" : ""}`}>
     <aside className="sidebar" aria-label="Main navigation">
-      <div className="brand-row"><div className="brand-mark"><Zap size={17} fill="currentColor" /></div><span className="brand-name">ContentFlow</span><button className="icon-button sidebar-collapse" aria-label="Collapse sidebar"><PanelLeftClose size={17} /></button></div>
-      <button className="new-content-button" onClick={() => setCreateOpen(true)}><Plus size={18} /><span>New content</span><span className="key-hint">N</span></button>
-      <nav className="primary-nav"><button className={`nav-item ${typeFilter === "all" ? "active" : ""}`} onClick={() => setTypeFilter("all")}><Inbox size={18} /><span>All content</span><span className="nav-count">{allSummaries.length}</span></button><button className="nav-item"><CalendarDays size={18} /><span>Calendar</span></button></nav>
-      <div className="nav-section"><p className="nav-label">Content types</p>{contentTypes.map((type) => <button key={type} className={`nav-item ${typeFilter === type ? "active" : ""}`} onClick={() => setTypeFilter(type)}><span className="nav-type-icon" style={{ color: typeMeta[type].color }}><TypeIcon type={type} /></span><span>{typeMeta[type].label}</span><span className="nav-count">{counts[type]}</span></button>)}</div>
-      <div className="sidebar-bottom"><button className="nav-item theme-toggle" onClick={toggleTheme} aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}>{theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}<span>{theme === "dark" ? "Light mode" : "Dark mode"}</span></button><button className="nav-item"><Settings size={18} /><span>Settings</span></button><div className="profile-row"><div className="avatar">OL</div><div><strong>Owain Lewis</strong><span>Personal workspace</span></div><MoreHorizontal size={17} /></div></div>
+      <div className="brand-row"><div className="brand-mark"><Zap size={17} fill="currentColor" /></div><span className="brand-name">ContentFlow</span><button className="icon-button sidebar-collapse" onClick={toggleSidebar} aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"} aria-expanded={!sidebarCollapsed}>{sidebarCollapsed ? <PanelLeftOpen size={17} /> : <PanelLeftClose size={17} />}</button></div>
+      <button className="new-content-button" onClick={() => setCreateOpen(true)} title={sidebarCollapsed ? "New content" : undefined}><Plus size={18} /><span>New content</span><span className="key-hint">N</span></button>
+      <nav className="primary-nav"><button className={`nav-item ${view === "workspace" && typeFilter === "all" ? "active" : ""}`} onClick={() => { setTypeFilter("all"); navigate("workspace"); }} title={sidebarCollapsed ? "All content" : undefined}><Inbox size={18} /><span>All content</span><span className="nav-count">{allSummaries.length}</span></button><button className={`nav-item ${view === "calendar" ? "active" : ""}`} onClick={() => navigate("calendar")} title={sidebarCollapsed ? "Calendar" : undefined}><CalendarDays size={18} /><span>Calendar</span></button></nav>
+      <div className="nav-section"><p className="nav-label">Content types</p>{enabledTypes.map((type) => <button key={type} className={`nav-item ${typeFilter === type ? "active" : ""}`} onClick={() => { setTypeFilter(type); navigate("workspace"); }} title={sidebarCollapsed ? typeMeta[type].label : undefined}><span className="nav-type-icon" style={{ color: typeMeta[type].color }}><TypeIcon type={type} /></span><span>{typeMeta[type].label}</span><span className="nav-count">{counts[type]}</span></button>)}</div>
+      <div className="sidebar-bottom"><button className={`nav-item ${view === "settings" ? "active" : ""}`} onClick={() => navigate("settings")} title={sidebarCollapsed ? "Settings" : undefined}><SettingsIcon size={18} /><span>Settings</span></button><div className="profile-row"><div className="avatar">OL</div><div><strong>Owain Lewis</strong><span>Personal workspace</span></div><MoreHorizontal size={17} /></div></div>
     </aside>
 
+    {view === "workspace" && <>
     <section ref={libraryPanelRef} className={`library-panel ${libraryOpen ? "open" : ""}`} aria-label="Content library" aria-hidden={isCompact && !libraryOpen ? true : undefined} inert={isCompact && !libraryOpen ? true : undefined}>
-      <div className="library-header"><button className="icon-button mobile-close" onClick={() => setLibraryOpen(false)} aria-label="Close library"><ArrowLeft size={19} /></button><div><p className="eyebrow">Workspace</p><h1>{typeFilter === "all" ? "All content" : typeMeta[typeFilter].label}</h1></div><button className="icon-button compact-new" onClick={() => setCreateOpen(true)} aria-label="Create content"><Plus size={19} /></button></div>
+      <div className="library-header"><button className="icon-button mobile-close" onClick={() => setLibraryOpen(false)} aria-label="Close library"><ArrowLeft size={19} /></button><div><p className="eyebrow">Workspace</p><h1>{typeFilter === "all" ? "All content" : typeMeta[typeFilter].label}</h1></div><button className="icon-button compact-new" onClick={startCreate} aria-label={createLabel}><Plus size={19} /></button></div>
       <label className="search-box"><Search size={17} /><input ref={searchRef} value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search titles" aria-label="Search content titles" /><span className="key-hint">⌘ K</span></label>
       <div className="filter-row" aria-label="Filter by status"><button className={statusFilter === "all" ? "active" : ""} onClick={() => setStatusFilter("all")}>All</button>{contentStatuses.map((status) => <button key={status} className={statusFilter === status ? "active" : ""} onClick={() => setStatusFilter(status)}>{statusLabels[status]}</button>)}</div>
       {filterError && <div className="inline-error" role="alert">{filterError}</div>}
       <div className="library-summary"><span>{summaries.length} {summaries.length === 1 ? "item" : "items"}</span><span>Last edited <ChevronDown size={14} /></span></div>
       <div className="content-list">
-        {summaries.map((item) => { const itemExpiry = expiry(item.expires_at); return <button className={`content-card ${selectedId === item.id ? "selected" : ""}`} aria-current={selectedId === item.id ? "true" : undefined} key={item.id} onClick={() => { setActionError(""); setSelectedId(item.id); setLibraryOpen(false); }}><span className="card-icon" style={{ color: typeMeta[item.type].color }}><TypeIcon type={item.type} size={17} /></span><span className="card-copy"><strong>{item.working_title}</strong><span className="card-meta"><span className={`status-dot ${item.status}`} />{item.archived_at ? "Archived" : statusLabels[item.status]}<span className="meta-separator">·</span>{formatRelativeTime(item.updated_at)}</span><span className={`expiry-line ${itemExpiry.warning ? "warning" : ""}`}>{itemExpiry.warning ? itemExpiry.summary : `Expires ${itemExpiry.label}`}</span></span><span className="card-arrow">›</span></button>; })}
-        {!summaries.length && <div className="empty-state"><Search size={22} /><strong>{allSummaries.length ? "No content found" : "Your workspace is empty"}</strong><span>{allSummaries.length ? "Try another title or clear your filters." : "Create your first piece of content."}</span>{allSummaries.length ? <button onClick={() => { setQuery(""); setStatusFilter("all"); setTypeFilter("all"); }}>Clear filters</button> : <button onClick={() => setCreateOpen(true)}>New content</button>}</div>}
+        {summaries.map((item) => { const itemExpiry = expiry(item.expires_at); return <button className={`content-card ${selectedId === item.id ? "selected" : ""}`} aria-current={selectedId === item.id ? "true" : undefined} key={item.id} onClick={() => { setActionError(""); setSelectedId(item.id); setLibraryOpen(false); }}><span className="card-icon" style={{ color: typeMeta[item.type].color }}><TypeIcon type={item.type} size={17} /></span><span className="card-copy"><strong className={item.working_title.trim() ? "" : "card-untitled"}>{displayTitle(item)}</strong><span className="card-meta"><span className={`status-dot ${item.status}`} />{statusLabels[item.status]}<span className="meta-separator">·</span>{formatRelativeTime(item.updated_at)}</span><span className={`expiry-line ${itemExpiry.warning ? "warning" : ""}`}>{itemExpiry.warning ? itemExpiry.summary : `Expires ${itemExpiry.label}`}</span></span><span className="card-arrow">›</span></button>; })}
+        {!summaries.length && <div className="empty-state"><Search size={22} /><strong>{allSummaries.length ? "No content found" : "Your workspace is empty"}</strong><span>{allSummaries.length ? "Try another title or clear your filters." : "Create your first piece of content."}</span>{allSummaries.length ? <button onClick={() => { setQuery(""); setStatusFilter("all"); setTypeFilter("all"); }}>Clear filters</button> : <button onClick={startCreate}>{createLabel}</button>}</div>}
       </div>
     </section>
 
     <section className="editor-panel" aria-label="Content editor" aria-hidden={isCompact && libraryOpen ? true : undefined} inert={isCompact && libraryOpen ? true : undefined}>
-      <header className="mobile-app-header"><button ref={mobileLibraryButtonRef} className="icon-button" onClick={() => setLibraryOpen(true)} aria-label="Open content library"><Menu size={20} /></button><div className="brand-mark"><Zap size={15} fill="currentColor" /></div><strong>ContentFlow</strong><button className="icon-button mobile-theme-toggle" onClick={toggleTheme} aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}>{theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}</button><button className="icon-button" onClick={() => setCreateOpen(true)} aria-label="Create content"><Plus size={20} /></button></header>
+      <header className="mobile-app-header"><button ref={mobileLibraryButtonRef} className="icon-button" onClick={() => setLibraryOpen(true)} aria-label="Open content library"><Menu size={20} /></button><div className="brand-mark"><Zap size={15} fill="currentColor" /></div><strong>ContentFlow</strong><button className="icon-button mobile-theme-toggle" onClick={toggleTheme} aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}>{theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}</button><button className="icon-button" onClick={startCreate} aria-label={createLabel}><Plus size={20} /></button></header>
       {selected ? <>
-        <div className="editor-toolbar"><div className="editor-context"><span className="type-pill" style={{ color: typeMeta[selected.type].color }}><TypeIcon type={selected.type} />{typeMeta[selected.type].label}</span><span className="toolbar-divider" /><label className="status-select"><span className={`status-dot ${selected.status}`} /><select aria-label="Content status" value={selected.status} disabled={Boolean(selected.archived_at) || Boolean(selectedPendingLifecycle) || Boolean(selectedExpiry?.expired)} onChange={(event) => updateSelected((current) => ({ ...current, status: event.target.value as ContentStatus }))}>{contentStatuses.map((status) => <option value={status} key={status}>{statusLabels[status]}</option>)}</select><ChevronDown size={14} /></label></div><div className="editor-actions"><span className={`saved-state ${currentSaveState}`} aria-live="polite">{currentSaveState === "saving" || currentSaveState === "retrying" ? <LoaderCircle className="spin" size={14} /> : currentSaveState === "conflict" || currentSaveState === "error" ? <AlertTriangle size={14} /> : <Check size={14} />}{saveLabel(currentSaveState)}</span><button className="lifecycle-button" disabled={lifecycleDisabled} onClick={() => void archiveSelected()}>{selected.archived_at ? <RotateCcw size={16} /> : <Archive size={16} />}{selected.archived_at ? "Restore" : "Archive"}</button></div></div>
+        <div className="editor-toolbar"><div className="editor-context"><span className="type-pill" style={{ color: typeMeta[selected.type].color }}><TypeIcon type={selected.type} />{typeMeta[selected.type].label}</span><span className="toolbar-divider" /><label className="status-select"><span className={`status-dot ${selected.status}`} /><select aria-label="Content status" value={selected.status} disabled={Boolean(selectedPendingLifecycle) || Boolean(selectedExpiry?.expired)} onChange={(event) => updateSelected((current) => ({ ...current, status: event.target.value as ContentStatus }))}>{contentStatuses.map((status) => <option value={status} key={status}>{statusLabels[status]}</option>)}</select><ChevronDown size={14} /></label></div><div className="editor-actions"><span className={`saved-state ${currentSaveState}`} aria-live="polite">{currentSaveState === "saving" || currentSaveState === "retrying" ? <LoaderCircle className="spin" size={14} /> : currentSaveState === "conflict" || currentSaveState === "error" ? <AlertTriangle size={14} /> : <Check size={14} />}{saveLabel(currentSaveState)}</span></div></div>
         {foreignPendingLifecycle && <div className="inline-error" role="alert">Review the {foreignPendingLifecycle.action} conflict for “{foreignPendingLifecycleTitle ?? "another item"}” before continuing. <button onClick={() => { setActionError(""); setSelectedId(foreignPendingLifecycle.id); setLibraryOpen(false); }}>Review item</button></div>}
         {actionError && <div className="inline-error" role="alert">{actionError}</div>}
         <div className="editor-scroll"><article className="editor-document">
-          <div className="document-heading" inert={Boolean(selectedPendingLifecycle) || Boolean(selectedExpiry?.expired)}>{renderWorkingTitle()}<div className="document-meta"><span><Clock3 size={14} /> Edited {formatRelativeTime(selected.updated_at)}</span><span>{documentWordCount(selected).toLocaleString()} words</span><span className={selectedExpiry?.warning ? "expiry-warning" : ""}><CalendarDays size={14} /> Expires {selectedExpiry?.label}{selectedExpiry?.warning ? ` · ${selectedExpiry.detail}` : ""}</span></div></div>
+          <div className="document-heading" inert={Boolean(selectedPendingLifecycle) || Boolean(selectedExpiry?.expired)}>{selected.type === "youtube" ? renderWorkingTitle() : <h1 className={`document-identity ${selected.working_title.trim() ? "" : "document-identity-untitled"}`}>{displayTitle(selected)}</h1>}<div className="document-meta"><span><Clock3 size={14} /> Edited {formatRelativeTime(selected.updated_at)}</span><span>{documentWordCount(selected).toLocaleString()} words</span><span className={selectedExpiry?.warning ? "expiry-warning" : ""}><CalendarDays size={14} /> Expires {selectedExpiry?.label}{selectedExpiry?.warning ? ` · ${selectedExpiry.detail}` : ""}</span></div></div>
           {conflict && <section className="conflict-panel" aria-labelledby="conflict-title"><div className="conflict-title"><AlertTriangle size={18} /><div><h2 id="conflict-title">This item changed elsewhere</h2><p>{selectedPendingLifecycle ? `Review the current server version before you retry or cancel ${selectedPendingLifecycle.action}.` : "Compare the saved server version with your unsaved local work. Nothing was overwritten."}</p></div></div><div className="conflict-columns"><div><h3>Server version</h3><pre>{JSON.stringify(editableSnapshot(conflict.server), null, 2)}</pre></div><div><h3>{selectedPendingLifecycle ? "Previous version" : "Your unsaved version"}</h3><pre>{JSON.stringify(editableSnapshot(conflict.local), null, 2)}</pre></div></div><div className="conflict-actions">{selectedPendingLifecycle ? <><button onClick={() => resolveLifecycleConflict(false)}>Cancel action</button><button className="primary-button" onClick={() => resolveLifecycleConflict(true)}>Retry {selectedPendingLifecycle.action}</button></> : <><button onClick={() => resolveSelectedConflict("server")}>Use server version</button><button className="primary-button" onClick={() => resolveSelectedConflict("local")}>Save my version</button></>}</div></section>}
           <div className="editor-content" inert={Boolean(selectedPendingLifecycle) || Boolean(selectedExpiry?.expired)}>{selected.type === "youtube" ? renderYouTubeEditor() : renderPlainEditor()}</div>
         </article></div>
-        <footer className="editor-footer"><span>{selected.archived_at ? "Archived item" : typeMeta[selected.type].description}</span><button className="delete-button" disabled={lifecycleDisabled} onClick={() => setDeleteOpen(true)}><Trash2 size={15} /> Delete</button></footer>
-      </> : <div className="editor-empty">{detailLoading ? <><LoaderCircle className="spin" /><p>Loading selected content…</p></> : detailError ? <><AlertTriangle /><h1>Could not open this item</h1><p role="alert">{detailError}</p><button className="primary-button" onClick={() => setDetailReload((value) => value + 1)}>Retry loading item</button></> : <><SquarePen size={28} /><h1>{allSummaries.length ? "Choose an item" : "Start with a new piece"}</h1><p>{allSummaries.length ? "Select content from your library." : "Create one of seven content types to begin."}</p>{actionError && <p className="inline-error" role="alert">{actionError}</p>}<button className="primary-button" onClick={() => setCreateOpen(true)}><Plus size={16} /> New content</button></>}</div>}
+        <footer className="editor-footer"><span>{typeMeta[selected.type].description}</span><button className="delete-button" disabled={lifecycleDisabled} onClick={() => setDeleteOpen(true)}><Trash2 size={15} /> Delete</button></footer>
+      </> : <div className="editor-empty">{detailLoading ? <><LoaderCircle className="spin" /><p>Loading selected content…</p></> : detailError ? <><AlertTriangle /><h1>Could not open this item</h1><p role="alert">{detailError}</p><button className="primary-button" onClick={() => setDetailReload((value) => value + 1)}>Retry loading item</button></> : <><SquarePen size={28} /><h1>{allSummaries.length ? "Choose an item" : "Start writing"}</h1><p>{allSummaries.length ? "Select content from your library." : "Pick a format to create your first piece."}</p>{actionError && <p className="inline-error" role="alert">{actionError}</p>}<button className="primary-button" onClick={startCreate}><Plus size={16} /> {createLabel}</button></>}</div>}
     </section>
+    </>}
 
-    {createOpen && <div className="modal-backdrop"><section ref={createModalRef} className="modal-card" role="dialog" aria-modal="true" aria-labelledby="create-title"><div className="modal-header"><div><p className="eyebrow">New content</p><h2 id="create-title">What are you creating?</h2><p>Choose a format. You can change its status as the work develops.</p></div><button className="icon-button" onClick={() => setCreateOpen(false)} aria-label="Close create dialog"><X size={19} /></button></div><div className="create-grid" aria-busy={createPending}>{contentTypes.map((type) => <button key={type} disabled={createPending} onClick={() => void createItem(type)}><span className="create-icon" style={{ color: typeMeta[type].color }}><TypeIcon type={type} size={19} /></span><span><strong>{typeMeta[type].label}</strong><small>{typeMeta[type].description}</small></span><span className="create-arrow">›</span></button>)}</div>{createPending && <p aria-live="polite">Creating…</p>}{actionError && <p className="inline-error" role="alert">{actionError}</p>}</section></div>}
-    {deleteOpen && selected && <div className="modal-backdrop"><section ref={deleteModalRef} className="modal-card confirm-card" role="alertdialog" aria-modal="true" aria-labelledby="delete-title" aria-describedby="delete-description"><div className="modal-header"><div><p className="eyebrow">Permanent deletion</p><h2 id="delete-title">Delete “{selected.working_title}”?</h2><p id="delete-description">This removes the item immediately and cannot be undone.</p></div></div><div className="confirm-actions"><button onClick={() => setDeleteOpen(false)}>Cancel</button><button className="danger-button" onClick={() => void confirmDelete()}><Trash2 size={15} /> Delete permanently</button></div></section></div>}
+    {view === "calendar" && <Calendar items={allSummaries} onOpen={(id) => { setSelectedId(id); navigate("workspace"); }} onSchedule={(id, day) => void rescheduleItem(id, day)} error={calendarError} />}
+
+    {view === "settings" && <Settings theme={theme} onThemeChange={setThemeChoice} enabledTypes={enabledTypes} onToggleType={toggleType} counts={counts} workspaceId={workspaceId} />}
+
+    {createOpen && <div className="modal-backdrop"><section ref={createModalRef} className="modal-card" role="dialog" aria-modal="true" aria-labelledby="create-title"><div className="modal-header"><div><p className="eyebrow">New content</p><h2 id="create-title">What are you creating?</h2><p>Choose a format. You can change its status as the work develops.</p></div><button className="icon-button" onClick={() => setCreateOpen(false)} aria-label="Close create dialog"><X size={19} /></button></div><div className="create-grid" aria-busy={createPending}>{enabledTypes.map((type) => <button key={type} disabled={createPending} onClick={() => void createItem(type)}><span className="create-icon" style={{ color: typeMeta[type].color }}><TypeIcon type={type} size={19} /></span><span><strong>{typeMeta[type].label}</strong><small>{typeMeta[type].description}</small></span><span className="create-arrow">›</span></button>)}</div>{createPending && <p aria-live="polite">Creating…</p>}{actionError && <p className="inline-error" role="alert">{actionError}</p>}</section></div>}
+    {deleteOpen && selected && <div className="modal-backdrop"><section ref={deleteModalRef} className="modal-card confirm-card" role="alertdialog" aria-modal="true" aria-labelledby="delete-title" aria-describedby="delete-description"><div className="modal-header"><div><p className="eyebrow">Permanent deletion</p><h2 id="delete-title">Delete “{displayTitle(selected)}”?</h2><p id="delete-description">This removes the item immediately and cannot be undone.</p></div></div><div className="confirm-actions"><button onClick={() => setDeleteOpen(false)}>Cancel</button><button className="danger-button" onClick={() => void confirmDelete()}><Trash2 size={15} /> Delete permanently</button></div></section></div>}
   </main>;
 }

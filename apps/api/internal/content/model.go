@@ -20,8 +20,6 @@ import (
 const (
 	MaxRequestBytes        = 1 << 20
 	MaxTextBytes           = 500 << 10
-	MaxParentDocumentBytes = 900 << 10
-	MaxFirestoreBytes      = (1 << 20) - 4
 	// Firestore rejects a 1,500-byte query operand. Searchable values reserve
 	// one additional byte because a lexicographic successor can grow in UTF-8.
 	MaxIndexedStringBytes = 1498
@@ -109,7 +107,7 @@ type Item struct {
 	CreatedAt              time.Time  `json:"created_at" firestore:"created_at"`
 	UpdatedAt              time.Time  `json:"updated_at" firestore:"updated_at"`
 	ExpiresAt              time.Time  `json:"expires_at" firestore:"expires_at"`
-	ArchivedAt             *time.Time `json:"archived_at,omitempty" firestore:"archived_at,omitempty"`
+	ScheduledAt            *time.Time `json:"scheduled_at,omitempty" firestore:"scheduled_at,omitempty"`
 	Content                any        `json:"content" firestore:"-"`
 }
 
@@ -122,7 +120,7 @@ type Summary struct {
 	CreatedAt    time.Time      `json:"created_at"`
 	UpdatedAt    time.Time      `json:"updated_at"`
 	ExpiresAt    time.Time      `json:"expires_at"`
-	ArchivedAt   *time.Time     `json:"archived_at,omitempty"`
+	ScheduledAt  *time.Time     `json:"scheduled_at,omitempty"`
 	AssetCounts  map[string]int `json:"asset_counts"`
 }
 
@@ -130,7 +128,7 @@ func (i Item) Summary() Summary {
 	return Summary{
 		ID: i.ID, Type: i.Type, Status: i.Status, WorkingTitle: i.WorkingTitle,
 		Revision: i.Revision, CreatedAt: i.CreatedAt, UpdatedAt: i.UpdatedAt,
-		ExpiresAt: i.ExpiresAt, ArchivedAt: i.ArchivedAt, AssetCounts: map[string]int{},
+		ExpiresAt: i.ExpiresAt, ScheduledAt: i.ScheduledAt, AssetCounts: map[string]int{},
 	}
 }
 
@@ -163,6 +161,7 @@ type CreateRequest struct {
 	WorkingTitle string
 	Status       Status
 	OperationID  string
+	ScheduledAt  *time.Time
 	Content      any
 }
 
@@ -170,6 +169,7 @@ type BatchItemRequest struct {
 	Type         Type
 	WorkingTitle string
 	Status       Status
+	ScheduledAt  *time.Time
 	Content      any
 }
 
@@ -218,6 +218,7 @@ func DecodeCreate(raw []byte) (CreateRequest, error) {
 		WorkingTitle string          `json:"working_title"`
 		Status       Status          `json:"status"`
 		OperationID  string          `json:"operation_id"`
+		ScheduledAt  *time.Time      `json:"scheduled_at"`
 		Content      json.RawMessage `json:"content"`
 	}
 	if err := decodeExact(raw, &wire); err != nil {
@@ -227,7 +228,7 @@ func DecodeCreate(raw []byte) (CreateRequest, error) {
 	if err != nil {
 		return CreateRequest{}, err
 	}
-	request := CreateRequest{Type: wire.Type, WorkingTitle: wire.WorkingTitle, Status: wire.Status, OperationID: wire.OperationID, Content: contentValue}
+	request := CreateRequest{Type: wire.Type, WorkingTitle: wire.WorkingTitle, Status: wire.Status, OperationID: wire.OperationID, ScheduledAt: wire.ScheduledAt, Content: contentValue}
 	if err := validateRequest(request); err != nil {
 		return CreateRequest{}, err
 	}
@@ -261,6 +262,7 @@ func decodeBatchItem(raw []byte, operationID string) (BatchItemRequest, error) {
 		Type         Type            `json:"type"`
 		WorkingTitle string          `json:"working_title"`
 		Status       Status          `json:"status"`
+		ScheduledAt  *time.Time      `json:"scheduled_at"`
 		Content      json.RawMessage `json:"content"`
 	}
 	if err := decodeExact(raw, &wire); err != nil {
@@ -270,7 +272,7 @@ func decodeBatchItem(raw []byte, operationID string) (BatchItemRequest, error) {
 	if err != nil {
 		return BatchItemRequest{}, err
 	}
-	item := BatchItemRequest{Type: wire.Type, WorkingTitle: wire.WorkingTitle, Status: wire.Status, Content: contentValue}
+	item := BatchItemRequest{Type: wire.Type, WorkingTitle: wire.WorkingTitle, Status: wire.Status, ScheduledAt: wire.ScheduledAt, Content: contentValue}
 	if err := validateBatchItem(item, operationID); err != nil {
 		return BatchItemRequest{}, err
 	}
@@ -284,6 +286,7 @@ func DecodeReplace(raw []byte) (ReplaceRequest, error) {
 		Status       Status          `json:"status"`
 		OperationID  string          `json:"operation_id"`
 		Revision     *int64          `json:"revision"`
+		ScheduledAt  *time.Time      `json:"scheduled_at"`
 		Content      json.RawMessage `json:"content"`
 	}
 	if err := decodeExact(raw, &wire); err != nil || wire.Revision == nil {
@@ -293,7 +296,7 @@ func DecodeReplace(raw []byte) (ReplaceRequest, error) {
 	if err != nil {
 		return ReplaceRequest{}, err
 	}
-	request := ReplaceRequest{CreateRequest: CreateRequest{Type: wire.Type, WorkingTitle: wire.WorkingTitle, Status: wire.Status, OperationID: wire.OperationID, Content: contentValue}, Revision: *wire.Revision}
+	request := ReplaceRequest{CreateRequest: CreateRequest{Type: wire.Type, WorkingTitle: wire.WorkingTitle, Status: wire.Status, OperationID: wire.OperationID, ScheduledAt: wire.ScheduledAt, Content: contentValue}, Revision: *wire.Revision}
 	if request.Revision < 1 {
 		return ReplaceRequest{}, problem(400, "invalid_revision")
 	}
@@ -399,9 +402,11 @@ func validateRequest(request CreateRequest) error {
 	if !validStatus(request.Status) {
 		return problem(400, "invalid_status")
 	}
-	if strings.TrimFunc(request.WorkingTitle, unicode.IsSpace) == "" {
-		return problem(400, "working_title_required")
+	if request.ScheduledAt != nil && request.ScheduledAt.IsZero() {
+		return problem(400, "invalid_scheduled_at")
 	}
+	// A working title is optional. Only YouTube has a title the writer actually
+	// authors; every other type is identified by its ID until it is named.
 	texts := []string{request.WorkingTitle}
 	switch value := request.Content.(type) {
 	case YouTubeContent:

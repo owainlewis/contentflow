@@ -53,7 +53,7 @@ func TestRunBoundsOIDCDiscoveryBeforeStartingServers(t *testing.T) {
 
 	cfg := config.Config{
 		Environment: "development", PublicAddress: "127.0.0.1:0", PrivateAddress: "127.0.0.1:0", AssetDirectory: t.TempDir(),
-		GoogleProject: "project", PublicOrigin: "https://contentflow.example", OAuthIssuer: issuer.URL,
+		DatabaseURL: "postgres://localhost/contentflow", PublicOrigin: "https://contentflow.example", OAuthIssuer: issuer.URL,
 		OAuthClientID: "client", OAuthSecret: "secret", OwnerSubject: "owner", WorkspaceID: "workspace",
 	}
 	started := time.Now()

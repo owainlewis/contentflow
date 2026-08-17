@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-func TestDependenciesReportAssetAndFirestoreState(t *testing.T) {
+func TestDependenciesReportAssetAndDatabaseState(t *testing.T) {
 	t.Parallel()
 
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
@@ -21,32 +21,32 @@ func TestDependenciesReportAssetAndFirestoreState(t *testing.T) {
 
 	checks := (Dependencies{
 		AssetDirectory: t.TempDir(),
-		FirestoreHost:  listener.Addr().String(),
+		DatabaseCheck:  func(context.Context) error { return nil },
 		DialTimeout:    time.Second,
 	}).Check(context.Background())
 
-	for _, dependency := range []string{"assets", "firestore"} {
+	for _, dependency := range []string{"assets", "database"} {
 		if err := checks[dependency]; err != nil {
 			t.Fatalf("expected %s to be ready: %v", dependency, err)
 		}
 	}
 }
 
-func TestDependenciesUseBoundedProductionFirestoreCheck(t *testing.T) {
+func TestDependenciesUseBoundedProductionDatabaseCheck(t *testing.T) {
 	t.Parallel()
-	want := errors.New("firestore unavailable")
+	want := errors.New("database unavailable")
 	checks := (Dependencies{
 		AssetDirectory: t.TempDir(),
 		DialTimeout:    time.Second,
-		FirestoreCheck: func(ctx context.Context) error {
+		DatabaseCheck: func(ctx context.Context) error {
 			if _, hasDeadline := ctx.Deadline(); !hasDeadline {
-				t.Error("production Firestore check has no deadline")
+				t.Error("production database check has no deadline")
 			}
 			return want
 		},
 	}).Check(context.Background())
-	if !errors.Is(checks["firestore"], want) {
-		t.Fatalf("readiness did not report production Firestore failure: %v", checks["firestore"])
+	if !errors.Is(checks["database"], want) {
+		t.Fatalf("readiness did not report database failure: %v", checks["database"])
 	}
 }
 
@@ -61,7 +61,7 @@ func TestDependenciesReportMissingAssetDirectory(t *testing.T) {
 
 func TestCacheCheckCachesAndCoalescesBoundedDependencyResults(t *testing.T) {
 	t.Parallel()
-	want := errors.New("firestore unavailable")
+	want := errors.New("database unavailable")
 	started := make(chan struct{})
 	release := make(chan struct{})
 	var calls atomic.Int64

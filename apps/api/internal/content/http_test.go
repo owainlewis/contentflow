@@ -152,7 +152,6 @@ func TestHTTPRejectsDiscriminatorsAndEveryByteLimit(t *testing.T) {
 		{"omitted transcript", `{"type":"youtube","working_title":"Title","status":"draft","operation_id":"` + ulid.Make().String() + `","content":{"topic":"","icp":"","angle":"","cta":"","publishing_title":"","description":"","sections":[]}}`, "transcript_required", http.StatusBadRequest},
 		{"client expiry", `{"type":"x","working_title":"Title","status":"draft","operation_id":"` + ulid.Make().String() + `","expires_at":"2099-01-01T00:00:00Z","content":{"body":"post"}}`, "invalid_request", http.StatusBadRequest},
 		{"text field", `{"type":"x","working_title":"Title","status":"draft","operation_id":"` + ulid.Make().String() + `","content":{"body":"` + strings.Repeat("x", content.MaxTextBytes+1) + `"}}`, "text_field_too_large", http.StatusRequestEntityTooLarge},
-		{"parent document", `{"type":"youtube","working_title":"Title","status":"draft","operation_id":"` + ulid.Make().String() + `","content":{"topic":"","icp":"","angle":"","cta":"","publishing_title":"","description":"` + strings.Repeat("x", 460<<10) + `","transcript":"` + strings.Repeat("y", 460<<10) + `","sections":[]}}`, "content_document_too_large", http.StatusRequestEntityTooLarge},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
@@ -209,9 +208,9 @@ func TestHTTPBatchBoundariesAtomicityAndConcurrentByteStableRetries(t *testing.T
 		t.Fatalf("51-item batch returned %d: %s", tooMany.Code, tooMany.Body.String())
 	}
 	invalidOperation := ulid.Make().String()
-	invalidBody := `{"operation_id":"` + invalidOperation + `","items":[{"type":"x","working_title":"Would roll back","status":"draft","content":{"body":"first"}},{"type":"x","working_title":"","status":"draft","content":{"body":"invalid"}}]}`
+	invalidBody := `{"operation_id":"` + invalidOperation + `","items":[{"type":"x","working_title":"Would roll back","status":"draft","content":{"body":"first"}},{"type":"x","working_title":"Invalid","status":"nonsense","content":{"body":"invalid"}}]}`
 	invalid := performAPI(api, token, http.MethodPost, "/api/v1/content/batches", invalidBody)
-	if invalid.Code != http.StatusBadRequest || !strings.Contains(invalid.Body.String(), "working_title_required") {
+	if invalid.Code != http.StatusBadRequest || !strings.Contains(invalid.Body.String(), "invalid_status") {
 		t.Fatalf("invalid batch returned %d: %s", invalid.Code, invalid.Body.String())
 	}
 	perItemKey := performAPI(api, token, http.MethodPost, "/api/v1/content/batches", `{"operation_id":"`+ulid.Make().String()+`","items":[{"type":"x","working_title":"Draft","status":"draft","operation_id":"`+ulid.Make().String()+`","content":{"body":"post"}}]}`)

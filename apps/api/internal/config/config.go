@@ -14,10 +14,9 @@ type Config struct {
 	PublicAddress     string
 	PrivateAddress    string
 	AssetDirectory    string
-	FirestoreHost     string
+	DatabaseURL       string
 	LocalProxyAuth    bool
 	LoopbackPortProxy bool
-	GoogleProject     string
 	PublicOrigin      string
 	OAuthIssuer       string
 	OAuthClientID     string
@@ -41,10 +40,9 @@ func Load() (Config, error) {
 		PublicAddress:     stringEnv("CONTENTFLOW_ADDR", ":8080"),
 		PrivateAddress:    stringEnv("CONTENTFLOW_PRIVATE_ADDR", ":8081"),
 		AssetDirectory:    stringEnv("CONTENTFLOW_ASSET_DIR", "var/assets"),
-		FirestoreHost:     os.Getenv("FIRESTORE_EMULATOR_HOST"),
+		DatabaseURL:       os.Getenv("CONTENTFLOW_DATABASE_URL"),
 		LocalProxyAuth:    localProxyAuth,
 		LoopbackPortProxy: loopbackPortProxy,
-		GoogleProject:     os.Getenv("CONTENTFLOW_GOOGLE_PROJECT_ID"),
 		PublicOrigin:      os.Getenv("CONTENTFLOW_PUBLIC_ORIGIN"),
 		OAuthIssuer:       os.Getenv("CONTENTFLOW_OAUTH_ISSUER"),
 		OAuthClientID:     os.Getenv("CONTENTFLOW_OAUTH_CLIENT_ID"),
@@ -63,8 +61,8 @@ func (c Config) Validate() error {
 	if c.Environment == "production" && c.LocalProxyAuth {
 		return fmt.Errorf("CONTENTFLOW_LOCAL_PROXY_AUTH cannot be enabled in production")
 	}
-	if c.Environment == "production" && c.FirestoreHost != "" {
-		return fmt.Errorf("FIRESTORE_EMULATOR_HOST cannot be set in production")
+	if strings.TrimSpace(c.DatabaseURL) == "" {
+		return fmt.Errorf("CONTENTFLOW_DATABASE_URL is required")
 	}
 	if c.PublicAddress == "" {
 		return fmt.Errorf("CONTENTFLOW_ADDR is required")
@@ -74,9 +72,6 @@ func (c Config) Validate() error {
 	}
 	if c.LocalProxyAuth && c.PrivateAddress == "" {
 		return fmt.Errorf("CONTENTFLOW_PRIVATE_ADDR is required when local proxy authentication is enabled")
-	}
-	if c.LocalProxyAuth && strings.TrimSpace(c.FirestoreHost) == "" {
-		return fmt.Errorf("FIRESTORE_EMULATOR_HOST is required when local proxy authentication is enabled")
 	}
 	if c.LocalProxyAuth && !loopbackAddress(c.PublicAddress) && !c.LoopbackPortProxy {
 		return fmt.Errorf("CONTENTFLOW_ADDR must bind to loopback when local proxy authentication is enabled")
@@ -112,7 +107,6 @@ func (c Config) Validate() error {
 	}
 	if c.Environment == "production" {
 		required := map[string]string{
-			"CONTENTFLOW_GOOGLE_PROJECT_ID":   c.GoogleProject,
 			"CONTENTFLOW_PUBLIC_ORIGIN":       c.PublicOrigin,
 			"CONTENTFLOW_OAUTH_ISSUER":        c.OAuthIssuer,
 			"CONTENTFLOW_OAUTH_CLIENT_ID":     c.OAuthClientID,
@@ -160,7 +154,7 @@ func (c Config) AuthEnabled() bool {
 }
 
 func (c Config) authenticationValues() []string {
-	return []string{c.GoogleProject, c.PublicOrigin, c.OAuthIssuer, c.OAuthClientID, c.OAuthSecret, c.OwnerSubject, c.WorkspaceID}
+	return []string{c.PublicOrigin, c.OAuthIssuer, c.OAuthClientID, c.OAuthSecret, c.OwnerSubject, c.WorkspaceID}
 }
 
 func stringEnv(name, fallback string) string {

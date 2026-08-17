@@ -281,23 +281,6 @@ func TestCLICommandsAgainstRealAPIInHumanAndJSONModes(t *testing.T) {
 	var clearedItem itemResponse
 	_ = json.Unmarshal([]byte(clearedShow.stdout), &clearedItem)
 
-	archiveHuman := invoke(t, fixture.server.URL, fullToken, client, "", "content", "archive", id, "--revision", fmt.Sprint(clearedItem.Revision))
-	if archiveHuman.exitCode != ExitSuccess || !strings.HasPrefix(archiveHuman.stdout, "Status: archived\n") {
-		t.Fatalf("archive human failed: %#v", archiveHuman)
-	}
-	archiveJSON := invoke(t, fixture.server.URL, fullToken, client, "", "content", "archive", id, "--revision", fmt.Sprint(clearedItem.Revision+1), "--json")
-	if archiveJSON.exitCode != ExitSuccess || parseMutation(t, archiveJSON.stdout).Status != "archived" {
-		t.Fatalf("archive JSON failed: %#v", archiveJSON)
-	}
-	restoreHuman := invoke(t, fixture.server.URL, fullToken, client, "", "content", "restore", id, "--revision", fmt.Sprint(clearedItem.Revision+2))
-	if restoreHuman.exitCode != ExitSuccess || !strings.HasPrefix(restoreHuman.stdout, "Status: restored\n") {
-		t.Fatalf("restore human failed: %#v", restoreHuman)
-	}
-	restoreJSON := invoke(t, fixture.server.URL, fullToken, client, "", "content", "restore", id, "--revision", fmt.Sprint(clearedItem.Revision+3), "--json")
-	if restoreJSON.exitCode != ExitSuccess || parseMutation(t, restoreJSON.stdout).Status != "restored" {
-		t.Fatalf("restore JSON failed: %#v", restoreJSON)
-	}
-
 	batchFile := writeTestFile(t, "batch.json", `{"items":[{"type":"x","working_title":"Draft one","status":"draft","content":{"body":"one"}},{"type":"linkedin","working_title":"Draft two","status":"draft","content":{"body":"two"}}]}`)
 	batchHuman := invoke(t, fixture.server.URL, fullToken, client, "", "content", "batch-create", "--file", batchFile)
 	if batchHuman.exitCode != ExitSuccess || !strings.HasPrefix(batchHuman.stdout, "Status: created\n") {
@@ -1137,7 +1120,6 @@ func TestConflictCurrentMustMatchMutationTarget(t *testing.T) {
 		want      string
 	}{
 		{"update JSON", []string{"content", "update", "01J00000000000000000000001", "--file", update, "--operation-id", "01J00000000000000000000003", "--json"}, ""},
-		{"archive human", []string{"content", "archive", "01J00000000000000000000001", "--revision", "1", "--operation-id", "01J00000000000000000000003"}, "error: invalid_api_response\noperation_id: 01J00000000000000000000003\n"},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -1148,7 +1130,7 @@ func TestConflictCurrentMustMatchMutationTarget(t *testing.T) {
 			if test.want == "" {
 				assertFileMutationRecovery(t, result.stderr, true, "invalid_api_response", "01J00000000000000000000003")
 			} else if result.stderr != test.want {
-				t.Fatalf("unexpected archive recovery output: %#v", result)
+				t.Fatalf("unexpected delete recovery output: %#v", result)
 			}
 		})
 	}
@@ -2081,7 +2063,7 @@ func TestOperationIDsAreValidatedBeforeRequestsOrOutput(t *testing.T) {
 	}{
 		{"file", []string{"content", "create", "--file", inputWithID}},
 		{"flag JSON", []string{"content", "create", "--file", input, "--operation-id", "bad\n\x1b[31m", "--json"}},
-		{"revision", []string{"content", "archive", "01J00000000000000000000001", "--revision", "1", "--operation-id", "not-a-ulid"}},
+		{"revision", []string{"content", "delete", "01J00000000000000000000001", "--revision", "1", "--operation-id", "not-a-ulid"}},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -2297,8 +2279,6 @@ func TestMutationHTTPStatusMustMatchEndpointContract(t *testing.T) {
 		{"create accepted human", http.StatusAccepted, `{"operation_id":"` + operationID + `","item_ids":["01J00000000000000000000034"],"revisions":[1],"expires_at":["2026-10-10T09:00:00Z"],"status":"created"}`, []string{"content", "create", "--file", createInput, "--operation-id", operationID}, true, false},
 		{"batch OK JSON", http.StatusOK, `{"operation_id":"` + operationID + `","item_ids":["01J00000000000000000000034","01J00000000000000000000035"],"revisions":[1,1],"expires_at":["2026-10-10T09:00:00Z","2026-10-10T09:00:01Z"],"status":"created"}`, []string{"content", "batch-create", "--file", batchInput, "--operation-id", operationID, "--json"}, true, true},
 		{"update created human", http.StatusCreated, `{"operation_id":"` + operationID + `","item_ids":["` + contentID + `"],"revisions":[2],"expires_at":["2026-10-10T09:00:00Z"],"status":"updated"}`, []string{"content", "update", contentID, "--file", updateInput, "--operation-id", operationID}, true, false},
-		{"archive accepted JSON", http.StatusAccepted, `{"operation_id":"` + operationID + `","item_ids":["` + contentID + `"],"revisions":[2],"expires_at":["2026-10-10T09:00:00Z"],"status":"archived"}`, []string{"content", "archive", contentID, "--revision", "1", "--operation-id", operationID, "--json"}, false, true},
-		{"restore created human", http.StatusCreated, `{"operation_id":"` + operationID + `","item_ids":["` + contentID + `"],"revisions":[2],"expires_at":["2026-10-10T09:00:00Z"],"status":"restored"}`, []string{"content", "restore", contentID, "--revision", "1", "--operation-id", operationID}, false, false},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -2333,8 +2313,6 @@ func TestSingletonMutationResponseMustMatchRequestedContentID(t *testing.T) {
 		jsonOutput bool
 	}{
 		{"update human", "updated", []string{"content", "update", "01J00000000000000000000047", "--file", input, "--operation-id", "01J00000000000000000000049"}, false},
-		{"archive JSON", "archived", []string{"content", "archive", "01J00000000000000000000047", "--revision", "1", "--operation-id", "01J00000000000000000000049", "--json"}, true},
-		{"restore human", "restored", []string{"content", "restore", "01J00000000000000000000047", "--revision", "1", "--operation-id", "01J00000000000000000000049"}, false},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
