@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"errors"
+	"strings"
 	"sync"
 	"time"
 )
@@ -33,6 +34,14 @@ type Token struct {
 	CreatedAt   time.Time
 }
 
+type User struct {
+	ID           string
+	WorkspaceID  string
+	Email        string
+	PasswordHash string
+	CreatedAt    time.Time
+}
+
 type RateLimitBucket struct {
 	ID    string
 	Limit int
@@ -47,6 +56,13 @@ type Store interface {
 	TokenByHash(context.Context, [sha256.Size]byte) (Token, error)
 	RevokeToken(context.Context, string, string) error
 	AllowRequests(context.Context, []RateLimitBucket, time.Time, time.Duration) (bool, error)
+	SaveUser(context.Context, User) error
+	UserByEmail(context.Context, string) (User, error)
+}
+
+// NormalizeEmail lower-cases and trims so lookup and uniqueness ignore case.
+func NormalizeEmail(email string) string {
+	return strings.ToLower(strings.TrimSpace(email))
 }
 
 type MemoryStore struct {
@@ -56,6 +72,7 @@ type MemoryStore struct {
 	tokens   map[string]Token
 	hashes   map[[sha256.Size]byte]string
 	rates    map[string]rateLimit
+	users    map[string]User
 }
 
 func NewMemoryStore() *MemoryStore {
@@ -160,4 +177,25 @@ func (s *MemoryStore) RevokeToken(_ context.Context, workspaceID, id string) err
 	delete(s.tokens, id)
 	delete(s.hashes, token.Hash)
 	return nil
+}
+
+func (s *MemoryStore) SaveUser(_ context.Context, user User) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.users == nil {
+		s.users = map[string]User{}
+	}
+	user.Email = NormalizeEmail(user.Email)
+	s.users[user.Email] = user
+	return nil
+}
+
+func (s *MemoryStore) UserByEmail(_ context.Context, email string) (User, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	user, found := s.users[NormalizeEmail(email)]
+	if !found {
+		return User{}, ErrNotFound
+	}
+	return user, nil
 }

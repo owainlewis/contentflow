@@ -190,24 +190,75 @@ func (s *Service) HandleCallback(response http.ResponseWriter, request *http.Req
 		writeError(response, http.StatusForbidden, "owner_mismatch")
 		return
 	}
+	if !s.issueSession(response, request, s.config.WorkspaceID) {
+		return
+	}
+	s.clearCookie(response, loginCookieName, s.loginCookieSameSite())
+	http.Redirect(response, request, s.config.PublicOrigin+"/", http.StatusFound)
+}
+
+// issueSession mints a session and sets the cookie. It reports whether it
+// succeeded, having already written an error response when it did not.
+func (s *Service) issueSession(response http.ResponseWriter, request *http.Request, workspaceID string) bool {
 	sessionID, err := s.randomString(32)
 	if err != nil {
 		writeError(response, http.StatusInternalServerError, "authentication_unavailable")
-		return
+		return false
 	}
 	csrf, err := s.randomString(32)
 	if err != nil {
 		writeError(response, http.StatusInternalServerError, "authentication_unavailable")
+		return false
+	}
+	session := Session{ID: sessionID, WorkspaceID: workspaceID, CSRFToken: csrf, ExpiresAt: s.now().Add(24 * time.Hour)}
+	if err := s.store.SaveSession(request.Context(), session); err != nil {
+		writeError(response, http.StatusServiceUnavailable, "authentication_unavailable")
+		return false
+	}
+	s.setCookie(response, sessionCookieName, sessionID, session.ExpiresAt, http.SameSiteLaxMode)
+	return true
+}
+
+// HandlePasswordLogin signs a user in with an email and password. Failures are
+// deliberately indistinguishable: an unknown account and a wrong password
+// return the same error after the same amount of work.
+func (s *Service) HandlePasswordLogin(response http.ResponseWriter, request *http.Request) {
+	if !s.allowPreAuthentication(request) {
+		writeError(response, http.StatusTooManyRequests, "rate_limit_exceeded")
 		return
 	}
-	session := Session{ID: sessionID, WorkspaceID: s.config.WorkspaceID, CSRFToken: csrf, ExpiresAt: s.now().Add(24 * time.Hour)}
-	if err := s.store.SaveSession(request.Context(), session); err != nil {
+	var credentials struct {
+		Email    string `json:"email"`
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(io.LimitReader(request.Body, 4<<10)).Decode(&credentials); err != nil {
+		writeError(response, http.StatusBadRequest, "invalid_request")
+		return
+	}
+	if credentials.Email == "" || credentials.Password == "" {
+		writeError(response, http.StatusUnauthorized, "invalid_credentials")
+		return
+	}
+
+	user, err := s.store.UserByEmail(request.Context(), credentials.Email)
+	if err != nil && !errors.Is(err, ErrNotFound) {
 		writeError(response, http.StatusServiceUnavailable, "authentication_unavailable")
 		return
 	}
-	s.clearCookie(response, loginCookieName, s.loginCookieSameSite())
-	s.setCookie(response, sessionCookieName, sessionID, session.ExpiresAt, http.SameSiteLaxMode)
-	http.Redirect(response, request, s.config.PublicOrigin+"/", http.StatusFound)
+	storedHash := user.PasswordHash
+	if errors.Is(err, ErrNotFound) {
+		storedHash = dummyPasswordHash
+	}
+	matched, hashErr := VerifyPassword(storedHash, credentials.Password)
+	if hashErr != nil || !matched || errors.Is(err, ErrNotFound) {
+		writeError(response, http.StatusUnauthorized, "invalid_credentials")
+		return
+	}
+
+	if !s.issueSession(response, request, user.WorkspaceID) {
+		return
+	}
+	writeJSON(response, http.StatusOK, map[string]any{"status": "signed_in"})
 }
 
 func (s *Service) HandleSession(response http.ResponseWriter, request *http.Request) {

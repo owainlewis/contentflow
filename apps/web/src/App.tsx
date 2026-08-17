@@ -210,6 +210,10 @@ export default function Home() {
   const [sessionExpired, setSessionExpired] = useState(false);
   const [reauthChecking, setReauthChecking] = useState(false);
   const [reauthError, setReauthError] = useState("");
+  const [signInEmail, setSignInEmail] = useState("");
+  const [signInPassword, setSignInPassword] = useState("");
+  const [signInError, setSignInError] = useState("");
+  const [signInPending, setSignInPending] = useState(false);
   const [pendingSessionCreate, setPendingSessionCreate] = useState<ContentType>();
   const [pendingSessionLifecycle, setPendingSessionLifecycle] = useState<{ document: ContentDetail; action: LifecycleAction }>();
   const [loadError, setLoadError] = useState("");
@@ -564,6 +568,33 @@ export default function Home() {
     if (window.location.pathname !== viewPaths[next]) window.history.pushState({}, "", viewPaths[next]);
     setView(next);
     setLibraryOpen(false);
+  }
+
+  async function submitPasswordSignIn(event: React.FormEvent) {
+    event.preventDefault();
+    if (signInPending) return;
+    setSignInPending(true);
+    setSignInError("");
+    try {
+      const response = await fetch("/api/v1/auth/password", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: signInEmail, password: signInPassword }),
+      });
+      if (response.ok) {
+        window.location.reload();
+        return;
+      }
+      const problem = await response.json().catch(() => ({})) as { error?: string };
+      setSignInError(problem.error === "rate_limit_exceeded"
+        ? "Too many attempts. Wait a moment and try again."
+        : "That email and password did not match.");
+    } catch {
+      setSignInError("Could not reach the server. Try again.");
+    } finally {
+      setSignInPending(false);
+    }
   }
 
   function persistEnabledTypes(next: ContentType[]) {
@@ -1037,7 +1068,19 @@ export default function Home() {
   }
 
   if (authState === "loading") return <main className="centered-state"><LoaderCircle className="spin" /><h1>Opening ContentFlow</h1><p>Loading your workspace…</p></main>;
-  if (authState === "signed-out") return <main className="centered-state"><div className="brand-mark"><Zap size={20} fill="currentColor" /></div><h1>ContentFlow</h1><p>Sign in to open your personal content workspace.</p><a className="primary-button" href="/api/v1/auth/login">Sign in with Google</a></main>;
+  if (authState === "signed-out") return <main className="centered-state sign-in-state">
+    <div className="brand-mark"><Zap size={20} fill="currentColor" /></div>
+    <h1>ContentFlow</h1>
+    <p>Sign in to open your content workspace.</p>
+    <form className="sign-in-form" onSubmit={(event) => void submitPasswordSignIn(event)}>
+      <label>Email<input type="email" autoComplete="username" required value={signInEmail} onChange={(event) => setSignInEmail(event.target.value)} /></label>
+      <label>Password<input type="password" autoComplete="current-password" required value={signInPassword} onChange={(event) => setSignInPassword(event.target.value)} /></label>
+      {signInError && <p className="inline-error" role="alert">{signInError}</p>}
+      <button className="primary-button" type="submit" disabled={signInPending}>{signInPending ? "Signing in…" : "Sign in"}</button>
+    </form>
+    <div className="sign-in-divider"><span>or</span></div>
+    <a className="secondary-button" href="/api/v1/auth/login">Sign in with Google</a>
+  </main>;
   if (authState === "error") return <main className="centered-state"><AlertTriangle /><h1>ContentFlow is unavailable</h1><p>{loadError}</p><button className="primary-button" onClick={() => window.location.reload()}>Try again</button></main>;
   if (sessionExpired) return <main className="centered-state"><AlertTriangle /><h1>Your session expired</h1><p>{pendingSessionLifecycle ? `Your ${pendingSessionLifecycle.action} action for “${displayTitle(pendingSessionLifecycle.document)}” is waiting. Sign in in a new tab, then return here to retry it.` : "Your unsaved changes are still queued. Sign in in a new tab, then return here to continue saving."}</p><a className="primary-button" href="/api/v1/auth/login" target="_blank" rel="noreferrer">Open sign in</a><button className="secondary-button" disabled={reauthChecking} onClick={() => void resumeExpiredSession()}>{reauthChecking ? "Checking…" : "I’ve signed in"}</button>{reauthError && <p className="inline-error" role="alert">{reauthError}</p>}</main>;
 

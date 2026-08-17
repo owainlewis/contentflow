@@ -187,3 +187,24 @@ func (s *PostgresStore) AllowRequests(ctx context.Context, buckets []RateLimitBu
 func (s *PostgresStore) AllowRequest(ctx context.Context, bucketID string, now time.Time, limit int, window time.Duration) (bool, error) {
 	return s.AllowRequests(ctx, []RateLimitBucket{{ID: bucketID, Limit: limit}}, now, window)
 }
+
+func (s *PostgresStore) SaveUser(ctx context.Context, user User) error {
+	_, err := s.pool.Exec(ctx,
+		`insert into users (id, workspace_id, email, password_hash, created_at) values ($1, $2, $3, $4, $5)
+		 on conflict (email) do update set password_hash = excluded.password_hash, workspace_id = excluded.workspace_id`,
+		user.ID, user.WorkspaceID, NormalizeEmail(user.Email), user.PasswordHash, user.CreatedAt)
+	return err
+}
+
+func (s *PostgresStore) UserByEmail(ctx context.Context, email string) (User, error) {
+	row := s.pool.QueryRow(ctx,
+		`select id, workspace_id, email, password_hash, created_at from users where email = $1`, NormalizeEmail(email))
+	var user User
+	switch err := row.Scan(&user.ID, &user.WorkspaceID, &user.Email, &user.PasswordHash, &user.CreatedAt); {
+	case errors.Is(err, pgx.ErrNoRows):
+		return User{}, ErrNotFound
+	case err != nil:
+		return User{}, err
+	}
+	return user, nil
+}

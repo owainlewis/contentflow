@@ -797,3 +797,13 @@ button, select { cursor: pointer; }
   .settings-nav { position: static; grid-auto-flow: column; overflow-x: auto; }
   .calendar-day { min-height: 78px; }
 }
+
+.sign-in-state { gap: 0; }
+.sign-in-form { display: grid; gap: 13px; width: min(320px, 100%); margin-top: 22px; text-align: left; }
+.sign-in-form label { display: grid; gap: 6px; color: var(--text-muted); font-size: var(--font-label); font-weight: 700; }
+.sign-in-form input { height: 42px; padding: 0 12px; border: 1px solid var(--line); border-radius: 7px; color: var(--text-strong); background: var(--control); font-size: 14px; }
+.sign-in-form input:focus { outline: 0; border-color: var(--accent); }
+.sign-in-form .primary-button { justify-content: center; width: 100%; }
+.sign-in-form .inline-error { margin: 0; }
+.sign-in-divider { display: flex; align-items: center; gap: 12px; width: min(320px, 100%); margin: 20px 0 16px; color: var(--text-muted); font-size: var(--font-label); }
+.sign-in-divider::before, .sign-in-divider::after { content: ""; flex: 1; height: 1px; background: var(--line); }
