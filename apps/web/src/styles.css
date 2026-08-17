@@ -808,3 +808,7 @@ button, select { cursor: pointer; }
 .sign-in-form .inline-error { margin: 0; }
 .sign-in-divider { display: flex; align-items: center; gap: 12px; width: min(320px, 100%); margin: 20px 0 16px; color: var(--text-muted); font-size: var(--font-label); }
 .sign-in-divider::before, .sign-in-divider::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+
+/* Auto-sized fields manage their own height, so manual resize and the inner
+   scrollbar would both fight the measurement. */
+textarea.auto-textarea { resize: none; overflow-y: hidden; }

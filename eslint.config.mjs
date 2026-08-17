@@ -28,6 +28,12 @@ const eslintConfig = defineConfig([
       react: {
         version: "detect",
       },
+      // Let the a11y rules see through wrappers to the control they render.
+      "jsx-a11y": {
+        components: {
+          AutoTextarea: "textarea",
+        },
+      },
     },
   },
 ]);

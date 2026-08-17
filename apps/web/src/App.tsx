@@ -55,6 +55,7 @@ import {
   type Section,
   type YouTubeContent,
 } from "./api";
+import AutoTextarea from "./AutoTextarea";
 import Calendar from "./Calendar";
 import Settings from "./Settings";
 import { TypeIcon, displayTitle, statusLabels, typeMeta } from "./content-meta";
@@ -1007,16 +1008,16 @@ export default function Home() {
         <div className="planning-content">
           <div className="planning-section-heading"><span>Strategy</span><small>Shape the idea before you shape the script.</small></div>
           <div className="brief-grid">
-            <label className="brief-field"><span><Lightbulb size={14} /> Topic</span><textarea aria-label="YouTube topic" rows={2} value={content.topic} onChange={(event) => updateYouTubeField("topic", event.target.value)} /></label>
-            <label className="brief-field"><span><Users size={14} /> ICP</span><textarea aria-label="YouTube ICP" rows={2} value={content.icp} onChange={(event) => updateYouTubeField("icp", event.target.value)} /></label>
-            <label className="brief-field brief-field-wide"><span>Unique angle</span><textarea aria-label="YouTube angle" rows={2} value={content.angle} onChange={(event) => updateYouTubeField("angle", event.target.value)} /></label>
+            <label className="brief-field"><span><Lightbulb size={14} /> Topic</span><AutoTextarea aria-label="YouTube topic" minRows={2} value={content.topic} onChange={(event) => updateYouTubeField("topic", event.target.value)} /></label>
+            <label className="brief-field"><span><Users size={14} /> ICP</span><AutoTextarea aria-label="YouTube ICP" minRows={2} value={content.icp} onChange={(event) => updateYouTubeField("icp", event.target.value)} /></label>
+            <label className="brief-field brief-field-wide"><span>Unique angle</span><AutoTextarea aria-label="YouTube angle" minRows={2} value={content.angle} onChange={(event) => updateYouTubeField("angle", event.target.value)} /></label>
             <label className="brief-field brief-field-wide"><span><MousePointerClick size={14} /> CTA</span><input aria-label="YouTube CTA" value={content.cta} onChange={(event) => updateYouTubeField("cta", event.target.value)} /></label>
           </div>
           <div className="planning-section-heading publishing-heading"><span>Publishing details</span><small>Keep publishing copy separate from the working title.</small></div>
           <div className="publishing-grid">
             <div className="publishing-fields">
               <label className="brief-field"><span>YouTube title</span><input aria-label="YouTube title" value={content.publishing_title} onChange={(event) => updateYouTubeField("publishing_title", event.target.value)} /></label>
-              <label className="brief-field"><span>Description</span><textarea aria-label="YouTube description" rows={4} value={content.description} onChange={(event) => updateYouTubeField("description", event.target.value)} /></label>
+              <label className="brief-field"><span>Description</span><AutoTextarea aria-label="YouTube description" minRows={3} value={content.description} onChange={(event) => updateYouTubeField("description", event.target.value)} /></label>
             </div>
             <section className="youtube-preview-field" aria-label="YouTube video preview">
               <span className="attachment-label">Video preview</span>
@@ -1037,14 +1038,14 @@ export default function Home() {
       <section className="transcript-card" aria-labelledby="transcript-heading">
         <div className="transcript-heading"><div><p className="eyebrow">Recording transcript</p><h2 id="transcript-heading">What was actually said</h2></div><span>Separate from the planned script</span></div>
         <p>Paste the spoken words here after recording. Editing this transcript never changes the script sections below.</p>
-        <textarea aria-label="YouTube transcript: what was actually said" value={content.transcript} rows={8} placeholder="Paste the words that were actually spoken…" onChange={(event) => updateYouTubeField("transcript", event.target.value)} />
+        <AutoTextarea aria-label="YouTube transcript: what was actually said" value={content.transcript} minRows={6} placeholder="Paste the words that were actually spoken…" onChange={(event) => updateYouTubeField("transcript", event.target.value)} />
       </section>
       <div className="section-intro"><div><p className="eyebrow">Planned script</p><h2>Build the story, one block at a time</h2></div><span>{content.sections.length} sections</span></div>
       {content.sections.map((section, index) => <section className="script-block" key={section.clientKey}>
         <div className="block-rail"><span>{String(index + 1).padStart(2, "0")}</span><span className="rail-line" /></div>
         <div className="block-content">
           <div className="block-topline"><input aria-label={`Section ${index + 1} name`} value={section.title} onChange={(event) => editYouTubeSection(section.clientKey, { title: event.target.value })} /><span className="section-actions"><button aria-label={`Move ${section.title || `section ${index + 1}`} up`} disabled={index === 0} onClick={() => moveYouTubeSection(index, -1)}><ArrowUp size={15} /></button><button aria-label={`Move ${section.title || `section ${index + 1}`} down`} disabled={index === content.sections.length - 1} onClick={() => moveYouTubeSection(index, 1)}><ArrowDown size={15} /></button><button aria-label={`Remove ${section.title || `section ${index + 1}`}`} onClick={() => removeYouTubeSection(section.clientKey)}><Trash2 size={15} /></button></span></div>
-          <textarea aria-label={`${section.title || `Section ${index + 1}`} script`} value={section.body} rows={Math.max(3, Math.ceil(section.body.length / 92))} onChange={(event) => editYouTubeSection(section.clientKey, { body: event.target.value })} />
+          <AutoTextarea aria-label={`${section.title || `Section ${index + 1}`} script`} value={section.body} minRows={3} onChange={(event) => editYouTubeSection(section.clientKey, { body: event.target.value })} />
           <span className="block-count">{wordCount(section.body)} words</span>
         </div>
       </section>)}
