@@ -35,6 +35,9 @@ class FakeAPI {
   items = new Map<string, ContentDetail>();
   requests: Array<{ method: string; path: string; body: string; csrfToken: string | null }> = [];
   replaceBodies: string[] = [];
+  replaceGate?: Promise<void>;
+  replaceGateStarted = 0;
+  enforceRevisions = false;
   conflictNext = false;
   lifecycleConflictNext = false;
   lifecycleGate?: Promise<void>;
@@ -44,6 +47,7 @@ class FakeAPI {
   expireGatedDetail = false;
   detailFailures = new Set<string>();
   failNextList = false;
+  failDetailAfterReplace = false;
   expireNextList = false;
   failListAfterLifecycle = false;
   listGate?: Promise<void>;
@@ -179,24 +183,35 @@ class FakeAPI {
     }
     if (method === "PUT") {
       this.replaceBodies.push(body);
+      if (this.replaceGate) {
+        const gate = this.replaceGate;
+        this.replaceGate = undefined;
+        this.replaceGateStarted += 1;
+        await gate;
+      }
       if (this.replaceAuthFailure) {
         const failure = this.replaceAuthFailure;
         this.replaceAuthFailure = undefined;
         return json({ error: failure.code }, failure.status);
       }
-      const request = JSON.parse(body) as { working_title: string; status: ContentStatus; revision: number; content: ContentDetail["content"] };
+      const request = JSON.parse(body) as { working_title: string; status: ContentStatus; revision: number; scheduled_at?: string; content: ContentDetail["content"] };
+      if (this.enforceRevisions && request.revision !== item.revision) return json({ error: "revision_conflict", current: item }, 409);
       if (this.conflictNext) {
         this.conflictNext = false;
         const current = { ...item, working_title: "Server changed title", revision: item.revision + 1 };
         this.items.set(id, current);
         return json({ error: "revision_conflict", current }, 409);
       }
-      const saved = { ...item, working_title: request.working_title, status: request.status, content: request.content, revision: item.revision + 1, updated_at: new Date().toISOString() };
+      const saved = { ...item, working_title: request.working_title, status: request.status, scheduled_at: request.scheduled_at, content: request.content, revision: item.revision + 1, updated_at: new Date().toISOString() };
       if (saved.type === "youtube") {
         const content = saved.content as YouTubeContent;
         saved.content = { ...content, sections: content.sections.map((section, position) => ({ ...section, id: section.id ?? `01KSECTION${String(position).padStart(16, "0")}`, clientKey: section.id ?? section.clientKey, position })) };
       }
       this.items.set(id, saved);
+      if (this.failDetailAfterReplace) {
+        this.failDetailAfterReplace = false;
+        this.detailFailures.add(id);
+      }
       return json({ operation_id: "op", item_ids: [id], revisions: [saved.revision], expires_at: [expires], status: "updated" });
     }
     if (method === "POST" && match[2]) {
@@ -1630,12 +1645,16 @@ describe("persistent ContentFlow workspace", () => {
   });
 
 
-  it("routes between the workspace, calendar, and settings views", async () => {
+  it("routes between the workspace, weekly matrix, calendar, and settings views", async () => {
     const api = new FakeAPI([detail("linkedin")]);
     vi.stubGlobal("fetch", api.fetch);
     const user = userEvent.setup();
     render(<Home />);
     await screen.findByRole("heading", { name: "LinkedIn one" });
+
+    await user.click(screen.getByRole("button", { name: /^Weekly/ }));
+    expect(await screen.findByRole("heading", { name: "Weekly matrix" })).toBeTruthy();
+    expect(window.location.pathname).toBe("/weekly");
 
     await user.click(screen.getByRole("button", { name: /^Calendar/ }));
     expect(await screen.findByRole("heading", { name: "Calendar" })).toBeTruthy();
@@ -1658,6 +1677,190 @@ describe("persistent ContentFlow workspace", () => {
     render(<Home />);
 
     expect(await screen.findByRole("heading", { name: "Calendar" })).toBeTruthy();
+  });
+
+  it("opens the weekly matrix directly from its URL", async () => {
+    const api = new FakeAPI([detail("linkedin")]);
+    vi.stubGlobal("fetch", api.fetch);
+    window.history.pushState({}, "", "/weekly");
+    render(<Home />);
+
+    expect(await screen.findByRole("heading", { name: "Weekly matrix" })).toBeTruthy();
+  });
+
+  it("places scheduled content in the correct platform and weekday cells", async () => {
+    const monday = new Date();
+    monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
+    monday.setHours(9, 0, 0, 0);
+    const tuesday = new Date(monday);
+    tuesday.setDate(monday.getDate() + 1);
+    const youtube = { ...detail("youtube"), scheduled_at: monday.toISOString() };
+    const instagram = { ...detail("instagram"), scheduled_at: tuesday.toISOString() };
+    const api = new FakeAPI([youtube, instagram]);
+    vi.stubGlobal("fetch", api.fetch);
+    const user = userEvent.setup();
+    render(<Home />);
+    await screen.findByDisplayValue("YouTube one");
+
+    await user.click(screen.getByRole("button", { name: /^Weekly/ }));
+    const youtubeCell = screen.getByLabelText(`YouTube on ${monday.toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long", year: "numeric" })}`);
+    const instagramCell = screen.getByLabelText(`Instagram on ${tuesday.toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long", year: "numeric" })}`);
+    expect(within(youtubeCell).getByRole("button", { name: "Open YouTube one" })).toBeTruthy();
+    expect(within(instagramCell).getByRole("button", { name: "Open Instagram one" })).toBeTruthy();
+    expect(screen.getByText("2 pieces scheduled this week")).toBeTruthy();
+  });
+
+  it("moves weekly content with the keyboard-friendly control without opening it", async () => {
+    const monday = new Date();
+    monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
+    monday.setHours(9, 0, 0, 0);
+    const tuesday = new Date(monday);
+    tuesday.setDate(monday.getDate() + 1);
+    const api = new FakeAPI([{ ...detail("linkedin"), scheduled_at: monday.toISOString() }]);
+    vi.stubGlobal("fetch", api.fetch);
+    const user = userEvent.setup();
+    render(<Home />);
+    await screen.findByRole("heading", { name: "LinkedIn one" });
+    await user.click(screen.getByRole("button", { name: /^Weekly/ }));
+
+    await user.selectOptions(screen.getByLabelText("Move LinkedIn one"), `${tuesday.getFullYear()}-${String(tuesday.getMonth() + 1).padStart(2, "0")}-${String(tuesday.getDate()).padStart(2, "0")}`);
+
+    await waitFor(() => expect(api.replaceBodies.length).toBe(1));
+    const scheduled = (JSON.parse(api.replaceBodies[0]) as { scheduled_at?: string }).scheduled_at;
+    expect(new Date(scheduled!).toDateString()).toBe(tuesday.toDateString());
+    expect(window.location.pathname).toBe("/weekly");
+    expect(screen.getByRole("heading", { name: "Weekly matrix" })).toBeTruthy();
+  });
+
+  it("keeps the selected editor revision and schedule current after a weekly move", async () => {
+    const monday = new Date();
+    monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
+    monday.setHours(9, 0, 0, 0);
+    const tuesday = new Date(monday);
+    tuesday.setDate(monday.getDate() + 1);
+    const linkedin = { ...detail("linkedin"), scheduled_at: monday.toISOString() };
+    const api = new FakeAPI([linkedin]);
+    api.enforceRevisions = true;
+    vi.stubGlobal("fetch", api.fetch);
+    const user = userEvent.setup();
+    render(<Home />);
+    await screen.findByRole("heading", { name: "LinkedIn one" });
+    await user.click(screen.getByRole("button", { name: /^Weekly/ }));
+
+    await user.selectOptions(screen.getByLabelText("Move LinkedIn one"), `${tuesday.getFullYear()}-${String(tuesday.getMonth() + 1).padStart(2, "0")}-${String(tuesday.getDate()).padStart(2, "0")}`);
+    await waitFor(() => expect(api.items.get(linkedin.id)?.revision).toBe(2));
+    await user.click(await screen.findByRole("button", { name: "Open LinkedIn one" }));
+    const post = await screen.findByLabelText("LinkedIn post");
+    await user.clear(post);
+    await user.type(post, "Edited after moving");
+
+    await waitFor(() => expect((api.items.get(linkedin.id)?.content as { body: string }).body).toBe("Edited after moving"), { timeout: 2500 });
+    const saved = api.items.get(linkedin.id)!;
+    expect(new Date(saved.scheduled_at!).toDateString()).toBe(tuesday.toDateString());
+    expect(saved.revision).toBe(3);
+    expect(screen.queryByRole("heading", { name: "This item changed elsewhere" })).toBeNull();
+  });
+
+  it("disables repeat weekly moves until the current reschedule finishes", async () => {
+    const monday = new Date();
+    monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
+    monday.setHours(9, 0, 0, 0);
+    const tuesday = new Date(monday);
+    tuesday.setDate(monday.getDate() + 1);
+    const wednesday = new Date(monday);
+    wednesday.setDate(monday.getDate() + 2);
+    const linkedin = { ...detail("linkedin"), scheduled_at: monday.toISOString() };
+    const api = new FakeAPI([linkedin]);
+    let releaseMove = () => undefined;
+    api.replaceGate = new Promise<void>((resolve) => { releaseMove = resolve; });
+    vi.stubGlobal("fetch", api.fetch);
+    const user = userEvent.setup();
+    render(<Home />);
+    await screen.findByRole("heading", { name: "LinkedIn one" });
+    await user.click(screen.getByRole("button", { name: /^Weekly/ }));
+
+    const move = screen.getByLabelText("Move LinkedIn one");
+    await user.selectOptions(move, `${tuesday.getFullYear()}-${String(tuesday.getMonth() + 1).padStart(2, "0")}-${String(tuesday.getDate()).padStart(2, "0")}`);
+    await waitFor(() => expect(api.replaceGateStarted).toBe(1));
+    expect((move as HTMLSelectElement).disabled).toBe(true);
+    releaseMove();
+    await waitFor(() => expect((screen.getByLabelText("Move LinkedIn one") as HTMLSelectElement).disabled).toBe(false));
+
+    await user.selectOptions(screen.getByLabelText("Move LinkedIn one"), `${wednesday.getFullYear()}-${String(wednesday.getMonth() + 1).padStart(2, "0")}-${String(wednesday.getDate()).padStart(2, "0")}`);
+    await waitFor(() => expect(api.replaceBodies.length).toBe(2));
+    await waitFor(() => expect(new Date(api.items.get(linkedin.id)!.scheduled_at!).toDateString()).toBe(wednesday.toDateString()));
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("reports a committed move accurately when its follow-up detail read fails", async () => {
+    const monday = new Date();
+    monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
+    monday.setHours(9, 0, 0, 0);
+    const tuesday = new Date(monday);
+    tuesday.setDate(monday.getDate() + 1);
+    const linkedin = { ...detail("linkedin"), scheduled_at: monday.toISOString() };
+    const api = new FakeAPI([linkedin]);
+    api.failDetailAfterReplace = true;
+    vi.stubGlobal("fetch", api.fetch);
+    const user = userEvent.setup();
+    render(<Home />);
+    await screen.findByRole("heading", { name: "LinkedIn one" });
+    await user.click(screen.getByRole("button", { name: /^Weekly/ }));
+
+    await user.selectOptions(screen.getByLabelText("Move LinkedIn one"), `${tuesday.getFullYear()}-${String(tuesday.getMonth() + 1).padStart(2, "0")}-${String(tuesday.getDate()).padStart(2, "0")}`);
+
+    expect((await screen.findByRole("alert")).textContent).toContain("The item was moved, but its latest details could not be refreshed. Reload to confirm.");
+    expect(new Date(api.items.get(linkedin.id)!.scheduled_at!).toDateString()).toBe(tuesday.toDateString());
+    const tuesdayCell = screen.getByLabelText(`LinkedIn on ${tuesday.toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long", year: "numeric" })}`);
+    expect(within(tuesdayCell).getByRole("button", { name: "Open LinkedIn one" })).toBeTruthy();
+    expect(screen.queryByText("That item could not be rescheduled. Try again.")).toBeNull();
+  });
+
+  it("moves content between cells by dragging along its platform row", async () => {
+    const monday = new Date();
+    monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
+    monday.setHours(9, 0, 0, 0);
+    const wednesday = new Date(monday);
+    wednesday.setDate(monday.getDate() + 2);
+    const api = new FakeAPI([{ ...detail("youtube"), scheduled_at: monday.toISOString() }]);
+    vi.stubGlobal("fetch", api.fetch);
+    const user = userEvent.setup();
+    render(<Home />);
+    await screen.findByDisplayValue("YouTube one");
+    await user.click(screen.getByRole("button", { name: /^Weekly/ }));
+
+    const cardButton = screen.getByRole("button", { name: "Open YouTube one" });
+    const card = cardButton.closest("article")!;
+    const target = screen.getByLabelText(`YouTube on ${wednesday.toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long", year: "numeric" })}`);
+    const carried = new Map<string, string>();
+    const dataTransfer = {
+      setData: (format: string, value: string) => { carried.set(format, value); },
+      getData: (format: string) => carried.get(format) ?? "",
+      effectAllowed: "move",
+      dropEffect: "move",
+    };
+    fireEvent.dragStart(card, { dataTransfer });
+    fireEvent.dragOver(target, { dataTransfer });
+    fireEvent.drop(target, { dataTransfer });
+
+    await waitFor(() => expect(api.replaceBodies.length).toBe(1));
+    expect(new Date((JSON.parse(api.replaceBodies[0]) as { scheduled_at: string }).scheduled_at).toDateString()).toBe(wednesday.toDateString());
+    expect(window.location.pathname).toBe("/weekly");
+  });
+
+  it("moves between weeks and returns to the current week", async () => {
+    const api = new FakeAPI([detail("linkedin")]);
+    vi.stubGlobal("fetch", api.fetch);
+    const user = userEvent.setup();
+    render(<Home />);
+    await screen.findByRole("heading", { name: "LinkedIn one" });
+    await user.click(screen.getByRole("button", { name: /^Weekly/ }));
+    const currentLabel = screen.getByRole("button", { name: "Previous week" }).nextElementSibling?.textContent;
+
+    await user.click(screen.getByRole("button", { name: "Next week" }));
+    expect(screen.getByRole("button", { name: "Previous week" }).nextElementSibling?.textContent).not.toBe(currentLabel);
+    await user.click(screen.getByRole("button", { name: "This week" }));
+    expect(screen.getByRole("button", { name: "Previous week" }).nextElementSibling?.textContent).toBe(currentLabel);
   });
 
   it("schedules an unscheduled item onto a day and writes the date", async () => {

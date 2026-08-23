@@ -7,6 +7,7 @@ type Props = {
   items: ContentSummary[];
   onOpen: (id: string) => void;
   onSchedule: (id: string, day: string | undefined) => void;
+  blockedIds?: ReadonlySet<string>;
   error?: string;
 };
 
@@ -26,7 +27,7 @@ function monthGrid(month: Date) {
   return Array.from({ length: 42 }, (_, index) => new Date(start.getFullYear(), start.getMonth(), start.getDate() + index));
 }
 
-export default function Calendar({ items, onOpen, onSchedule, error }: Props) {
+export default function Calendar({ items, onOpen, onSchedule, blockedIds = new Set(), error }: Props) {
   const [month, setMonth] = useState(() => {
     const today = new Date();
     return new Date(today.getFullYear(), today.getMonth(), 1);
@@ -61,12 +62,14 @@ export default function Calendar({ items, onOpen, onSchedule, error }: Props) {
   }
 
   function chip(item: ContentSummary, inTray: boolean) {
+    const scheduleBlocked = blockedIds.has(item.id);
     return (
       <button
         key={item.id}
-        className={`calendar-chip ${dragging === item.id ? "dragging" : ""}`}
-        draggable
+        className={`calendar-chip ${dragging === item.id ? "dragging" : ""} ${scheduleBlocked ? "schedule-blocked" : ""}`}
+        draggable={!scheduleBlocked}
         onDragStart={(event) => {
+          if (scheduleBlocked) return;
           // Firefox refuses to start a drag unless some data is set.
           event.dataTransfer.setData("text/plain", item.id);
           event.dataTransfer.effectAllowed = "move";
@@ -74,7 +77,7 @@ export default function Calendar({ items, onOpen, onSchedule, error }: Props) {
         }}
         onDragEnd={() => { setDragging(undefined); setDragOver(undefined); }}
         onClick={() => onOpen(item.id)}
-        title={`${displayTitle(item)} — open`}
+        title={scheduleBlocked ? `${displayTitle(item)} — wait for the current save before moving` : `${displayTitle(item)} — open`}
         aria-label={`${displayTitle(item)}${inTray ? ", unscheduled" : ""}`}
       >
         <span style={{ color: typeMeta[item.type].color }}><TypeIcon type={item.type} size={13} /></span>

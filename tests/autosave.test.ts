@@ -19,6 +19,43 @@ const original = (): ContentDetail => ({
 afterEach(() => vi.useRealTimers());
 
 describe("AutosaveManager", () => {
+  it("rebases a debounced draft onto an external schedule update", async () => {
+    vi.useFakeTimers();
+    const bodies: string[] = [];
+    const documents: ContentDetail[] = [];
+    const scheduled = { ...original(), revision: 2, updated_at: "2026-08-16T10:00:00Z", scheduled_at: "2026-08-18T08:00:00Z" };
+    const manager = new AutosaveManager({
+      delay: 750,
+      serialize: serializeReplacement,
+      send: async (_id, body) => {
+        bodies.push(body);
+        return { operation_id: "op", item_ids: [scheduled.id], revisions: [3], expires_at: [scheduled.expires_at], status: "updated" };
+      },
+      resolve: async () => ({ ...scheduled, working_title: "Local edit", revision: 3 }),
+      onDocument: (document) => documents.push(document),
+      onState: () => undefined,
+      onConflict: () => undefined,
+    });
+
+    manager.enqueue({ ...original(), working_title: "Local edit" });
+    expect(manager.isBusy(original().id)).toBe(true);
+    expect(manager.reconcileExternal(scheduled)).toBe(true);
+    expect(manager.getDraft(original().id)).toEqual(expect.objectContaining({
+      working_title: "Local edit",
+      revision: 2,
+      scheduled_at: scheduled.scheduled_at,
+    }));
+    await vi.advanceTimersByTimeAsync(750);
+
+    expect(JSON.parse(bodies[0])).toEqual(expect.objectContaining({
+      working_title: "Local edit",
+      revision: 2,
+      scheduled_at: scheduled.scheduled_at,
+    }));
+    expect(documents.at(-1)).toEqual(expect.objectContaining({ scheduled_at: scheduled.scheduled_at }));
+    manager.dispose();
+  });
+
   it("waits 750 ms, retries frozen bytes and operation ID, then queues later edits under a new ID", async () => {
     vi.useFakeTimers();
     const bodies: string[] = [];

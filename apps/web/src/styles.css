@@ -791,6 +791,7 @@ button, select { cursor: pointer; }
 .calendar-chip { display: flex; align-items: center; gap: 6px; width: 100%; padding: 5px 7px; border: 1px solid var(--line); border-radius: 5px; color: var(--text-soft); background: var(--surface); font-size: var(--font-label); text-align: left; cursor: grab; }
 .calendar-chip:hover { color: var(--text-strong); border-color: var(--line-strong); background: var(--hover); }
 .calendar-chip.dragging { opacity: .45; }
+.calendar-chip.schedule-blocked { cursor: wait; opacity: .62; }
 .calendar-chip-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .calendar-tray { display: flex; flex-direction: column; gap: 10px; padding: 15px; border: 1px solid var(--line); border-radius: 8px; background: var(--control); }
 .calendar-tray.drag-over { border-color: var(--accent); background: var(--hover); }
@@ -799,6 +800,44 @@ button, select { cursor: pointer; }
 .calendar-tray .settings-hint { margin: 0; }
 .calendar-tray-items { display: grid; gap: 5px; }
 .calendar-tray-empty { margin: 0; color: var(--text-muted); font-size: var(--font-label); }
+
+.weekly-header { display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; flex-wrap: wrap; }
+.weekly-page { overflow-x: hidden; }
+.weekly-summary { margin: 7px 0 0; color: var(--text-muted); font-size: 13px; }
+.weekly-scroll { min-width: 0; overflow-x: auto; border: 1px solid var(--line); border-radius: 9px; background: var(--line); outline: 0; }
+.weekly-scroll:focus-visible { box-shadow: 0 0 0 2px var(--accent); }
+.weekly-matrix { width: 100%; min-width: 1080px; table-layout: fixed; border-collapse: separate; border-spacing: 1px; background: var(--line); }
+.weekly-matrix th, .weekly-matrix td { background: var(--control); }
+.weekly-matrix thead th { height: 58px; padding: 8px; color: var(--text-muted); background: var(--surface); text-align: center; }
+.weekly-matrix thead th > span, .weekly-matrix thead th > strong { display: block; }
+.weekly-matrix thead th > span { font-size: var(--font-label); font-weight: 720; letter-spacing: .07em; text-transform: uppercase; }
+.weekly-matrix thead th > strong { margin-top: 1px; color: var(--text-soft); font-size: 16px; font-weight: 620; }
+.weekly-matrix .weekly-corner { width: 145px; padding-left: 14px; text-align: left; }
+.weekly-corner > svg { margin-right: 7px; vertical-align: -3px; }
+.weekly-matrix tbody th { width: 145px; padding: 12px 13px; text-align: left; }
+.weekly-matrix tbody th > span { display: inline-block; vertical-align: middle; }
+.weekly-platform-icon { width: 26px; }
+.weekly-matrix tbody th strong, .weekly-matrix tbody th small { display: block; }
+.weekly-matrix tbody th strong { color: var(--text-strong); font-size: 13px; font-weight: 650; }
+.weekly-matrix tbody th small { margin-top: 2px; color: var(--text-muted); font-size: var(--font-label); font-weight: 500; }
+.weekly-matrix td { height: 100px; padding: 7px; vertical-align: top; transition: background .15s ease, box-shadow .15s ease; }
+.weekly-matrix th.today { box-shadow: inset 0 2px 0 var(--accent); }
+.weekly-matrix th.today > strong { color: var(--accent); }
+.weekly-matrix td.today { background: color-mix(in srgb, var(--accent) 4%, var(--control)); }
+.weekly-matrix td.drag-over { background: var(--hover); box-shadow: inset 0 0 0 2px var(--accent); }
+.weekly-empty { display: grid; place-items: center; min-height: 84px; color: var(--faint); font-size: var(--font-label); }
+.weekly-card { display: grid; gap: 5px; margin-bottom: 5px; padding: 7px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); cursor: grab; }
+.weekly-card:last-child { margin-bottom: 0; }
+.weekly-card:hover { border-color: var(--line-strong); background: var(--hover); }
+.weekly-card.dragging { opacity: .45; }
+.weekly-card.schedule-blocked { cursor: wait; opacity: .62; }
+.weekly-card-open { min-width: 0; padding: 0; border: 0; color: var(--text-soft); background: transparent; text-align: left; }
+.weekly-card-open strong, .weekly-card-open span { display: block; }
+.weekly-card-open strong { overflow: hidden; font-size: var(--font-label); font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+.weekly-card-open span { margin-top: 2px; color: var(--text-muted); font-size: 10px; }
+.weekly-card-move { display: block; min-width: 0; }
+.weekly-card-move select { width: 100%; height: 23px; padding: 0 5px; border: 1px solid var(--line-soft); border-radius: 4px; color: var(--text-muted); background: var(--control); font-size: 10px; }
+.weekly-help { margin: 11px 1px 0; color: var(--text-muted); font-size: var(--font-label); }
 
 @media (max-width: 1180px) {
   .calendar-body { grid-template-columns: minmax(0, 1fr); }
@@ -810,6 +849,8 @@ button, select { cursor: pointer; }
   .settings-body { grid-template-columns: minmax(0, 1fr); }
   .settings-nav { position: static; grid-auto-flow: column; overflow-x: auto; }
   .calendar-day { min-height: 78px; }
+  .weekly-page { overflow-y: auto; }
+  .weekly-matrix { min-width: 980px; }
 }
 
 .sign-in-state { gap: 0; }

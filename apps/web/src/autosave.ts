@@ -94,6 +94,32 @@ export class AutosaveManager {
     return queue ? `${queue.version}:${queue.persistedVersion}` : "0:0";
   }
 
+  isBusy(id: string) {
+    const queue = this.queues.get(id);
+    return Boolean(queue && (queue.version > queue.persistedVersion || queue.inFlight || queue.conflict || queue.unauthorizedRetry));
+  }
+
+  // Scheduling is saved outside the editor queue. Rebase an idle or debounced
+  // draft onto that server result so the next edit cannot restore stale
+  // metadata or submit an old revision.
+  reconcileExternal(server: ContentDetail) {
+    const queue = this.queues.get(server.id);
+    if (!queue) {
+      this.options.onDocument(server);
+      return true;
+    }
+    if (queue.inFlight || queue.conflict || queue.unauthorizedRetry) return false;
+    if (queue.version > queue.persistedVersion) {
+      queue.draft = rebaseConflictState(queue.draft, server);
+      this.options.onDocument(queue.draft);
+      return true;
+    }
+    queue.draft = server;
+    this.options.onDocument(server);
+    this.options.onState(server.id, "saved");
+    return true;
+  }
+
   beginConflict(local: ContentDetail, server: ContentDetail) {
     const queue = this.queues.get(local.id) ?? { draft: local, version: 0, persistedVersion: 0, ready: false };
     if (queue.timer) window.clearTimeout(queue.timer);
@@ -309,7 +335,7 @@ export class AutosaveManager {
 
 export function mergeServerState(latest: ContentDetail, server: ContentDetail, frozen: ContentDetail): ContentDetail | undefined {
   if (latest.type !== "youtube" || server.type !== "youtube" || frozen.type !== "youtube") {
-    return { ...latest, revision: server.revision, updated_at: server.updated_at, expires_at: server.expires_at };
+    return mergeMetadata(latest, server);
   }
   const serverContent = server.content as YouTubeContent;
   const frozenContent = frozen.content as YouTubeContent;
@@ -333,6 +359,7 @@ export function mergeServerState(latest: ContentDetail, server: ContentDetail, f
     revision: server.revision,
     updated_at: server.updated_at,
     expires_at: server.expires_at,
+    scheduled_at: server.scheduled_at,
     content: {
       ...latestContent,
       sections: latestContent.sections.map((section, position) => ({
@@ -367,5 +394,6 @@ function mergeMetadata(local: ContentDetail, server: ContentDetail): ContentDeta
     revision: server.revision,
     updated_at: server.updated_at,
     expires_at: server.expires_at,
+    scheduled_at: server.scheduled_at,
   };
 }
