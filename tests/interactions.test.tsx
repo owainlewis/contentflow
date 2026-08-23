@@ -1912,6 +1912,22 @@ describe("persistent ContentFlow workspace", () => {
     await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("button", { name: "Collapse content library" })));
   });
 
+  it("opens a collapsed desktop library before focusing search", async () => {
+    window.localStorage.setItem("contentflow-library-collapsed", "true");
+    const api = new FakeAPI([detail("email")]);
+    vi.stubGlobal("fetch", api.fetch);
+    const user = userEvent.setup();
+    render(<Home />);
+    await screen.findByRole("heading", { name: "Email one" });
+
+    await user.keyboard("{Control>}k{/Control}");
+
+    const search = screen.getByRole("textbox", { name: "Search content titles" });
+    await waitFor(() => expect(document.activeElement).toBe(search));
+    expect(document.querySelector(".app-shell")?.classList).not.toContain("library-is-collapsed");
+    expect(window.localStorage.getItem("contentflow-library-collapsed")).toBe("false");
+  });
+
   it("keeps the mobile content library available when desktop collapse is remembered", async () => {
     window.localStorage.setItem("contentflow-library-collapsed", "true");
     const api = new FakeAPI([detail("email")]);
@@ -1934,6 +1950,30 @@ describe("persistent ContentFlow workspace", () => {
 
     expect(screen.getByRole("region", { name: "Content library" }).hasAttribute("inert")).toBe(false);
     expect(screen.queryByRole("button", { name: "Expand content library" })).toBeNull();
+  });
+
+  it("opens the mobile library before focusing search", async () => {
+    const api = new FakeAPI([detail("email")]);
+    vi.stubGlobal("fetch", api.fetch);
+    vi.stubGlobal("matchMedia", vi.fn(() => ({
+      matches: true,
+      media: "(max-width: 900px)",
+      onchange: null,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    })));
+    const user = userEvent.setup();
+    render(<Home />);
+    await screen.findByRole("heading", { name: "Email one" });
+
+    await user.keyboard("{Control>}k{/Control}");
+
+    const search = screen.getByRole("textbox", { name: "Search content titles" });
+    await waitFor(() => expect(document.activeElement).toBe(search));
+    expect(document.querySelector(".editor-panel")?.hasAttribute("inert")).toBe(true);
   });
 
   it("can restore a collapsed library from an empty workspace", async () => {

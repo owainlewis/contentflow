@@ -257,6 +257,7 @@ export default function Home() {
   const libraryCollapseButtonRef = useRef<HTMLButtonElement>(null);
   const libraryExpandButtonRef = useRef<HTMLButtonElement>(null);
   const libraryToggleRequestedRef = useRef(false);
+  const searchFocusRequestedRef = useRef(false);
   const mobileLibraryButtonRef = useRef<HTMLButtonElement>(null);
   const libraryWasOpenRef = useRef(false);
   const searchRef = useRef<HTMLInputElement>(null);
@@ -537,6 +538,14 @@ export default function Home() {
   }, [isCompact, libraryCollapsed]);
 
   useEffect(() => {
+    if (!searchFocusRequestedRef.current) return;
+    const libraryAccessible = isCompact ? libraryOpen : !libraryCollapsed;
+    if (!libraryAccessible) return;
+    searchFocusRequestedRef.current = false;
+    searchRef.current?.focus();
+  }, [isCompact, libraryCollapsed, libraryOpen]);
+
+  useEffect(() => {
     const timer = window.setTimeout(() => setTheme(document.documentElement.dataset.theme === "light" ? "light" : "dark"), 0);
     return () => window.clearTimeout(timer);
   }, []);
@@ -568,7 +577,20 @@ export default function Home() {
       if (createOpen || deleteOpen) return;
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
         event.preventDefault();
-        searchRef.current?.focus();
+        searchFocusRequestedRef.current = true;
+        if (isCompact && !libraryOpen) {
+          setLibraryOpen(true);
+        } else if (!isCompact && libraryCollapsed) {
+          setLibraryCollapsed(false);
+          try {
+            window.localStorage.setItem(libraryCollapsedKey, "false");
+          } catch {
+            // The library still opens for this session.
+          }
+        } else {
+          searchFocusRequestedRef.current = false;
+          searchRef.current?.focus();
+        }
       } else if (!event.metaKey && !event.ctrlKey && !event.altKey && event.key.toLowerCase() === "n" && !(event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLSelectElement)) {
         event.preventDefault();
         // Mirrors the sidebar button this shortcut is labelled on: always ask.
@@ -577,7 +599,7 @@ export default function Home() {
     }
     document.addEventListener("keydown", shortcut);
     return () => document.removeEventListener("keydown", shortcut);
-  }, [createOpen, deleteOpen]);
+  }, [createOpen, deleteOpen, isCompact, libraryCollapsed, libraryOpen]);
 
   const counts = useMemo(() => allSummaries.reduce<Record<ContentType, number>>((result, item) => {
     result[item.type] += 1;
