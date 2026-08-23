@@ -56,8 +56,9 @@ export default function WeeklyMatrix({ items, enabledTypes, onOpen, onSchedule, 
 
   const scheduledThisWeek = useMemo(() => {
     const keys = new Set(days.map(dayKey));
-    return items.filter((item) => item.scheduled_at && keys.has(dayKey(new Date(item.scheduled_at)))).length;
-  }, [days, items]);
+    const visibleTypes = new Set(enabledTypes);
+    return items.filter((item) => visibleTypes.has(item.type) && item.scheduled_at && keys.has(dayKey(new Date(item.scheduled_at)))).length;
+  }, [days, enabledTypes, items]);
 
   function moveWeek(offset: number) {
     setWeekStart((current) => new Date(current.getFullYear(), current.getMonth(), current.getDate() + (offset * 7)));

@@ -1732,6 +1732,27 @@ describe("persistent ContentFlow workspace", () => {
     expect(screen.getByText("2 pieces scheduled this week")).toBeTruthy();
   });
 
+  it("counts only content types shown in the weekly matrix", async () => {
+    const monday = new Date();
+    monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
+    monday.setHours(9, 0, 0, 0);
+    const api = new FakeAPI([
+      { ...detail("youtube"), scheduled_at: monday.toISOString() },
+      { ...detail("tiktok"), scheduled_at: monday.toISOString() },
+    ]);
+    vi.stubGlobal("fetch", api.fetch);
+    const user = userEvent.setup();
+    render(<Home />);
+    await screen.findByDisplayValue("YouTube one");
+    await user.click(screen.getByRole("button", { name: /^Settings/ }));
+    await user.click(await screen.findByRole("button", { name: "Content types" }));
+    await user.click(screen.getByLabelText("Show TikTok"));
+    await user.click(screen.getByRole("button", { name: /^Weekly/ }));
+
+    expect(await screen.findByText("1 piece scheduled this week")).toBeTruthy();
+    expect(screen.queryByRole("row", { name: /^TikTok/ })).toBeNull();
+  });
+
   it("moves weekly content with the keyboard-friendly control without opening it", async () => {
     const monday = new Date();
     monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
