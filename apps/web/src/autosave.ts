@@ -45,6 +45,7 @@ type AutosaveOptions = {
 
 export class AutosaveManager {
   private queues = new Map<string, Queue>();
+  private externalVersions = new Map<string, number>();
   private delay: number;
   private retryDelays: number[];
   private requestTimeout: number;
@@ -91,7 +92,7 @@ export class AutosaveManager {
 
   getVersionStamp(id: string) {
     const queue = this.queues.get(id);
-    return queue ? `${queue.version}:${queue.persistedVersion}` : "0:0";
+    return `${queue?.version ?? 0}:${queue?.persistedVersion ?? 0}:${this.externalVersions.get(id) ?? 0}`;
   }
 
   isBusy(id: string) {
@@ -103,6 +104,7 @@ export class AutosaveManager {
   // draft onto that server result so the next edit cannot restore stale
   // metadata or submit an old revision.
   reconcileExternal(server: ContentDetail) {
+    this.externalVersions.set(server.id, (this.externalVersions.get(server.id) ?? 0) + 1);
     const queue = this.queues.get(server.id);
     if (!queue) {
       this.options.onDocument(server);
@@ -138,10 +140,10 @@ export class AutosaveManager {
 
   discard(id: string) {
     const queue = this.queues.get(id);
-    if (!queue) return;
-    if (queue.timer) window.clearTimeout(queue.timer);
-    if (queue.retryTimer) window.clearTimeout(queue.retryTimer);
+    if (queue?.timer) window.clearTimeout(queue.timer);
+    if (queue?.retryTimer) window.clearTimeout(queue.retryTimer);
     this.queues.delete(id);
+    this.externalVersions.delete(id);
   }
 
   resolveConflict(id: string, choice: "server" | "local") {
@@ -167,6 +169,7 @@ export class AutosaveManager {
 
   dispose() {
     for (const id of this.queues.keys()) this.discard(id);
+    this.externalVersions.clear();
   }
 
   resumeUnauthorized() {

@@ -1804,6 +1804,45 @@ describe("persistent ContentFlow workspace", () => {
     expect(screen.queryByRole("heading", { name: "This item changed elsewhere" })).toBeNull();
   });
 
+  it("ignores a stale detail read that finishes after an unselected weekly move", async () => {
+    const monday = new Date();
+    monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
+    monday.setHours(9, 0, 0, 0);
+    const tuesday = new Date(monday);
+    tuesday.setDate(monday.getDate() + 1);
+    const linkedin = { ...detail("linkedin"), scheduled_at: monday.toISOString() };
+    const api = new FakeAPI([detail("youtube"), linkedin]);
+    api.enforceRevisions = true;
+    let releaseMove = () => undefined;
+    api.replaceGate = new Promise<void>((resolve) => { releaseMove = resolve; });
+    vi.stubGlobal("fetch", api.fetch);
+    const user = userEvent.setup();
+    render(<Home />);
+    await screen.findByDisplayValue("YouTube one");
+    await user.click(screen.getByRole("button", { name: /^Weekly/ }));
+
+    await user.selectOptions(screen.getByLabelText("Move LinkedIn one"), `${tuesday.getFullYear()}-${String(tuesday.getMonth() + 1).padStart(2, "0")}-${String(tuesday.getDate()).padStart(2, "0")}`);
+    await waitFor(() => expect(api.replaceGateStarted).toBe(1));
+    let releaseDetail = () => undefined;
+    api.detailGate = new Promise<void>((resolve) => { releaseDetail = resolve; });
+    await user.click(screen.getByRole("button", { name: /^All content/ }));
+    await user.click(screen.getByRole("button", { name: /^LinkedIn one/ }));
+    await waitFor(() => expect(api.detailGate).toBeUndefined());
+
+    releaseMove();
+    await waitFor(() => expect(api.items.get(linkedin.id)?.revision).toBe(2));
+    await waitFor(() => expect(screen.queryByRole("status")).toBeNull());
+    releaseDetail();
+    const post = await screen.findByLabelText("LinkedIn post");
+    await user.type(post, "Edit after moving");
+
+    await waitFor(() => expect((api.items.get(linkedin.id)?.content as { body: string }).body).toBe("Edit after moving"), { timeout: 2500 });
+    const saved = api.items.get(linkedin.id)!;
+    expect(saved.revision).toBe(3);
+    expect(new Date(saved.scheduled_at!).toDateString()).toBe(tuesday.toDateString());
+    expect(screen.queryByRole("heading", { name: "This item changed elsewhere" })).toBeNull();
+  });
+
   it("disables repeat weekly moves until the current reschedule finishes", async () => {
     const monday = new Date();
     monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));

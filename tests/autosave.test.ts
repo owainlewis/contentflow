@@ -19,6 +19,23 @@ const original = (): ContentDetail => ({
 afterEach(() => vi.useRealTimers());
 
 describe("AutosaveManager", () => {
+  it("invalidates detail reads when an idle document is reconciled externally", () => {
+    const manager = new AutosaveManager({
+      serialize: serializeReplacement,
+      send: async () => { throw new Error("not used"); },
+      resolve: async () => original(),
+      onDocument: () => undefined,
+      onState: () => undefined,
+      onConflict: () => undefined,
+    });
+    const before = manager.getVersionStamp(original().id);
+
+    expect(manager.reconcileExternal({ ...original(), revision: 2, scheduled_at: "2026-08-18T08:00:00Z" })).toBe(true);
+
+    expect(manager.getVersionStamp(original().id)).not.toBe(before);
+    manager.dispose();
+  });
+
   it("rebases a debounced draft onto an external schedule update", async () => {
     vi.useFakeTimers();
     const bodies: string[] = [];
