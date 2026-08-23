@@ -8,6 +8,7 @@ type Props = {
   onOpen: (id: string) => void;
   onSchedule: (id: string, day: string | undefined) => void;
   blockedIds?: ReadonlySet<string>;
+  pendingIds?: ReadonlySet<string>;
   error?: string;
 };
 
@@ -27,7 +28,7 @@ function monthGrid(month: Date) {
   return Array.from({ length: 42 }, (_, index) => new Date(start.getFullYear(), start.getMonth(), start.getDate() + index));
 }
 
-export default function Calendar({ items, onOpen, onSchedule, blockedIds = new Set(), error }: Props) {
+export default function Calendar({ items, onOpen, onSchedule, blockedIds = new Set(), pendingIds = new Set(), error }: Props) {
   const [month, setMonth] = useState(() => {
     const today = new Date();
     return new Date(today.getFullYear(), today.getMonth(), 1);
@@ -63,11 +64,13 @@ export default function Calendar({ items, onOpen, onSchedule, blockedIds = new S
 
   function chip(item: ContentSummary, inTray: boolean) {
     const scheduleBlocked = blockedIds.has(item.id);
+    const schedulePending = pendingIds.has(item.id);
     return (
       <button
         key={item.id}
         className={`calendar-chip ${dragging === item.id ? "dragging" : ""} ${scheduleBlocked ? "schedule-blocked" : ""}`}
         draggable={!scheduleBlocked}
+        disabled={schedulePending}
         onDragStart={(event) => {
           if (scheduleBlocked) return;
           // Firefox refuses to start a drag unless some data is set.

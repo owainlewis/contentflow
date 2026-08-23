@@ -1783,13 +1783,55 @@ describe("persistent ContentFlow workspace", () => {
     await user.selectOptions(move, `${tuesday.getFullYear()}-${String(tuesday.getMonth() + 1).padStart(2, "0")}-${String(tuesday.getDate()).padStart(2, "0")}`);
     await waitFor(() => expect(api.replaceGateStarted).toBe(1));
     expect((move as HTMLSelectElement).disabled).toBe(true);
+    const open = screen.getByRole("button", { name: "Open LinkedIn one" }) as HTMLButtonElement;
+    expect(open.disabled).toBe(true);
+    await user.click(open);
+    expect(window.location.pathname).toBe("/weekly");
     releaseMove();
     await waitFor(() => expect((screen.getByLabelText("Move LinkedIn one") as HTMLSelectElement).disabled).toBe(false));
+    expect((screen.getByRole("button", { name: "Open LinkedIn one" }) as HTMLButtonElement).disabled).toBe(false);
 
     await user.selectOptions(screen.getByLabelText("Move LinkedIn one"), `${wednesday.getFullYear()}-${String(wednesday.getMonth() + 1).padStart(2, "0")}-${String(wednesday.getDate()).padStart(2, "0")}`);
     await waitFor(() => expect(api.replaceBodies.length).toBe(2));
     await waitFor(() => expect(new Date(api.items.get(linkedin.id)!.scheduled_at!).toDateString()).toBe(wednesday.toDateString()));
     expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("locks the selected editor while its weekly move is pending", async () => {
+    const monday = new Date();
+    monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
+    monday.setHours(9, 0, 0, 0);
+    const tuesday = new Date(monday);
+    tuesday.setDate(monday.getDate() + 1);
+    const linkedin = { ...detail("linkedin"), scheduled_at: monday.toISOString() };
+    const api = new FakeAPI([linkedin]);
+    api.enforceRevisions = true;
+    let releaseMove = () => undefined;
+    api.replaceGate = new Promise<void>((resolve) => { releaseMove = resolve; });
+    vi.stubGlobal("fetch", api.fetch);
+    const user = userEvent.setup();
+    render(<Home />);
+    await screen.findByRole("heading", { name: "LinkedIn one" });
+    await user.click(screen.getByRole("button", { name: /^Weekly/ }));
+
+    await user.selectOptions(screen.getByLabelText("Move LinkedIn one"), `${tuesday.getFullYear()}-${String(tuesday.getMonth() + 1).padStart(2, "0")}-${String(tuesday.getDate()).padStart(2, "0")}`);
+    await waitFor(() => expect(api.replaceGateStarted).toBe(1));
+    await user.click(screen.getByRole("button", { name: /^All content/ }));
+
+    const post = await screen.findByLabelText("LinkedIn post");
+    expect(screen.getByRole("status").textContent).toContain("Updating schedule");
+    expect(post.closest(".editor-content")?.hasAttribute("inert")).toBe(true);
+    fireEvent.change(post, { target: { value: "Edit during move" } });
+    expect((post as HTMLTextAreaElement).value).toBe("");
+    await new Promise((resolve) => window.setTimeout(resolve, 850));
+    expect(api.replaceBodies).toHaveLength(1);
+
+    releaseMove();
+    await waitFor(() => expect(screen.queryByRole("status")).toBeNull());
+    expect(post.closest(".editor-content")?.hasAttribute("inert")).toBe(false);
+    await user.type(post, "Edit after move");
+    await waitFor(() => expect(api.replaceBodies).toHaveLength(2), { timeout: 2500 });
+    expect((api.items.get(linkedin.id)?.content as { body: string }).body).toBe("Edit after move");
   });
 
   it("reports a committed move accurately when its follow-up detail read fails", async () => {

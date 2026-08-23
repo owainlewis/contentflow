@@ -832,6 +832,7 @@ button, select { cursor: pointer; }
 .weekly-card.dragging { opacity: .45; }
 .weekly-card.schedule-blocked { cursor: wait; opacity: .62; }
 .weekly-card-open { min-width: 0; padding: 0; border: 0; color: var(--text-soft); background: transparent; text-align: left; }
+.weekly-card-open:disabled { cursor: wait; }
 .weekly-card-open strong, .weekly-card-open span { display: block; }
 .weekly-card-open strong { overflow: hidden; font-size: var(--font-label); font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
 .weekly-card-open span { margin-top: 2px; color: var(--text-muted); font-size: 10px; }

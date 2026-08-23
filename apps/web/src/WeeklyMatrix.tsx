@@ -10,6 +10,7 @@ type Props = {
   onOpen: (id: string) => void;
   onSchedule: (id: string, day: string | undefined) => void;
   blockedIds?: ReadonlySet<string>;
+  pendingIds?: ReadonlySet<string>;
   error?: string;
 };
 
@@ -31,7 +32,7 @@ function weekLabel(start: Date, end: Date) {
   return `${starts} – ${ends}`;
 }
 
-export default function WeeklyMatrix({ items, enabledTypes, onOpen, onSchedule, blockedIds = new Set(), error }: Props) {
+export default function WeeklyMatrix({ items, enabledTypes, onOpen, onSchedule, blockedIds = new Set(), pendingIds = new Set(), error }: Props) {
   const [weekStart, setWeekStart] = useState(() => mondayOf(new Date()));
   const [dragging, setDragging] = useState<string>();
   const [dragOver, setDragOver] = useState<string>();
@@ -74,6 +75,7 @@ export default function WeeklyMatrix({ items, enabledTypes, onOpen, onSchedule, 
 
   function card(item: ContentSummary) {
     const scheduleBlocked = blockedIds.has(item.id);
+    const schedulePending = pendingIds.has(item.id);
     return (
       <article
         key={item.id}
@@ -95,7 +97,7 @@ export default function WeeklyMatrix({ items, enabledTypes, onOpen, onSchedule, 
           window.setTimeout(() => { suppressOpen.current = false; }, 0);
         }}
       >
-        <button className="weekly-card-open" onClick={() => { if (!suppressOpen.current) onOpen(item.id); }} aria-label={`Open ${displayTitle(item)}`}>
+        <button className="weekly-card-open" disabled={schedulePending} onClick={() => { if (!suppressOpen.current) onOpen(item.id); }} aria-label={`Open ${displayTitle(item)}`}>
           <strong>{displayTitle(item)}</strong>
           <span>{statusLabels[item.status]}</span>
         </button>
