@@ -1900,13 +1900,16 @@ describe("persistent ContentFlow workspace", () => {
     expect(library.getAttribute("aria-hidden")).toBe("true");
     expect(library.hasAttribute("inert")).toBe(true);
     expect(window.localStorage.getItem("contentflow-library-collapsed")).toBe("true");
+    const expand = screen.getByRole("button", { name: "Expand content library" });
+    await waitFor(() => expect(document.activeElement).toBe(expand));
 
-    await user.click(screen.getByRole("button", { name: "Expand content library" }));
+    await user.click(expand);
 
     expect(document.querySelector(".app-shell")?.classList).not.toContain("library-is-collapsed");
     expect(library.hasAttribute("aria-hidden")).toBe(false);
     expect(library.hasAttribute("inert")).toBe(false);
     expect(window.localStorage.getItem("contentflow-library-collapsed")).toBe("false");
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("button", { name: "Collapse content library" })));
   });
 
   it("keeps the mobile content library available when desktop collapse is remembered", async () => {
