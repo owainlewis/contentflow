@@ -83,6 +83,15 @@ type LibraryFilters = { query: string; type: ContentType | "all"; status: Conten
 type Attachment = { id: string; kind: "image" | "video" | "pdf"; name: string; size: number };
 type ThumbnailPreview = { dataUrl?: string; requestId: string };
 
+class ScheduleLock {
+  private readonly ids = new Set<string>();
+
+  has(id: string) { return this.ids.has(id); }
+  add(id: string) { this.ids.add(id); }
+  remove(id: string) { this.ids.delete(id); }
+  snapshot(): ReadonlySet<string> { return new Set(this.ids); }
+}
+
 const enabledTypesKey = "contentflow-enabled-types";
 const sidebarCollapsedKey = "contentflow-sidebar-collapsed";
 const libraryCollapsedKey = "contentflow-library-collapsed";
@@ -281,7 +290,7 @@ export default function Home() {
   const requestSequence = useRef(0);
   const sessionGenerationRef = useRef(0);
   const activeFiltersRef = useRef<LibraryFilters>({ query: "", type: "all", status: "all" });
-  const schedulePendingRef = useRef(new Set<string>());
+  const [scheduleLock] = useState(() => new ScheduleLock());
 
   const refreshLibrary = useCallback(async (filtersOverride?: LibraryFilters) => {
     const sequence = ++requestSequence.current;
@@ -743,7 +752,7 @@ export default function Home() {
   }
 
   function updateSelected(change: (current: ContentDetail) => ContentDetail) {
-    if (!selected || pendingLifecycle?.id === selected.id || schedulePendingIds.has(selected.id)) return;
+    if (!selected || pendingLifecycle?.id === selected.id || scheduleLock.has(selected.id)) return;
     const next = change(selected);
     setSelected(next);
     setAllSummaries((items) => items.map((item) => item.id === next.id ? { ...item, working_title: next.working_title, status: next.status, updated_at: new Date().toISOString() } : item));
@@ -845,13 +854,13 @@ export default function Home() {
   // editor queue to become idle, then rebases that queue onto the saved result.
   async function rescheduleItem(id: string, day: string | undefined) {
     if (csrfToken === undefined) return;
-    if (schedulePendingRef.current.has(id)) return;
+    if (scheduleLock.has(id)) return;
     if (autosaveRef.current?.isBusy(id)) {
       setCalendarError("Wait for the current edit to finish saving before you move this item.");
       return;
     }
-    schedulePendingRef.current.add(id);
-    setSchedulePendingIds(new Set(schedulePendingRef.current));
+    scheduleLock.add(id);
+    setSchedulePendingIds(scheduleLock.snapshot());
     setCalendarError("");
     try {
       let detail: ContentDetail;
@@ -891,8 +900,8 @@ export default function Home() {
       }
       if (refreshFailed) setCalendarError("The item was moved, but its latest details could not be refreshed. Reload to confirm.");
     } finally {
-      schedulePendingRef.current.delete(id);
-      setSchedulePendingIds(new Set(schedulePendingRef.current));
+      scheduleLock.remove(id);
+      setSchedulePendingIds(scheduleLock.snapshot());
     }
   }
 
@@ -1206,6 +1215,13 @@ export default function Home() {
       <div className="nav-section"><p className="nav-label">Content types</p>{enabledTypes.map((type) => <button key={type} className={`nav-item ${typeFilter === type ? "active" : ""}`} onClick={() => { setTypeFilter(type); navigate("workspace"); }} title={sidebarCollapsed ? typeMeta[type].label : undefined}><span className="nav-type-icon" style={{ color: typeMeta[type].color }}><TypeIcon type={type} /></span><span>{typeMeta[type].label}</span><span className="nav-count">{counts[type]}</span></button>)}</div>
       <div className="sidebar-bottom"><button className={`nav-item ${view === "settings" ? "active" : ""}`} onClick={() => navigate("settings")} title={sidebarCollapsed ? "Settings" : undefined}><SettingsIcon size={18} /><span>Settings</span></button><div className="profile-row"><div className="avatar">OL</div><div><strong>Owain Lewis</strong><span>Personal workspace</span></div><MoreHorizontal size={17} /></div></div>
     </aside>
+
+    <nav className="mobile-view-nav" aria-label="Mobile navigation">
+      <button className={view === "workspace" ? "active" : ""} aria-current={view === "workspace" ? "page" : undefined} aria-label="Open all content" onClick={() => { setTypeFilter("all"); navigate("workspace"); }}><Inbox size={18} /><span>Content</span></button>
+      <button className={view === "weekly" ? "active" : ""} aria-current={view === "weekly" ? "page" : undefined} aria-label="Open weekly view" onClick={() => navigate("weekly")}><LayoutGrid size={18} /><span>Weekly</span></button>
+      <button className={view === "calendar" ? "active" : ""} aria-current={view === "calendar" ? "page" : undefined} aria-label="Open calendar view" onClick={() => navigate("calendar")}><CalendarDays size={18} /><span>Calendar</span></button>
+      <button className={view === "settings" ? "active" : ""} aria-current={view === "settings" ? "page" : undefined} aria-label="Open settings view" onClick={() => navigate("settings")}><SettingsIcon size={18} /><span>Settings</span></button>
+    </nav>
 
     {view === "workspace" && <>
     <section id="content-library" ref={libraryPanelRef} className={`library-panel ${libraryOpen ? "open" : ""}`} aria-label="Content library" aria-hidden={isCompact ? !libraryOpen : libraryCollapsed || undefined} inert={isCompact ? !libraryOpen : libraryCollapsed}>

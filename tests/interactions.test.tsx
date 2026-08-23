@@ -1670,6 +1670,28 @@ describe("persistent ContentFlow workspace", () => {
     expect(window.location.pathname).toBe("/");
   });
 
+  it("keeps every top-level view reachable from compact navigation", async () => {
+    const api = new FakeAPI([detail("linkedin")]);
+    vi.stubGlobal("fetch", api.fetch);
+    const user = userEvent.setup();
+    render(<Home />);
+    await screen.findByRole("heading", { name: "LinkedIn one" });
+
+    await user.click(screen.getByRole("button", { name: "Open weekly view" }));
+    expect(await screen.findByRole("heading", { name: "Weekly matrix" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Open weekly view" }).getAttribute("aria-current")).toBe("page");
+
+    await user.click(screen.getByRole("button", { name: "Open calendar view" }));
+    expect(await screen.findByRole("heading", { name: "Calendar" })).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: "Open settings view" }));
+    expect(await screen.findByRole("heading", { name: "Settings" })).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: "Open all content" }));
+    expect(await screen.findByRole("heading", { name: "LinkedIn one" })).toBeTruthy();
+    expect(window.location.pathname).toBe("/");
+  });
+
   it("opens the calendar directly from its URL", async () => {
     const api = new FakeAPI([detail("linkedin")]);
     vi.stubGlobal("fetch", api.fetch);

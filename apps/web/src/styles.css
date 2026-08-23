@@ -655,6 +655,7 @@ button, select { cursor: pointer; }
 .delete-button { display: flex; align-items: center; gap: 7px; padding: 6px 8px; border: 0; border-radius: 6px; color: var(--text-muted); background: transparent; font-size: var(--font-label); }
 .delete-button:hover { color: #ff7d7d; background: rgba(255,90,90,.06); }
 .mobile-app-header { display: none; }
+.mobile-view-nav { display: none; }
 
 /* The library is optional on desktop so the editor can use the full writing
    width. Mobile keeps the same temporary drawer regardless of this setting. */
@@ -713,12 +714,16 @@ button, select { cursor: pointer; }
 @media (max-width: 900px) {
   .app-shell { display: block; min-height: 0; }
   .sidebar { display: none; }
+  .mobile-view-nav { position: fixed; z-index: 9; right: 0; bottom: 0; left: 0; height: 58px; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border-top: 1px solid var(--line); background: var(--panel); }
+  .mobile-view-nav button { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; padding: 4px; border: 0; color: var(--text-muted); background: transparent; font-size: 10px; font-weight: 620; }
+  .mobile-view-nav button.active { color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent); }
+  .mobile-view-nav button:focus-visible { outline: 2px solid var(--accent); outline-offset: -3px; }
   .library-panel, .library-is-collapsed .library-panel { position: fixed; z-index: 10; inset: 0; width: min(390px, 100%); display: flex; visibility: visible; transform: translateX(-103%); border-right: 1px solid var(--line); box-shadow: 20px 0 55px rgba(0,0,0,.36); transition: transform .22s ease; }
   .library-panel.open { transform: translateX(0); }
   .mobile-close { display: inline-grid; margin: 0 1px 0 -8px; }
   .library-collapse { display: none; }
   .compact-new { margin-left: auto; }
-  .editor-panel { height: 100vh; }
+  .editor-panel { height: calc(100vh - 58px); }
   .mobile-app-header { height: 54px; flex: 0 0 auto; display: flex; align-items: center; gap: 9px; padding: 0 12px; border-bottom: 1px solid var(--line); background: var(--panel); }
   .mobile-app-header .brand-mark { width: 25px; height: 25px; border-radius: 7px; }
   .mobile-app-header strong { font-size: 14px; }
@@ -836,7 +841,7 @@ button, select { cursor: pointer; }
 .weekly-card-open strong, .weekly-card-open span { display: block; }
 .weekly-card-open strong { overflow: hidden; font-size: var(--font-label); font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
 .weekly-card-open span { margin-top: 2px; color: var(--text-muted); font-size: 10px; }
-.weekly-card-move { display: block; min-width: 0; }
+.weekly-card-move { position: relative; display: block; min-width: 0; }
 .weekly-card-move select { width: 100%; height: 23px; padding: 0 5px; border: 1px solid var(--line-soft); border-radius: 4px; color: var(--text-muted); background: var(--control); font-size: 10px; }
 .weekly-help { margin: 11px 1px 0; color: var(--text-muted); font-size: var(--font-label); }
 
@@ -846,7 +851,7 @@ button, select { cursor: pointer; }
 }
 
 @media (max-width: 900px) {
-  .page { grid-column: auto; height: 100vh; padding: 22px 18px 32px; }
+  .page { grid-column: auto; height: calc(100vh - 58px); padding: 22px 18px 32px; }
   .settings-body { grid-template-columns: minmax(0, 1fr); }
   .settings-nav { position: static; grid-auto-flow: column; overflow-x: auto; }
   .calendar-day { min-height: 78px; }
