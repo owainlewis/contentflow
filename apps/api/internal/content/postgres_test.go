@@ -3,6 +3,7 @@ package content
 import (
 	"context"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
@@ -147,6 +148,48 @@ func TestPostgresStoreEnforcesRevisionsAndReplaysOperations(t *testing.T) {
 	}
 	if _, err := service.Get(ctx, "workspace", id); err == nil {
 		t.Fatal("deleted item stayed readable")
+	}
+}
+
+func TestPostgresStoreReplaysConcurrentIdenticalOperations(t *testing.T) {
+	store, _ := newPostgresStore(t)
+	service := NewService(store)
+	operationID := testOperationID()
+	request := CreateRequest{
+		Type: TypeX, WorkingTitle: "Concurrent", Status: StatusDraft,
+		OperationID: operationID, Content: XContent{Body: "same body"},
+	}
+	const callers = 8
+	results := make(chan MutationResult, callers)
+	errorsByCaller := make(chan error, callers)
+	var group sync.WaitGroup
+	for range callers {
+		group.Add(1)
+		go func() {
+			defer group.Done()
+			result, err := service.Create(context.Background(), "workspace", request, "same-bytes")
+			results <- result
+			errorsByCaller <- err
+		}()
+	}
+	group.Wait()
+	close(results)
+	close(errorsByCaller)
+	for err := range errorsByCaller {
+		if err != nil {
+			t.Fatalf("concurrent create failed: %v", err)
+		}
+	}
+	var itemID string
+	for result := range results {
+		if len(result.ItemIDs) != 1 {
+			t.Fatalf("unexpected result: %#v", result)
+		}
+		if itemID == "" {
+			itemID = result.ItemIDs[0]
+		} else if result.ItemIDs[0] != itemID {
+			t.Fatalf("operation created both %s and %s", itemID, result.ItemIDs[0])
+		}
 	}
 }
 

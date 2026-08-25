@@ -41,6 +41,11 @@ const (
 	preAuthLookupGlobalLimit    = 1000
 	preAuthLookupMaxClients     = 4096
 	preAuthLookupRateWindow     = time.Minute
+	passwordClientRateLimit     = 10
+	passwordAccountRateLimit    = 10
+	passwordGlobalRateLimit     = 60
+	passwordRateWindow          = time.Minute
+	passwordHashConcurrency     = 2
 )
 
 var allowedScopes = []Scope{ScopeContentRead, ScopeContentWrite, ScopeAssetsWrite}
@@ -64,6 +69,7 @@ type Service struct {
 	sealer         cipher.AEAD
 	secureCookies  bool
 	preAuthLimiter *lookupLimiter
+	passwordSlots  chan struct{}
 }
 
 type Principal struct {
@@ -105,6 +111,7 @@ func New(config Config, provider OAuthProvider, store Store) (*Service, error) {
 		config: config, provider: provider, store: store, now: time.Now, random: rand.Read,
 		entropy: ulid.Monotonic(rand.Reader, 0), sealer: sealer, secureCookies: origin.Scheme == "https",
 		preAuthLimiter: newLookupLimiter(preAuthLookupClientLimit, preAuthLookupGlobalLimit, preAuthLookupMaxClients, preAuthLookupRateWindow),
+		passwordSlots:  make(chan struct{}, passwordHashConcurrency),
 	}, nil
 }
 
@@ -223,10 +230,6 @@ func (s *Service) issueSession(response http.ResponseWriter, request *http.Reque
 // deliberately indistinguishable: an unknown account and a wrong password
 // return the same error after the same amount of work.
 func (s *Service) HandlePasswordLogin(response http.ResponseWriter, request *http.Request) {
-	if !s.allowPreAuthentication(request) {
-		writeError(response, http.StatusTooManyRequests, "rate_limit_exceeded")
-		return
-	}
 	var credentials struct {
 		Email    string `json:"email"`
 		Password string `json:"password"`
@@ -239,6 +242,15 @@ func (s *Service) HandlePasswordLogin(response http.ResponseWriter, request *htt
 		writeError(response, http.StatusUnauthorized, "invalid_credentials")
 		return
 	}
+	allowed, err := s.allowPasswordAuthentication(request, credentials.Email)
+	if err != nil {
+		writeError(response, http.StatusServiceUnavailable, "authentication_unavailable")
+		return
+	}
+	if !allowed {
+		writeError(response, http.StatusTooManyRequests, "rate_limit_exceeded")
+		return
+	}
 
 	user, err := s.store.UserByEmail(request.Context(), credentials.Email)
 	if err != nil && !errors.Is(err, ErrNotFound) {
@@ -248,6 +260,13 @@ func (s *Service) HandlePasswordLogin(response http.ResponseWriter, request *htt
 	storedHash := user.PasswordHash
 	if errors.Is(err, ErrNotFound) {
 		storedHash = dummyPasswordHash
+	}
+	select {
+	case s.passwordSlots <- struct{}{}:
+		defer func() { <-s.passwordSlots }()
+	default:
+		writeError(response, http.StatusTooManyRequests, "rate_limit_exceeded")
+		return
 	}
 	matched, hashErr := VerifyPassword(storedHash, credentials.Password)
 	if hashErr != nil || !matched || errors.Is(err, ErrNotFound) {
@@ -259,6 +278,15 @@ func (s *Service) HandlePasswordLogin(response http.ResponseWriter, request *htt
 		return
 	}
 	writeJSON(response, http.StatusOK, map[string]any{"status": "signed_in"})
+}
+
+func (s *Service) allowPasswordAuthentication(request *http.Request, email string) (bool, error) {
+	buckets := []RateLimitBucket{
+		{ID: credentialKey("password-client:" + requestClientIdentity(request)), Limit: passwordClientRateLimit},
+		{ID: credentialKey("password-account:" + NormalizeEmail(email)), Limit: passwordAccountRateLimit},
+		{ID: credentialKey("password-global:" + s.config.WorkspaceID), Limit: passwordGlobalRateLimit},
+	}
+	return s.store.AllowRequests(request.Context(), buckets, s.now(), passwordRateWindow)
 }
 
 func (s *Service) HandleSession(response http.ResponseWriter, request *http.Request) {

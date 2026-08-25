@@ -75,6 +75,7 @@ func TestDecodeBatchEnforcesOneKeyBoundariesAndStandaloneItems(t *testing.T) {
 		{"too many", `{"operation_id":"` + operationID + `","items":[` + strings.Join(tooMany, ",") + `]}`, "invalid_batch_size"},
 		{"per-item operation", `{"operation_id":"` + operationID + `","items":[{"type":"x","working_title":"Draft","status":"draft","operation_id":"` + testOperationID() + `","content":{"body":"post"}}]}`, "invalid_request"},
 		{"invalid later item", `{"operation_id":"` + operationID + `","items":[` + item + `,{"type":"x","working_title":"Draft","status":"nonsense","content":{"body":"post"}}]}`, "invalid_status"},
+		{"invalid scheduled date", `{"operation_id":"` + operationID + `","items":[{"type":"x","working_title":"Draft","status":"draft","scheduled_at":"0001-01-01T00:00:00Z","content":{"body":"post"}}]}`, "invalid_scheduled_at"},
 		{"youtube sections", `{"operation_id":"` + operationID + `","items":[{"type":"youtube","working_title":"Video","status":"draft","content":{"transcript":"spoken","sections":[{"position":0,"title":"Intro","body":"script"}]}}]}`, "batch_item_not_standalone"},
 	}
 	for _, test := range invalid {

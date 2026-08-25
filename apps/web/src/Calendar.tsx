@@ -66,11 +66,11 @@ export default function Calendar({ items, onOpen, onSchedule, blockedIds = new S
     const scheduleBlocked = blockedIds.has(item.id);
     const schedulePending = pendingIds.has(item.id);
     return (
-      <button
+      <div
         key={item.id}
         className={`calendar-chip ${dragging === item.id ? "dragging" : ""} ${scheduleBlocked ? "schedule-blocked" : ""}`}
         draggable={!scheduleBlocked}
-        disabled={schedulePending}
+        aria-busy={schedulePending || undefined}
         onDragStart={(event) => {
           if (scheduleBlocked) return;
           // Firefox refuses to start a drag unless some data is set.
@@ -79,13 +79,20 @@ export default function Calendar({ items, onOpen, onSchedule, blockedIds = new S
           setDragging(item.id);
         }}
         onDragEnd={() => { setDragging(undefined); setDragOver(undefined); }}
-        onClick={() => onOpen(item.id)}
-        title={scheduleBlocked ? `${displayTitle(item)} — wait for the current save before moving` : `${displayTitle(item)} — open`}
-        aria-label={`${displayTitle(item)}${inTray ? ", unscheduled" : ""}`}
       >
-        <span style={{ color: typeMeta[item.type].color }}><TypeIcon type={item.type} size={13} /></span>
-        <span className="calendar-chip-title">{displayTitle(item)}</span>
-      </button>
+        <button className="calendar-chip-open" disabled={schedulePending} onClick={() => onOpen(item.id)} title={`${displayTitle(item)} — open`} aria-label={`${displayTitle(item)}${inTray ? ", unscheduled" : ""}`}>
+          <span style={{ color: typeMeta[item.type].color }}><TypeIcon type={item.type} size={13} /></span>
+          <span className="calendar-chip-title">{displayTitle(item)}</span>
+        </button>
+        <input
+          className="calendar-chip-date"
+          type="date"
+          value={item.scheduled_at ? dayKey(new Date(item.scheduled_at)) : ""}
+          aria-label={`Schedule ${displayTitle(item)}`}
+          disabled={scheduleBlocked}
+          onChange={(event) => onSchedule(item.id, event.target.value || undefined)}
+        />
+      </div>
     );
   }
 
@@ -139,7 +146,7 @@ export default function Calendar({ items, onOpen, onSchedule, blockedIds = new S
           onDrop={(event) => { event.preventDefault(); drop(event, undefined); }}
         >
           <div className="calendar-tray-header"><CalendarDays size={15} /><strong>Unscheduled</strong><span>{unscheduled.length}</span></div>
-          <p className="settings-hint">Drag a piece onto a day to plan it. Drag it back here to unschedule.</p>
+          <p className="settings-hint">Drag a piece onto a day, or use its date control. Clear the date to unschedule it.</p>
           <div className="calendar-tray-items">
             {unscheduled.map((item) => chip(item, true))}
             {!unscheduled.length && <p className="calendar-tray-empty">Everything is scheduled.</p>}

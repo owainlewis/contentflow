@@ -83,7 +83,7 @@ export default function Settings({ theme, onThemeChange, enabledTypes, onToggleT
               <p className="settings-hint">Your workspace identity, as reported by the API.</p>
               <dl className="settings-facts">
                 <div><dt>Workspace</dt><dd>{workspaceId ?? "Unknown"}</dd></div>
-                <div><dt>Signed in as</dt><dd>Owain Lewis</dd></div>
+                <div><dt>Session</dt><dd>Authenticated owner</dd></div>
               </dl>
             </section>
           )}

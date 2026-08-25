@@ -27,11 +27,13 @@ import (
 )
 
 const (
-	shutdownTimeout                = 10 * time.Second
-	oidcDiscoveryTimeout           = 5 * time.Second
-	requestReadTimeout             = 10 * time.Second
+	shutdownTimeout               = 10 * time.Second
+	oidcDiscoveryTimeout          = 5 * time.Second
+	requestReadTimeout            = 10 * time.Second
 	databaseReadinessCacheTTL     = 5 * time.Second
 	databaseReadinessCheckTimeout = 2 * time.Second
+	databaseCleanupInterval       = 6 * time.Hour
+	databaseCleanupTimeout        = 30 * time.Second
 )
 
 func main() {
@@ -93,6 +95,10 @@ func run(ctx context.Context, cfg config.Config) error {
 		return fmt.Errorf("connect to PostgreSQL: %w", err)
 	}
 	defer pool.Close()
+	stopCleanupWorker := startCleanupWorker(ctx, databaseCleanupInterval, func(cleanupContext context.Context, now time.Time) (int64, error) {
+		return database.Cleanup(cleanupContext, pool, now)
+	})
+	defer stopCleanupWorker()
 
 	checker := health.Dependencies{
 		AssetDirectory: cfg.AssetDirectory,
@@ -168,6 +174,39 @@ func run(ctx context.Context, cfg config.Config) error {
 		}
 	}
 	return runErr
+}
+
+func startCleanupWorker(ctx context.Context, interval time.Duration, cleanup func(context.Context, time.Time) (int64, error)) func() {
+	workerContext, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		runCleanupWorker(workerContext, interval, cleanup)
+	}()
+	return func() {
+		cancel()
+		<-done
+	}
+}
+
+func runCleanupWorker(ctx context.Context, interval time.Duration, cleanup func(context.Context, time.Time) (int64, error)) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		cleanupContext, cancel := context.WithTimeout(ctx, databaseCleanupTimeout)
+		removed, err := cleanup(cleanupContext, time.Now().UTC())
+		cancel()
+		if err != nil && ctx.Err() == nil {
+			slog.Error("database expiry cleanup failed", "error", err)
+		} else if removed > 0 {
+			slog.Info("database expiry cleanup completed", "rows_removed", removed)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
 }
 
 func newHTTPServer(address string, handler http.Handler) *http.Server {
