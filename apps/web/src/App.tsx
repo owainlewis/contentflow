@@ -672,15 +672,13 @@ export default function Home() {
 
   function toggleLibrary() {
     libraryToggleRequestedRef.current = true;
-    setLibraryCollapsed((current) => {
-      const next = !current;
-      try {
-        window.localStorage.setItem(libraryCollapsedKey, String(next));
-      } catch {
-        // Collapse still applies for this session.
-      }
-      return next;
-    });
+    const next = !libraryCollapsed;
+    setLibraryCollapsed(next);
+    try {
+      window.localStorage.setItem(libraryCollapsedKey, String(next));
+    } catch {
+      // Collapse still applies for this session.
+    }
   }
 
   function setThemeChoice(next: Theme) {
