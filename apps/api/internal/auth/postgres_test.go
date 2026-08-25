@@ -131,8 +131,8 @@ func TestPostgresRateLimitsAdmitUntilTheLimitAndResetPerWindow(t *testing.T) {
 func TestPostgresRateLimitHandlesConcurrentRequests(t *testing.T) {
 	store := newPostgresStore(t)
 	now := time.Date(2026, 8, 15, 12, 0, 0, 0, time.UTC)
-	const requests = 12
-	const limit = 5
+	const requests = 64
+	const limit = 25
 	results := make(chan bool, requests)
 	errorsByRequest := make(chan error, requests)
 	var group sync.WaitGroup
