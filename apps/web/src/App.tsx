@@ -82,6 +82,7 @@ type ThumbnailPreview = { dataUrl?: string; requestId: string };
 
 const enabledTypesKey = "contentflow-enabled-types";
 const sidebarCollapsedKey = "contentflow-sidebar-collapsed";
+const libraryCollapsedKey = "contentflow-library-collapsed";
 
 // Preferences live in localStorage beside the theme. They are per-browser, not
 // per-account, because the API has no settings resource to store them in.
@@ -102,6 +103,14 @@ function readEnabledTypes(): ContentType[] {
 function readSidebarCollapsed(): boolean {
   try {
     return window.localStorage.getItem(sidebarCollapsedKey) === "true";
+  } catch {
+    return false;
+  }
+}
+
+function readLibraryCollapsed(): boolean {
+  try {
+    return window.localStorage.getItem(libraryCollapsedKey) === "true";
   } catch {
     return false;
   }
@@ -228,6 +237,7 @@ export default function Home() {
   const [workspaceId, setWorkspaceId] = useState<string>();
   const [enabledTypes, setEnabledTypes] = useState<ContentType[]>(readEnabledTypes);
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(readSidebarCollapsed);
+  const [libraryCollapsed, setLibraryCollapsed] = useState<boolean>(readLibraryCollapsed);
   const [createPending, setCreatePending] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [libraryOpen, setLibraryOpen] = useState(false);
@@ -240,11 +250,16 @@ export default function Home() {
   const [actionError, setActionError] = useState("");
   const [filterError, setFilterError] = useState("");
   const [expiryClock, setExpiryClock] = useState(0);
+  const [searchFocusRequest, setSearchFocusRequest] = useState(0);
   const [attachments, setAttachments] = useState<Record<string, Attachment[]>>({});
   const [thumbnailPreviews, setThumbnailPreviews] = useState<Record<string, ThumbnailPreview>>({});
   const createModalRef = useRef<HTMLElement>(null);
   const deleteModalRef = useRef<HTMLElement>(null);
   const libraryPanelRef = useRef<HTMLElement>(null);
+  const libraryCollapseButtonRef = useRef<HTMLButtonElement>(null);
+  const libraryExpandButtonRef = useRef<HTMLButtonElement>(null);
+  const libraryToggleRequestedRef = useRef(false);
+  const searchFocusRequestedRef = useRef(false);
   const mobileLibraryButtonRef = useRef<HTMLButtonElement>(null);
   const libraryWasOpenRef = useRef(false);
   const searchRef = useRef<HTMLInputElement>(null);
@@ -502,7 +517,7 @@ export default function Home() {
     if (!panel) return;
     libraryWasOpenRef.current = true;
     const focusable = Array.from(panel.querySelectorAll<HTMLElement>('button:not([disabled]), input, textarea, select, [tabindex]:not([tabindex="-1"])'));
-    focusable[0]?.focus();
+    if (!searchFocusRequestedRef.current && !panel.contains(document.activeElement)) focusable[0]?.focus();
     function handleKey(event: KeyboardEvent) {
       if (event.key === "Escape") {
         event.preventDefault();
@@ -518,6 +533,23 @@ export default function Home() {
     document.addEventListener("keydown", handleKey);
     return () => document.removeEventListener("keydown", handleKey);
   }, [isCompact, libraryOpen]);
+
+  useEffect(() => {
+    if (!libraryToggleRequestedRef.current || isCompact) return;
+    libraryToggleRequestedRef.current = false;
+    (libraryCollapsed ? libraryExpandButtonRef : libraryCollapseButtonRef).current?.focus();
+  }, [isCompact, libraryCollapsed]);
+
+  useEffect(() => {
+    if (!searchFocusRequestedRef.current) return;
+    if (view !== "workspace") return;
+    const libraryAccessible = isCompact ? libraryOpen : !libraryCollapsed;
+    if (!libraryAccessible) return;
+    const search = searchRef.current;
+    if (!search) return;
+    search.focus();
+    if (document.activeElement === search) searchFocusRequestedRef.current = false;
+  }, [isCompact, libraryCollapsed, libraryOpen, searchFocusRequest, view]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => setTheme(document.documentElement.dataset.theme === "light" ? "light" : "dark"), 0);
@@ -551,7 +583,23 @@ export default function Home() {
       if (createOpen || deleteOpen) return;
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
         event.preventDefault();
-        searchRef.current?.focus();
+        searchFocusRequestedRef.current = true;
+        setSearchFocusRequest((request) => request + 1);
+        const compactNow = typeof window.matchMedia === "function" && window.matchMedia("(max-width: 900px)").matches;
+        if (view !== "workspace") {
+          if (window.location.pathname !== viewPaths.workspace) window.history.pushState({}, "", viewPaths.workspace);
+          setView("workspace");
+        }
+        if (compactNow && !libraryOpen) {
+          setLibraryOpen(true);
+        } else if (!compactNow && libraryCollapsed) {
+          setLibraryCollapsed(false);
+          try {
+            window.localStorage.setItem(libraryCollapsedKey, "false");
+          } catch {
+            // The library still opens for this session.
+          }
+        }
       } else if (!event.metaKey && !event.ctrlKey && !event.altKey && event.key.toLowerCase() === "n" && !(event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLSelectElement)) {
         event.preventDefault();
         // Mirrors the sidebar button this shortcut is labelled on: always ask.
@@ -560,7 +608,7 @@ export default function Home() {
     }
     document.addEventListener("keydown", shortcut);
     return () => document.removeEventListener("keydown", shortcut);
-  }, [createOpen, deleteOpen]);
+  }, [createOpen, deleteOpen, libraryCollapsed, libraryOpen, view]);
 
   const counts = useMemo(() => allSummaries.reduce<Record<ContentType, number>>((result, item) => {
     result[item.type] += 1;
@@ -624,6 +672,17 @@ export default function Home() {
     setSidebarCollapsed(next);
     try {
       window.localStorage.setItem(sidebarCollapsedKey, String(next));
+    } catch {
+      // Collapse still applies for this session.
+    }
+  }
+
+  function toggleLibrary() {
+    libraryToggleRequestedRef.current = true;
+    const next = !libraryCollapsed;
+    setLibraryCollapsed(next);
+    try {
+      window.localStorage.setItem(libraryCollapsedKey, String(next));
     } catch {
       // Collapse still applies for this session.
     }
@@ -1119,7 +1178,7 @@ export default function Home() {
   const selectedExpiry = selected ? expiry(selected.expires_at) : undefined;
   const lifecycleDisabled = currentSaveState !== "saved" || Boolean(pendingLifecycle) || Boolean(selectedExpiry?.expired);
 
-  return <main className={`app-shell ${sidebarCollapsed ? "sidebar-is-collapsed" : ""}`}>
+  return <main className={`app-shell ${sidebarCollapsed ? "sidebar-is-collapsed" : ""} ${libraryCollapsed ? "library-is-collapsed" : ""}`}>
     <aside className="sidebar" aria-label="Main navigation">
       <div className="brand-row"><div className="brand-mark"><Zap size={17} fill="currentColor" /></div><span className="brand-name">ContentFlow</span><button className="icon-button sidebar-collapse" onClick={toggleSidebar} aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"} aria-expanded={!sidebarCollapsed}>{sidebarCollapsed ? <PanelLeftOpen size={17} /> : <PanelLeftClose size={17} />}</button></div>
       <button className="new-content-button" onClick={() => setCreateOpen(true)} title={sidebarCollapsed ? "New content" : undefined}><Plus size={18} /><span>New content</span><span className="key-hint">N</span></button>
@@ -1129,8 +1188,8 @@ export default function Home() {
     </aside>
 
     {view === "workspace" && <>
-    <section ref={libraryPanelRef} className={`library-panel ${libraryOpen ? "open" : ""}`} aria-label="Content library" aria-hidden={isCompact && !libraryOpen ? true : undefined} inert={isCompact && !libraryOpen ? true : undefined}>
-      <div className="library-header"><button className="icon-button mobile-close" onClick={() => setLibraryOpen(false)} aria-label="Close library"><ArrowLeft size={19} /></button><div><p className="eyebrow">Workspace</p><h1>{typeFilter === "all" ? "All content" : typeMeta[typeFilter].label}</h1></div><button className="icon-button compact-new" onClick={startCreate} aria-label={createLabel}><Plus size={19} /></button></div>
+    <section id="content-library" ref={libraryPanelRef} className={`library-panel ${libraryOpen ? "open" : ""}`} aria-label="Content library" aria-hidden={isCompact ? !libraryOpen : libraryCollapsed || undefined} inert={isCompact ? !libraryOpen : libraryCollapsed}>
+      <div className="library-header"><button className="icon-button mobile-close" onClick={() => setLibraryOpen(false)} aria-label="Close library"><ArrowLeft size={19} /></button><div><p className="eyebrow">Workspace</p><h1>{typeFilter === "all" ? "All content" : typeMeta[typeFilter].label}</h1></div><button ref={libraryCollapseButtonRef} className="icon-button library-collapse" onClick={toggleLibrary} aria-label="Collapse content library" aria-controls="content-library" aria-expanded="true"><PanelLeftClose size={18} /></button><button className="icon-button compact-new" onClick={startCreate} aria-label={createLabel}><Plus size={19} /></button></div>
       <label className="search-box"><Search size={17} /><input ref={searchRef} value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search titles" aria-label="Search content titles" /><span className="key-hint">⌘ K</span></label>
       <div className="filter-row" aria-label="Filter by status"><button className={statusFilter === "all" ? "active" : ""} onClick={() => setStatusFilter("all")}>All</button>{contentStatuses.map((status) => <button key={status} className={statusFilter === status ? "active" : ""} onClick={() => setStatusFilter(status)}>{statusLabels[status]}</button>)}</div>
       {filterError && <div className="inline-error" role="alert">{filterError}</div>}
@@ -1144,7 +1203,7 @@ export default function Home() {
     <section className="editor-panel" aria-label="Content editor" aria-hidden={isCompact && libraryOpen ? true : undefined} inert={isCompact && libraryOpen ? true : undefined}>
       <header className="mobile-app-header"><button ref={mobileLibraryButtonRef} className="icon-button" onClick={() => setLibraryOpen(true)} aria-label="Open content library"><Menu size={20} /></button><div className="brand-mark"><Zap size={15} fill="currentColor" /></div><strong>ContentFlow</strong><button className="icon-button mobile-theme-toggle" onClick={toggleTheme} aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}>{theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}</button><button className="icon-button" onClick={startCreate} aria-label={createLabel}><Plus size={20} /></button></header>
       {selected ? <>
-        <div className="editor-toolbar"><div className="editor-context"><span className="type-pill" style={{ color: typeMeta[selected.type].color }}><TypeIcon type={selected.type} />{typeMeta[selected.type].label}</span><span className="toolbar-divider" /><label className="status-select"><span className={`status-dot ${selected.status}`} /><select aria-label="Content status" value={selected.status} disabled={Boolean(selectedPendingLifecycle) || Boolean(selectedExpiry?.expired)} onChange={(event) => updateSelected((current) => ({ ...current, status: event.target.value as ContentStatus }))}>{contentStatuses.map((status) => <option value={status} key={status}>{statusLabels[status]}</option>)}</select><ChevronDown size={14} /></label></div><div className="editor-actions"><span className={`saved-state ${currentSaveState}`} aria-live="polite">{currentSaveState === "saving" || currentSaveState === "retrying" ? <LoaderCircle className="spin" size={14} /> : currentSaveState === "conflict" || currentSaveState === "error" ? <AlertTriangle size={14} /> : <Check size={14} />}{saveLabel(currentSaveState)}</span></div></div>
+        <div className="editor-toolbar"><div className="editor-context">{libraryCollapsed && !isCompact && <button ref={libraryExpandButtonRef} className="icon-button editor-library-toggle" onClick={toggleLibrary} aria-label="Expand content library" aria-controls="content-library" aria-expanded="false"><PanelLeftOpen size={18} /></button>}<span className="type-pill" style={{ color: typeMeta[selected.type].color }}><TypeIcon type={selected.type} />{typeMeta[selected.type].label}</span><span className="toolbar-divider" /><label className="status-select"><span className={`status-dot ${selected.status}`} /><select aria-label="Content status" value={selected.status} disabled={Boolean(selectedPendingLifecycle) || Boolean(selectedExpiry?.expired)} onChange={(event) => updateSelected((current) => ({ ...current, status: event.target.value as ContentStatus }))}>{contentStatuses.map((status) => <option value={status} key={status}>{statusLabels[status]}</option>)}</select><ChevronDown size={14} /></label></div><div className="editor-actions"><span className={`saved-state ${currentSaveState}`} aria-live="polite">{currentSaveState === "saving" || currentSaveState === "retrying" ? <LoaderCircle className="spin" size={14} /> : currentSaveState === "conflict" || currentSaveState === "error" ? <AlertTriangle size={14} /> : <Check size={14} />}{saveLabel(currentSaveState)}</span></div></div>
         {foreignPendingLifecycle && <div className="inline-error" role="alert">Review the {foreignPendingLifecycle.action} conflict for “{foreignPendingLifecycleTitle ?? "another item"}” before continuing. <button onClick={() => { setActionError(""); setSelectedId(foreignPendingLifecycle.id); setLibraryOpen(false); }}>Review item</button></div>}
         {actionError && <div className="inline-error" role="alert">{actionError}</div>}
         <div className="editor-scroll"><article className="editor-document">
@@ -1153,7 +1212,7 @@ export default function Home() {
           <div className="editor-content" inert={Boolean(selectedPendingLifecycle) || Boolean(selectedExpiry?.expired)}>{selected.type === "youtube" ? renderYouTubeEditor() : renderPlainEditor()}</div>
         </article></div>
         <footer className="editor-footer"><span>{typeMeta[selected.type].description}</span><button className="delete-button" disabled={lifecycleDisabled} onClick={() => setDeleteOpen(true)}><Trash2 size={15} /> Delete</button></footer>
-      </> : <div className="editor-empty">{detailLoading ? <><LoaderCircle className="spin" /><p>Loading selected content…</p></> : detailError ? <><AlertTriangle /><h1>Could not open this item</h1><p role="alert">{detailError}</p><button className="primary-button" onClick={() => setDetailReload((value) => value + 1)}>Retry loading item</button></> : <><SquarePen size={28} /><h1>{allSummaries.length ? "Choose an item" : "Start writing"}</h1><p>{allSummaries.length ? "Select content from your library." : "Pick a format to create your first piece."}</p>{actionError && <p className="inline-error" role="alert">{actionError}</p>}<button className="primary-button" onClick={startCreate}><Plus size={16} /> {createLabel}</button></>}</div>}
+      </> : <div className="editor-empty">{libraryCollapsed && !isCompact && <button ref={libraryExpandButtonRef} className="icon-button editor-empty-library-toggle" onClick={toggleLibrary} aria-label="Expand content library" aria-controls="content-library" aria-expanded="false"><PanelLeftOpen size={18} /></button>}{detailLoading ? <><LoaderCircle className="spin" /><p>Loading selected content…</p></> : detailError ? <><AlertTriangle /><h1>Could not open this item</h1><p role="alert">{detailError}</p><button className="primary-button" onClick={() => setDetailReload((value) => value + 1)}>Retry loading item</button></> : <><SquarePen size={28} /><h1>{allSummaries.length ? "Choose an item" : "Start writing"}</h1><p>{allSummaries.length ? "Select content from your library." : "Pick a format to create your first piece."}</p>{actionError && <p className="inline-error" role="alert">{actionError}</p>}<button className="primary-button" onClick={startCreate}><Plus size={16} /> {createLabel}</button></>}</div>}
     </section>
     </>}
 
