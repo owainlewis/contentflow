@@ -16,7 +16,6 @@ type Store interface {
 	Create(context.Context, Item, Receipt) (MutationResult, error)
 	BatchCreate(context.Context, []Item, Receipt) (MutationResult, error)
 	Replace(context.Context, Item, int64, Receipt) (MutationResult, error)
-	SetArchived(context.Context, string, string, int64, bool, time.Time, Receipt) (MutationResult, error)
 	Delete(context.Context, string, string, int64, time.Time, Receipt) (MutationResult, error)
 	Get(context.Context, string, string, time.Time) (Item, error)
 	List(context.Context, string, ListQuery, time.Time) ([]Summary, error)
@@ -61,12 +60,10 @@ func (s *Service) Create(ctx context.Context, workspaceID string, request Create
 	item := Item{
 		ID: id, WorkspaceID: workspaceID, Type: request.Type, Status: request.Status,
 		WorkingTitle: request.WorkingTitle, NormalizedWorkingTitle: NormalizeTitle(request.WorkingTitle),
-		Revision: 1, CreatedAt: now, UpdatedAt: now, ExpiresAt: now.Add(ContentLifetime), Content: contentValue,
+		Revision: 1, CreatedAt: now, UpdatedAt: now, ExpiresAt: now.Add(ContentLifetime),
+		ScheduledAt: request.ScheduledAt, Content: contentValue,
 	}
 	item.SearchableWorkingTitle = SearchableTitle(item.NormalizedWorkingTitle)
-	if err := validateEncodedSizes(item); err != nil {
-		return MutationResult{}, err
-	}
 	result := MutationResult{OperationID: request.OperationID, ItemIDs: []string{id}, Revisions: []int64{1}, ExpiresAt: []time.Time{item.ExpiresAt}, Status: "created"}
 	return s.store.Create(ctx, item, newReceipt(workspaceID, requestHash, "create", http.StatusCreated, result, now))
 }
@@ -95,21 +92,16 @@ func (s *Service) BatchCreate(ctx context.Context, workspaceID string, request B
 		item := Item{
 			ID: id, WorkspaceID: workspaceID, Type: requestItem.Type, Status: requestItem.Status,
 			WorkingTitle: requestItem.WorkingTitle, NormalizedWorkingTitle: NormalizeTitle(requestItem.WorkingTitle),
-			Revision: 1, CreatedAt: now, UpdatedAt: now, ExpiresAt: now.Add(ContentLifetime), Content: requestItem.Content,
+			Revision: 1, CreatedAt: now, UpdatedAt: now, ExpiresAt: now.Add(ContentLifetime),
+			ScheduledAt: requestItem.ScheduledAt, Content: requestItem.Content,
 		}
 		item.SearchableWorkingTitle = SearchableTitle(item.NormalizedWorkingTitle)
-		if err := validateEncodedSizes(item); err != nil {
-			return MutationResult{}, err
-		}
 		items[index] = item
 		result.ItemIDs[index] = id
 		result.Revisions[index] = 1
 		result.ExpiresAt[index] = item.ExpiresAt
 	}
 	receipt := newReceipt(workspaceID, requestHash, "batch_create", http.StatusCreated, result, now)
-	if err := validateReceiptSize(receipt); err != nil {
-		return MutationResult{}, err
-	}
 	return s.store.BatchCreate(ctx, items, receipt)
 }
 
@@ -142,35 +134,11 @@ func (s *Service) Replace(ctx context.Context, workspaceID, id string, request R
 		ID: current.ID, WorkspaceID: current.WorkspaceID, Type: current.Type, Status: request.Status,
 		WorkingTitle: request.WorkingTitle, NormalizedWorkingTitle: NormalizeTitle(request.WorkingTitle),
 		Revision: request.Revision + 1, CreatedAt: current.CreatedAt, UpdatedAt: now,
-		ExpiresAt: current.ExpiresAt, ArchivedAt: current.ArchivedAt, Content: contentValue,
+		ExpiresAt: current.ExpiresAt, ScheduledAt: request.ScheduledAt, Content: contentValue,
 	}
 	replacement.SearchableWorkingTitle = SearchableTitle(replacement.NormalizedWorkingTitle)
-	if err := validateEncodedSizes(replacement); err != nil {
-		return MutationResult{}, err
-	}
 	result := MutationResult{OperationID: request.OperationID, ItemIDs: []string{id}, Revisions: []int64{replacement.Revision}, ExpiresAt: []time.Time{replacement.ExpiresAt}, Status: "updated"}
 	return s.store.Replace(ctx, replacement, request.Revision, newReceipt(workspaceID, requestHash, "replace", http.StatusOK, result, now))
-}
-
-func (s *Service) SetArchived(ctx context.Context, workspaceID, id string, request RevisionRequest, archived bool, requestHash string) (MutationResult, error) {
-	if err := validateRevisionRequest(request); err != nil {
-		return MutationResult{}, err
-	}
-	now := s.canonicalNow()
-	if replay, found, err := s.store.Receipt(ctx, workspaceID, request.OperationID, requestHash, now); found || err != nil {
-		return replay, err
-	}
-	current, err := s.store.Get(ctx, workspaceID, id, now)
-	if err != nil {
-		return MutationResult{}, err
-	}
-	status := "restored"
-	operation := "restore"
-	if archived {
-		status, operation = "archived", "archive"
-	}
-	result := MutationResult{OperationID: request.OperationID, ItemIDs: []string{id}, Revisions: []int64{request.Revision + 1}, ExpiresAt: []time.Time{current.ExpiresAt}, Status: status}
-	return s.store.SetArchived(ctx, workspaceID, id, request.Revision, archived, now, newReceipt(workspaceID, requestHash, operation, http.StatusOK, result, now))
 }
 
 func (s *Service) Delete(ctx context.Context, workspaceID, id string, request RevisionRequest, requestHash string) (MutationResult, error) {

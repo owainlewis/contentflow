@@ -39,7 +39,7 @@ export type ContentSummary = {
   created_at: string;
   updated_at: string;
   expires_at: string;
-  archived_at?: string;
+  scheduled_at?: string;
   asset_counts: Record<string, number>;
 };
 
@@ -57,6 +57,7 @@ export type MutationResult = {
 
 type Session = {
   csrf_token: string;
+  workspace_id?: string;
 };
 
 export class ApiError extends Error {
@@ -152,7 +153,7 @@ export async function getContent(id: string, signal?: AbortSignal, requestTimeou
 export async function createContent(type: ContentType, csrfToken: string, operationId: string, requestTimeout = 10_000): Promise<MutationResult> {
   const body = JSON.stringify({
     type,
-    working_title: `Untitled ${typeLabel(type)}`,
+    working_title: "",
     status: "idea",
     operation_id: operationId,
     content: wireContent(type, emptyContent(type)),
@@ -162,12 +163,6 @@ export async function createContent(type: ContentType, csrfToken: string, operat
 
 export async function replaceContent(id: string, frozenBody: string, csrfToken: string, signal?: AbortSignal): Promise<MutationResult> {
   return request<MutationResult>(`/api/v1/content/${encodeURIComponent(id)}`, { ...mutationInit("PUT", frozenBody, csrfToken), signal });
-}
-
-export async function setArchived(id: string, revision: number, archived: boolean, csrfToken: string, operationId: string, requestTimeout = 10_000): Promise<MutationResult> {
-  const body = JSON.stringify({ operation_id: operationId, revision });
-  const action = archived ? "archive" : "restore";
-  return withRequestTimeout((signal) => request<MutationResult>(`/api/v1/content/${encodeURIComponent(id)}/${action}`, { ...mutationInit("POST", body, csrfToken), signal }), requestTimeout);
 }
 
 export async function deleteContent(id: string, revision: number, csrfToken: string, operationId: string, requestTimeout = 10_000): Promise<MutationResult> {
@@ -193,6 +188,7 @@ export function serializeReplacement(detail: ContentDetail, operationId: string)
     status: detail.status,
     operation_id: operationId,
     revision: detail.revision,
+    ...(detail.scheduled_at ? { scheduled_at: detail.scheduled_at } : {}),
     content: wireContent(detail.type, detail.content),
   });
 }

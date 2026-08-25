@@ -134,9 +134,6 @@ func TestBatchCreateIsAtomicIdempotentBoundedAndWorkspaceScoped(t *testing.T) {
 			t.Fatalf("receipt leaked %q: %s", forbidden, encoded)
 		}
 	}
-	if err := validateReceiptSize(receipt); err != nil {
-		t.Fatalf("50-item receipt exceeded Firestore limit: %v", err)
-	}
 
 	now = receipt.Expires
 	expiredRequest := BatchRequest{OperationID: operationID, Items: []BatchItemRequest{{Type: TypeEmail, WorkingTitle: "After receipt expiry", Status: StatusDraft, Content: EmailContent{Body: "new"}}}}
@@ -152,6 +149,58 @@ func (s failingBatchStore) BatchCreate(context.Context, []Item, Receipt) (Mutati
 	return MutationResult{}, unavailable(errors.New("transaction failed"))
 }
 
+func TestUntitledItemsAreCreatedAndExcludedFromTitleSearch(t *testing.T) {
+	ctx := context.Background()
+	service := NewService(NewMemoryStore())
+	created, err := service.Create(ctx, "workspace", CreateRequest{
+		Type: TypeX, WorkingTitle: "", Status: StatusDraft, OperationID: testOperationID(), Content: XContent{Body: "post"},
+	}, "untitled")
+	if err != nil {
+		t.Fatalf("untitled create failed: %v", err)
+	}
+	stored, err := service.Get(ctx, "workspace", created.ItemIDs[0])
+	if err != nil || stored.WorkingTitle != "" {
+		t.Fatalf("stored working title is %q: %v", stored.WorkingTitle, err)
+	}
+	matches, err := service.List(ctx, "workspace", ListQuery{TitlePrefix: NormalizeTitle("post")})
+	if err != nil || len(matches) != 0 {
+		t.Fatalf("untitled item matched a title search: %d items, %v", len(matches), err)
+	}
+}
+
+func TestScheduledDateRoundTripsAndClearsOnReplace(t *testing.T) {
+	ctx := context.Background()
+	service := NewService(NewMemoryStore())
+	scheduled := time.Date(2026, 9, 1, 9, 0, 0, 0, time.UTC)
+	created, err := service.Create(ctx, "workspace", CreateRequest{
+		Type: TypeX, WorkingTitle: "Planned", Status: StatusDraft, OperationID: testOperationID(),
+		ScheduledAt: &scheduled, Content: XContent{Body: "post"},
+	}, "scheduled")
+	if err != nil {
+		t.Fatalf("scheduled create failed: %v", err)
+	}
+	id := created.ItemIDs[0]
+	stored, err := service.Get(ctx, "workspace", id)
+	if err != nil || stored.ScheduledAt == nil || !stored.ScheduledAt.Equal(scheduled) {
+		t.Fatalf("scheduled date did not round trip: %#v, %v", stored, err)
+	}
+	if listed, err := service.List(ctx, "workspace", ListQuery{}); err != nil || len(listed) != 1 || listed[0].ScheduledAt == nil || !listed[0].ScheduledAt.Equal(scheduled) {
+		t.Fatalf("summary omitted the scheduled date: %#v, %v", listed, err)
+	}
+
+	// Omitting the field on replace clears it, matching the other optional fields.
+	if _, err := service.Replace(ctx, "workspace", id, ReplaceRequest{
+		CreateRequest: CreateRequest{Type: TypeX, WorkingTitle: "Planned", Status: StatusDraft, OperationID: testOperationID(), Content: XContent{Body: "post"}},
+		Revision:      1,
+	}, "unscheduled"); err != nil {
+		t.Fatalf("replace failed: %v", err)
+	}
+	cleared, err := service.Get(ctx, "workspace", id)
+	if err != nil || cleared.ScheduledAt != nil {
+		t.Fatalf("scheduled date survived replacement: %#v, %v", cleared, err)
+	}
+}
+
 func TestBatchValidationAndTransactionFailuresCreateNothing(t *testing.T) {
 	ctx := context.Background()
 	store := NewMemoryStore()
@@ -159,10 +208,10 @@ func TestBatchValidationAndTransactionFailuresCreateNothing(t *testing.T) {
 	invalidOperation := testOperationID()
 	invalid := BatchRequest{OperationID: invalidOperation, Items: []BatchItemRequest{
 		{Type: TypeX, WorkingTitle: "Valid", Status: StatusDraft, Content: XContent{Body: "post"}},
-		{Type: TypeX, WorkingTitle: "", Status: StatusDraft, Content: XContent{Body: "invalid"}},
+		{Type: TypeX, WorkingTitle: "Invalid", Status: "nonsense", Content: XContent{Body: "invalid"}},
 	}}
 	_, err := service.BatchCreate(ctx, "workspace", invalid, "invalid")
-	assertErrorCode(t, err, "working_title_required")
+	assertErrorCode(t, err, "invalid_status")
 	if len(store.items) != 0 || len(store.receipts) != 0 {
 		t.Fatalf("validation failure wrote state: %d items, %d receipts", len(store.items), len(store.receipts))
 	}
@@ -264,14 +313,9 @@ func TestFullReplacementSectionsTranscriptConflictsAndReceipts(t *testing.T) {
 		}
 	}
 
-	archiveOperation := testOperationID()
-	archived, err := service.SetArchived(ctx, "workspace", id, RevisionRequest{OperationID: archiveOperation, Revision: 3}, true, "archive")
-	if err != nil || archived.Revisions[0] != 4 {
-		t.Fatalf("archive: %#v, %v", archived, err)
-	}
-	archivedItem, err := service.Get(ctx, "workspace", id)
-	if err != nil || archivedItem.ArchivedAt == nil || !archivedItem.ExpiresAt.Equal(expiresAt) {
-		t.Fatalf("archive changed expiry: %#v, %v", archivedItem, err)
+	stored, err := service.Get(ctx, "workspace", id)
+	if err != nil || !stored.ExpiresAt.Equal(expiresAt) {
+		t.Fatalf("replacement changed expiry: %#v, %v", stored, err)
 	}
 	now = expiresAt
 	if _, err := service.Get(ctx, "workspace", id); err == nil {

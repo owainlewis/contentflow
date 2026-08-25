@@ -41,6 +41,11 @@ const (
 	preAuthLookupGlobalLimit    = 1000
 	preAuthLookupMaxClients     = 4096
 	preAuthLookupRateWindow     = time.Minute
+	passwordClientRateLimit     = 10
+	passwordAccountRateLimit    = 10
+	passwordGlobalRateLimit     = 60
+	passwordRateWindow          = time.Minute
+	passwordHashConcurrency     = 2
 )
 
 var allowedScopes = []Scope{ScopeContentRead, ScopeContentWrite, ScopeAssetsWrite}
@@ -64,6 +69,7 @@ type Service struct {
 	sealer         cipher.AEAD
 	secureCookies  bool
 	preAuthLimiter *lookupLimiter
+	passwordSlots  chan struct{}
 }
 
 type Principal struct {
@@ -105,6 +111,7 @@ func New(config Config, provider OAuthProvider, store Store) (*Service, error) {
 		config: config, provider: provider, store: store, now: time.Now, random: rand.Read,
 		entropy: ulid.Monotonic(rand.Reader, 0), sealer: sealer, secureCookies: origin.Scheme == "https",
 		preAuthLimiter: newLookupLimiter(preAuthLookupClientLimit, preAuthLookupGlobalLimit, preAuthLookupMaxClients, preAuthLookupRateWindow),
+		passwordSlots:  make(chan struct{}, passwordHashConcurrency),
 	}, nil
 }
 
@@ -142,7 +149,7 @@ func (s *Service) HandleLogin(response http.ResponseWriter, request *http.Reques
 		writeError(response, http.StatusInternalServerError, "authentication_unavailable")
 		return
 	}
-	attempt := LoginAttempt{ID: attemptID, State: credentialDocumentID(state), CodeVerifier: sealedVerifier, ExpiresAt: s.now().Add(10 * time.Minute)}
+	attempt := LoginAttempt{ID: attemptID, State: credentialKey(state), CodeVerifier: sealedVerifier, ExpiresAt: s.now().Add(10 * time.Minute)}
 	if err := s.store.SaveLoginAttempt(request.Context(), attempt); err != nil {
 		writeError(response, http.StatusServiceUnavailable, "authentication_unavailable")
 		return
@@ -167,7 +174,7 @@ func (s *Service) HandleCallback(response http.ResponseWriter, request *http.Req
 		writeError(response, http.StatusTooManyRequests, "rate_limit_exceeded")
 		return
 	}
-	attempt, err := s.store.TakeLoginAttempt(request.Context(), cookie.Value, credentialDocumentID(state), s.now())
+	attempt, err := s.store.TakeLoginAttempt(request.Context(), cookie.Value, credentialKey(state), s.now())
 	if err != nil {
 		if !errors.Is(err, ErrNotFound) {
 			writeError(response, http.StatusServiceUnavailable, "authentication_unavailable")
@@ -190,24 +197,96 @@ func (s *Service) HandleCallback(response http.ResponseWriter, request *http.Req
 		writeError(response, http.StatusForbidden, "owner_mismatch")
 		return
 	}
+	if !s.issueSession(response, request, s.config.WorkspaceID) {
+		return
+	}
+	s.clearCookie(response, loginCookieName, s.loginCookieSameSite())
+	http.Redirect(response, request, s.config.PublicOrigin+"/", http.StatusFound)
+}
+
+// issueSession mints a session and sets the cookie. It reports whether it
+// succeeded, having already written an error response when it did not.
+func (s *Service) issueSession(response http.ResponseWriter, request *http.Request, workspaceID string) bool {
 	sessionID, err := s.randomString(32)
 	if err != nil {
 		writeError(response, http.StatusInternalServerError, "authentication_unavailable")
-		return
+		return false
 	}
 	csrf, err := s.randomString(32)
 	if err != nil {
 		writeError(response, http.StatusInternalServerError, "authentication_unavailable")
+		return false
+	}
+	session := Session{ID: sessionID, WorkspaceID: workspaceID, CSRFToken: csrf, ExpiresAt: s.now().Add(24 * time.Hour)}
+	if err := s.store.SaveSession(request.Context(), session); err != nil {
+		writeError(response, http.StatusServiceUnavailable, "authentication_unavailable")
+		return false
+	}
+	s.setCookie(response, sessionCookieName, sessionID, session.ExpiresAt, http.SameSiteLaxMode)
+	return true
+}
+
+// HandlePasswordLogin signs a user in with an email and password. Failures are
+// deliberately indistinguishable: an unknown account and a wrong password
+// return the same error after the same amount of work.
+func (s *Service) HandlePasswordLogin(response http.ResponseWriter, request *http.Request) {
+	var credentials struct {
+		Email    string `json:"email"`
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(io.LimitReader(request.Body, 4<<10)).Decode(&credentials); err != nil {
+		writeError(response, http.StatusBadRequest, "invalid_request")
 		return
 	}
-	session := Session{ID: sessionID, WorkspaceID: s.config.WorkspaceID, CSRFToken: csrf, ExpiresAt: s.now().Add(24 * time.Hour)}
-	if err := s.store.SaveSession(request.Context(), session); err != nil {
+	if credentials.Email == "" || credentials.Password == "" {
+		writeError(response, http.StatusUnauthorized, "invalid_credentials")
+		return
+	}
+	allowed, err := s.allowPasswordAuthentication(request, credentials.Email)
+	if err != nil {
 		writeError(response, http.StatusServiceUnavailable, "authentication_unavailable")
 		return
 	}
-	s.clearCookie(response, loginCookieName, s.loginCookieSameSite())
-	s.setCookie(response, sessionCookieName, sessionID, session.ExpiresAt, http.SameSiteLaxMode)
-	http.Redirect(response, request, s.config.PublicOrigin+"/", http.StatusFound)
+	if !allowed {
+		writeError(response, http.StatusTooManyRequests, "rate_limit_exceeded")
+		return
+	}
+
+	user, err := s.store.UserByEmail(request.Context(), credentials.Email)
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		writeError(response, http.StatusServiceUnavailable, "authentication_unavailable")
+		return
+	}
+	storedHash := user.PasswordHash
+	if errors.Is(err, ErrNotFound) {
+		storedHash = dummyPasswordHash
+	}
+	select {
+	case s.passwordSlots <- struct{}{}:
+		defer func() { <-s.passwordSlots }()
+	default:
+		writeError(response, http.StatusTooManyRequests, "rate_limit_exceeded")
+		return
+	}
+	matched, hashErr := VerifyPassword(storedHash, credentials.Password)
+	if hashErr != nil || !matched || errors.Is(err, ErrNotFound) {
+		writeError(response, http.StatusUnauthorized, "invalid_credentials")
+		return
+	}
+
+	if !s.issueSession(response, request, user.WorkspaceID) {
+		return
+	}
+	writeJSON(response, http.StatusOK, map[string]any{"status": "signed_in"})
+}
+
+func (s *Service) allowPasswordAuthentication(request *http.Request, email string) (bool, error) {
+	buckets := []RateLimitBucket{
+		{ID: credentialKey("password-client:" + requestClientIdentity(request)), Limit: passwordClientRateLimit},
+		{ID: credentialKey("password-account:" + NormalizeEmail(email)), Limit: passwordAccountRateLimit},
+		{ID: credentialKey("password-global:" + s.config.WorkspaceID), Limit: passwordGlobalRateLimit},
+	}
+	return s.store.AllowRequests(request.Context(), buckets, s.now(), passwordRateWindow)
 }
 
 func (s *Service) HandleSession(response http.ResponseWriter, request *http.Request) {
@@ -364,11 +443,11 @@ func (s *Service) authenticate(request *http.Request) (Principal, int, string) {
 func (s *Service) allowLoginAttempt(request *http.Request) (bool, error) {
 	buckets := []RateLimitBucket{
 		{
-			ID:    credentialDocumentID("oauth-login-client:" + s.config.WorkspaceID + ":" + requestClientIdentity(request)),
+			ID:    credentialKey("oauth-login-client:" + s.config.WorkspaceID + ":" + requestClientIdentity(request)),
 			Limit: loginAttemptClientRateLimit,
 		},
 		{
-			ID:    credentialDocumentID("oauth-login-global:" + s.config.WorkspaceID),
+			ID:    credentialKey("oauth-login-global:" + s.config.WorkspaceID),
 			Limit: loginAttemptGlobalRateLimit,
 		},
 	}
@@ -376,7 +455,7 @@ func (s *Service) allowLoginAttempt(request *http.Request) (bool, error) {
 }
 
 func (s *Service) allowPreAuthentication(request *http.Request) bool {
-	clientID := credentialDocumentID("pre-auth-client:" + requestClientIdentity(request))
+	clientID := credentialKey("pre-auth-client:" + requestClientIdentity(request))
 	return s.preAuthLimiter.Allow(clientID, s.now())
 }
 

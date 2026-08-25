@@ -21,7 +21,6 @@ type summary struct {
 	CreatedAt    time.Time       `json:"created_at"`
 	UpdatedAt    time.Time       `json:"updated_at"`
 	ExpiresAt    time.Time       `json:"expires_at"`
-	ArchivedAt   *time.Time      `json:"archived_at,omitempty"`
 	AssetCounts  map[string]*int `json:"asset_counts"`
 }
 
@@ -38,7 +37,6 @@ type itemResponse struct {
 	CreatedAt    time.Time       `json:"created_at"`
 	UpdatedAt    time.Time       `json:"updated_at"`
 	ExpiresAt    time.Time       `json:"expires_at"`
-	ArchivedAt   *time.Time      `json:"archived_at,omitempty"`
 	Content      json.RawMessage `json:"content"`
 }
 
@@ -62,17 +60,13 @@ func renderList(destination io.Writer, raw []byte) error {
 
 func renderListStream(destination io.Writer, source io.Reader) error {
 	table := tabwriter.NewWriter(destination, 0, 4, 2, ' ', 0)
-	_, _ = fmt.Fprintln(table, "ID\tTYPE\tSTATUS\tREVISION\tARCHIVED\tASSETS\tWORKING TITLE")
+	_, _ = fmt.Fprintln(table, "ID\tTYPE\tSTATUS\tREVISION\tASSETS\tWORKING TITLE")
 	err := decodeListStream(source, func(item summary) error {
-		archived := "no"
-		if item.ArchivedAt != nil {
-			archived = "yes"
-		}
 		assets := 0
 		for _, count := range item.AssetCounts {
 			assets += *count
 		}
-		_, _ = fmt.Fprintf(table, "%s\t%s\t%s\t%d\t%s\t%d\t%s\n", item.ID, item.Type, item.Status, item.Revision, archived, assets, quoteHumanText(item.WorkingTitle))
+		_, _ = fmt.Fprintf(table, "%s\t%s\t%s\t%d\t%d\t%s\n", item.ID, item.Type, item.Status, item.Revision, assets, quoteHumanText(item.WorkingTitle))
 		return nil
 	})
 	if err != nil {
@@ -82,7 +76,7 @@ func renderListStream(destination io.Writer, source io.Reader) error {
 }
 
 func validSummary(item summary) bool {
-	if !isCanonicalULID(item.ID) || !validContentType(item.Type) || !validContentStatus(item.Status) || strings.TrimSpace(item.WorkingTitle) == "" || len([]byte(item.WorkingTitle)) > 500<<10 || item.Revision < 1 || item.CreatedAt.IsZero() || item.UpdatedAt.IsZero() || item.ExpiresAt.IsZero() || item.AssetCounts == nil {
+	if !isCanonicalULID(item.ID) || !validContentType(item.Type) || !validContentStatus(item.Status) || len([]byte(item.WorkingTitle)) > 500<<10 || item.Revision < 1 || item.CreatedAt.IsZero() || item.UpdatedAt.IsZero() || item.ExpiresAt.IsZero() || item.AssetCounts == nil {
 		return false
 	}
 	for _, count := range item.AssetCounts {
@@ -90,7 +84,7 @@ func validSummary(item summary) bool {
 			return false
 		}
 	}
-	return item.ArchivedAt == nil || !item.ArchivedAt.IsZero()
+	return true
 }
 
 func quoteHumanText(value string) string { return strconv.Quote(value) }
@@ -107,30 +101,26 @@ func renderItemForID(destination io.Writer, raw []byte, expectedID string) error
 		}
 		return err
 	}
-	archivedAt := "-"
-	if item.ArchivedAt != nil {
-		archivedAt = item.ArchivedAt.UTC().Format(time.RFC3339Nano)
-	}
 	var content bytes.Buffer
 	if err := json.Indent(&content, item.Content, "", "  "); err != nil {
 		return err
 	}
-	_, err = fmt.Fprintf(destination, "ID: %s\nType: %s\nStatus: %s\nWorking title: %s\nRevision: %d\nCreated at: %s\nUpdated at: %s\nExpires at: %s\nArchived at: %s\nContent:\n%s\n",
+	_, err = fmt.Fprintf(destination, "ID: %s\nType: %s\nStatus: %s\nWorking title: %s\nRevision: %d\nCreated at: %s\nUpdated at: %s\nExpires at: %s\nContent:\n%s\n",
 		item.ID, item.Type, item.Status, quoteHumanText(item.WorkingTitle), item.Revision,
-		item.CreatedAt.UTC().Format(time.RFC3339Nano), item.UpdatedAt.UTC().Format(time.RFC3339Nano), item.ExpiresAt.UTC().Format(time.RFC3339Nano), archivedAt, content.String())
+		item.CreatedAt.UTC().Format(time.RFC3339Nano), item.UpdatedAt.UTC().Format(time.RFC3339Nano), item.ExpiresAt.UTC().Format(time.RFC3339Nano), content.String())
 	return err
 }
 
 func decodeItemResponse(raw []byte) (itemResponse, error) {
 	var fields map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &fields); err != nil || explicitNull(fields, "archived_at") {
+	if err := json.Unmarshal(raw, &fields); err != nil {
 		return itemResponse{}, fmt.Errorf("invalid item response")
 	}
 	var item itemResponse
 	if err := decodeStrictJSON(raw, &item); err != nil {
 		return itemResponse{}, fmt.Errorf("invalid item response")
 	}
-	if !isCanonicalULID(item.ID) || !validContentType(item.Type) || !validContentStatus(item.Status) || strings.TrimSpace(item.WorkingTitle) == "" || len([]byte(item.WorkingTitle)) > 500<<10 || item.Revision < 1 || item.CreatedAt.IsZero() || item.UpdatedAt.IsZero() || item.ExpiresAt.IsZero() || (item.ArchivedAt != nil && item.ArchivedAt.IsZero()) {
+	if !isCanonicalULID(item.ID) || !validContentType(item.Type) || !validContentStatus(item.Status) || len([]byte(item.WorkingTitle)) > 500<<10 || item.Revision < 1 || item.CreatedAt.IsZero() || item.UpdatedAt.IsZero() || item.ExpiresAt.IsZero() {
 		return itemResponse{}, fmt.Errorf("invalid item response")
 	}
 	if !validItemContent(item.Type, item.Content) {
@@ -365,7 +355,7 @@ func decodeListStream(source io.Reader, visit func(summary) error) error {
 			return fmt.Errorf("invalid list response")
 		}
 		var fields map[string]json.RawMessage
-		if err := json.Unmarshal(raw, &fields); err != nil || explicitNull(fields, "archived_at") {
+		if err := json.Unmarshal(raw, &fields); err != nil {
 			return fmt.Errorf("invalid list response")
 		}
 		var item summary
@@ -529,7 +519,7 @@ func validContentStatus(value string) bool {
 
 func validMutationStatus(value string) bool {
 	switch value {
-	case "created", "updated", "archived", "restored":
+	case "created", "updated", "deleted":
 		return true
 	default:
 		return false

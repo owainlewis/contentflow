@@ -74,7 +74,8 @@ func TestDecodeBatchEnforcesOneKeyBoundariesAndStandaloneItems(t *testing.T) {
 		{"empty", `{"operation_id":"` + operationID + `","items":[]}`, "invalid_batch_size"},
 		{"too many", `{"operation_id":"` + operationID + `","items":[` + strings.Join(tooMany, ",") + `]}`, "invalid_batch_size"},
 		{"per-item operation", `{"operation_id":"` + operationID + `","items":[{"type":"x","working_title":"Draft","status":"draft","operation_id":"` + testOperationID() + `","content":{"body":"post"}}]}`, "invalid_request"},
-		{"invalid later item", `{"operation_id":"` + operationID + `","items":[` + item + `,{"type":"x","working_title":"","status":"draft","content":{"body":"post"}}]}`, "working_title_required"},
+		{"invalid later item", `{"operation_id":"` + operationID + `","items":[` + item + `,{"type":"x","working_title":"Draft","status":"nonsense","content":{"body":"post"}}]}`, "invalid_status"},
+		{"invalid scheduled date", `{"operation_id":"` + operationID + `","items":[{"type":"x","working_title":"Draft","status":"draft","scheduled_at":"0001-01-01T00:00:00Z","content":{"body":"post"}}]}`, "invalid_scheduled_at"},
 		{"youtube sections", `{"operation_id":"` + operationID + `","items":[{"type":"youtube","working_title":"Video","status":"draft","content":{"transcript":"spoken","sections":[{"position":0,"title":"Intro","body":"script"}]}}]}`, "batch_item_not_standalone"},
 	}
 	for _, test := range invalid {
@@ -95,26 +96,12 @@ func TestTextAndEncodedDocumentLimits(t *testing.T) {
 	request.Content = YouTubeContent{Transcript: maxText + "x", Sections: []Section{}}
 	assertErrorCode(t, validateRequest(request), "text_field_too_large")
 
-	now := time.Date(2026, 8, 15, 12, 0, 0, 0, time.UTC)
+	// A document that would have exceeded the old Firestore ceiling is valid in
+	// PostgreSQL; only the per-field text limit still applies.
 	large := strings.Repeat("x", 460<<10)
-	item := Item{
-		ID: testOperationID(), WorkspaceID: "workspace", Type: TypeYouTube, Status: StatusDraft,
-		WorkingTitle: "Title", NormalizedWorkingTitle: "title", Revision: 1,
-		CreatedAt: now, UpdatedAt: now, ExpiresAt: now.Add(ContentLifetime),
-		Content: YouTubeContent{Description: large, Transcript: large, Sections: []Section{}},
-	}
-	assertErrorCode(t, validateEncodedSizes(item), "content_document_too_large")
-
-	item.Content = YouTubeContent{Transcript: strings.Repeat("x", 400<<10), Sections: []Section{{ID: testOperationID(), Position: 0, Title: maxText, Body: maxText}}}
-	if err := validateEncodedSizes(item); err != nil {
-		t.Fatalf("valid bounded parent and section were rejected: %v", err)
-	}
-	size, err := encodedFirestoreSize(sectionDocument{Position: 0, Title: maxText, Body: maxText, WorkspaceID: "workspace", ExpiresAt: item.ExpiresAt})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if size >= MaxFirestoreBytes {
-		t.Fatalf("text limits produced an oversized section: %d", size)
+	request.Content = YouTubeContent{Description: large, Transcript: large, Sections: []Section{}}
+	if err := validateRequest(request); err != nil {
+		t.Fatalf("a large but per-field-valid document was rejected: %v", err)
 	}
 }
 

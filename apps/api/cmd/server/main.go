@@ -17,26 +17,36 @@ import (
 	"syscall"
 	"time"
 
-	"cloud.google.com/go/firestore"
 	"github.com/owainlewis/contentflow/apps/api/internal/auth"
 	"github.com/owainlewis/contentflow/apps/api/internal/config"
 	"github.com/owainlewis/contentflow/apps/api/internal/content"
+	"github.com/owainlewis/contentflow/apps/api/internal/database"
 	"github.com/owainlewis/contentflow/apps/api/internal/health"
 	"github.com/owainlewis/contentflow/apps/api/internal/server"
 	webassets "github.com/owainlewis/contentflow/apps/api/web"
 )
 
 const (
-	shutdownTimeout                = 10 * time.Second
-	oidcDiscoveryTimeout           = 5 * time.Second
-	requestReadTimeout             = 10 * time.Second
-	firestoreReadinessCacheTTL     = 5 * time.Second
-	firestoreReadinessCheckTimeout = 2 * time.Second
+	shutdownTimeout               = 10 * time.Second
+	oidcDiscoveryTimeout          = 5 * time.Second
+	requestReadTimeout            = 10 * time.Second
+	databaseReadinessCacheTTL     = 5 * time.Second
+	databaseReadinessCheckTimeout = 2 * time.Second
+	databaseCleanupInterval       = 6 * time.Hour
+	databaseCleanupTimeout        = 30 * time.Second
 )
 
 func main() {
 	if len(os.Args) > 1 && os.Args[1] == "healthcheck" {
 		if err := checkHealth(os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
+
+	if len(os.Args) > 1 && os.Args[1] == "createuser" {
+		if err := createUser(os.Args[2:]); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
@@ -62,49 +72,56 @@ func main() {
 }
 
 func run(ctx context.Context, cfg config.Config) error {
-	checker := health.Dependencies{
-		AssetDirectory: cfg.AssetDirectory,
-		FirestoreHost:  cfg.FirestoreHost,
-	}
-	var authentication *auth.Service
-	var contentHandler *content.HTTPHandler
-	localWorkspaceID := ""
+	// Identity discovery is a bounded outbound call, so it runs before the
+	// database connection: a misconfigured issuer fails fast and clearly.
+	var provider *auth.OIDCProvider
+	var publicOrigin string
 	if cfg.AuthEnabled() {
-		publicOrigin, redirectURL, err := authenticationURLs(cfg.PublicOrigin)
+		origin, redirectURL, err := authenticationURLs(cfg.PublicOrigin)
 		if err != nil {
 			return fmt.Errorf("configure authentication origin: %w", err)
 		}
+		publicOrigin = origin
 		discoveryContext, cancelDiscovery := context.WithTimeout(ctx, oidcDiscoveryTimeout)
-		provider, err := auth.NewOIDCProvider(discoveryContext, cfg.OAuthIssuer, cfg.OAuthClientID, cfg.OAuthSecret, redirectURL)
+		provider, err = auth.NewOIDCProvider(discoveryContext, cfg.OAuthIssuer, cfg.OAuthClientID, cfg.OAuthSecret, redirectURL)
 		cancelDiscovery()
 		if err != nil {
 			return err
 		}
-		firestoreClient, err := firestore.NewClient(ctx, cfg.GoogleProject)
-		if err != nil {
-			return fmt.Errorf("connect to Firestore auth store: %w", err)
-		}
-		defer firestoreClient.Close()
+	}
+
+	pool, err := database.Open(ctx, cfg.DatabaseURL)
+	if err != nil {
+		return fmt.Errorf("connect to PostgreSQL: %w", err)
+	}
+	defer pool.Close()
+	stopCleanupWorker := startCleanupWorker(ctx, databaseCleanupInterval, func(cleanupContext context.Context, now time.Time) (int64, error) {
+		return database.Cleanup(cleanupContext, pool, now)
+	})
+	defer stopCleanupWorker()
+
+	checker := health.Dependencies{
+		AssetDirectory: cfg.AssetDirectory,
+		DatabaseCheck:  health.CacheCheck(func(ctx context.Context) error { return pool.Ping(ctx) }, databaseReadinessCacheTTL, databaseReadinessCheckTimeout),
+		DialTimeout:    databaseReadinessCheckTimeout,
+	}
+	contentStore := content.NewPostgresStore(pool)
+	var authentication *auth.Service
+	var contentHandler *content.HTTPHandler
+	localWorkspaceID := ""
+	if cfg.AuthEnabled() {
 		credentialKey := sha256.Sum256([]byte(cfg.OAuthSecret))
-		firestoreStore := auth.NewFirestoreStore(firestoreClient)
-		checker.FirestoreCheck = health.CacheCheck(firestoreStore.Check, firestoreReadinessCacheTTL, firestoreReadinessCheckTimeout)
-		checker.DialTimeout = firestoreReadinessCheckTimeout
 		authentication, err = auth.New(auth.Config{
 			PublicOrigin: publicOrigin, OwnerIssuer: cfg.OAuthIssuer, OwnerSubject: cfg.OwnerSubject,
 			WorkspaceID: cfg.WorkspaceID, CredentialKey: credentialKey[:],
-		}, provider, firestoreStore)
+		}, provider, auth.NewPostgresStore(pool))
 		if err != nil {
 			return fmt.Errorf("configure authentication: %w", err)
 		}
-		contentHandler = content.NewHTTPHandler(content.NewService(content.NewFirestoreStore(firestoreClient)))
-	} else if cfg.LocalProxyAuth && cfg.FirestoreHost != "" {
-		firestoreClient, err := firestore.NewClient(ctx, "contentflow-local")
-		if err != nil {
-			return fmt.Errorf("connect to local Firestore content store: %w", err)
-		}
-		defer firestoreClient.Close()
+		contentHandler = content.NewHTTPHandler(content.NewService(contentStore))
+	} else if cfg.LocalProxyAuth {
 		localWorkspaceID = "contentflow-local"
-		contentHandler = content.NewHTTPHandler(content.NewService(content.NewFirestoreStore(firestoreClient)))
+		contentHandler = content.NewHTTPHandler(content.NewService(contentStore))
 	}
 	api := server.NewAPIWithContent(checker, authentication, contentHandler)
 	if localWorkspaceID != "" {
@@ -157,6 +174,39 @@ func run(ctx context.Context, cfg config.Config) error {
 		}
 	}
 	return runErr
+}
+
+func startCleanupWorker(ctx context.Context, interval time.Duration, cleanup func(context.Context, time.Time) (int64, error)) func() {
+	workerContext, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		runCleanupWorker(workerContext, interval, cleanup)
+	}()
+	return func() {
+		cancel()
+		<-done
+	}
+}
+
+func runCleanupWorker(ctx context.Context, interval time.Duration, cleanup func(context.Context, time.Time) (int64, error)) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		cleanupContext, cancel := context.WithTimeout(ctx, databaseCleanupTimeout)
+		removed, err := cleanup(cleanupContext, time.Now().UTC())
+		cancel()
+		if err != nil && ctx.Err() == nil {
+			slog.Error("database expiry cleanup failed", "error", err)
+		} else if removed > 0 {
+			slog.Info("database expiry cleanup completed", "rows_removed", removed)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
 }
 
 func newHTTPServer(address string, handler http.Handler) *http.Server {

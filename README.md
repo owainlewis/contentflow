@@ -19,13 +19,13 @@ docs/                 Product and architecture documents
 
 ## Run the complete local stack
 
-Docker with Compose is required. Start the Go application, Firestore emulator, and persistent local asset volume with one command:
+Docker with Compose is required. Start the Go application, PostgreSQL 18, and a persistent local asset volume with one command:
 
 ```bash
 npm run dev
 ```
 
-Open `http://localhost:3000`. The public listener serves the app and proxies same-origin health and API requests to a private listener using a generated secret. The private API port is available only inside the Compose network. Local proxy authentication cannot be enabled when `CONTENTFLOW_ENV=production`.
+Open `http://127.0.0.1:3100`. The public listener serves the app and proxies same-origin health and API requests to a private listener using a generated secret. The private API port is available only inside the Compose network. Local proxy authentication cannot be enabled when `CONTENTFLOW_ENV=production`.
 
 Stop the stack with:
 
@@ -42,7 +42,7 @@ npm install
 npm run build
 CONTENTFLOW_ENV=production \
 CONTENTFLOW_ASSET_DIR=var/assets \
-CONTENTFLOW_GOOGLE_PROJECT_ID=your-project \
+CONTENTFLOW_DATABASE_URL=postgres://user:password@host:5432/contentflow \
 CONTENTFLOW_PUBLIC_ORIGIN=https://contentflow.example \
 CONTENTFLOW_OAUTH_ISSUER=https://accounts.google.com \
 CONTENTFLOW_OAUTH_CLIENT_ID=your-client-id \
@@ -54,33 +54,9 @@ npm start
 
 The self-contained binary listens on `http://localhost:8080`. Client-side routes fall back to the embedded `index.html`; `/api` and `/health` routes never fall through to the SPA.
 
-Production refuses to start unless every authentication value above is present, the public origin is HTTPS, and local proxy authentication is disabled. Any authenticated public origin or OAuth issuer must also use HTTPS unless it uses an explicit loopback address for local development. Cookie security is derived from that validated origin. The OAuth redirect URI is `<public-origin>/api/v1/auth/callback`; an explicitly configured port is retained for exact provider matching. HTTPS sign-in uses OIDC `form_post` so authorization codes and state never enter request URLs or platform request logs. OAuth attempts, sessions, distributed token rate limits, and SHA-256 token hashes are stored in Firestore. Raw API tokens are returned only by `POST /api/v1/tokens` and are never stored.
+Production refuses to start unless every authentication value above is present, the public origin is HTTPS, and local proxy authentication is disabled. Any authenticated public origin or OAuth issuer must also use HTTPS unless it uses an explicit loopback address for local development. Cookie security is derived from that validated origin. The OAuth redirect URI is `<public-origin>/api/v1/auth/callback`; an explicitly configured port is retained for exact provider matching. HTTPS sign-in uses OIDC `form_post` so authorization codes and state never enter request URLs or platform request logs. OAuth attempts, sessions, distributed token rate limits, and SHA-256 token hashes are stored in PostgreSQL. Session and login-attempt identifiers are stored as SHA-256 digests, never in the clear. Raw API tokens are returned only by `POST /api/v1/tokens` and are never stored.
 
-Before serving production traffic, enable managed deletion for the three expiring authentication collections:
-
-```bash
-scripts/configure-firestore-ttl.sh your-project-id
-```
-
-The script targets the default Firestore database used by the service and enables `expires_at` TTL policies for OAuth attempts, sessions, and authentication rate-limit records. Login admission is limited per client and globally across service instances before an OAuth attempt is stored. API token records remain until explicit revocation.
-
-Health endpoints:
-
-- `GET /health/live` reports whether the process is serving requests.
-- `GET /health/ready` checks the writable asset directory and checks Firestore whenever authentication or the Firestore emulator is configured.
-
-Public dependency calls are bounded as follows:
-
-| Public entry point | Firestore or outbound work | Bound |
-| --- | --- | --- |
-| Static files, missing routes, `/health/live` | None | No dependency call |
-| `/health/ready` | Firestore readiness query | Coalesced and cached for 5 seconds, with a 2-second internal deadline |
-| `/api/v1/auth/login` | Distributed admission transaction and OAuth-attempt write | Process-local 120/client and 1,000/instance per minute, then distributed 20/client and 300/workspace per minute |
-| `/api/v1/auth/callback` | OAuth-attempt transaction, OIDC token exchange and signing-key fetch, session write | Same process-local shield; attempts are single-use; outbound calls have a 10-second deadline |
-| Protected `/api/v1/*` with a session or bearer credential | Session or token lookup; distributed token admission | Same process-local shield; tokens also have a distributed 120/minute limit |
-| OIDC discovery | Provider metadata | Startup-only, with a 5-second deadline before listeners start |
-
-The local-development public API proxy only forwards to the loopback private listener. It is disabled in production.
+Expired rows are removed by a cleanup pass rather than a database TTL feature. Every read already filters on `expires_at`, so cleanup reclaims space and never affects correctness.
 
 ## Use the `flow` CLI
 
@@ -94,7 +70,7 @@ export CONTENTFLOW_API_TOKEN=cf_...
 
 The API URL must use HTTPS. Plaintext HTTP is accepted only for a literal loopback IP such as `http://127.0.0.1:3000`; the hostname `localhost` is rejected because it can be remapped.
 
-Read commands require `content:read`; mutations require `content:write`. The token is read only from the environment so it does not enter command history or process arguments. The CLI never administers tokens or accesses Firestore or Cloud Storage.
+Read commands require `content:read`; mutations require `content:write`. The token is read only from the environment so it does not enter command history or process arguments. The CLI never administers tokens or accesses the database or Cloud Storage.
 
 ```bash
 bin/flow content list --search "launch" --type youtube --status draft
@@ -103,12 +79,10 @@ bin/flow content transcript 01J...
 bin/flow content create --file create.json --transcript-file transcript.txt
 bin/flow content update 01J... --file replacement.json --transcript-file -
 bin/flow content update 01J... --file replacement.json --clear-transcript
-bin/flow content archive 01J... --revision 4
-bin/flow content restore 01J... --revision 5
 bin/flow content batch-create --file drafts.json --json
 ```
 
-Create and update files use the matching API request shape without requiring `operation_id`. Batch files contain the API `items` array. The CLI generates the operation ID, freezes the final JSON bytes, and reuses both for timeout retries. If a mutation fails, stable human and JSON errors include that operation ID. An indeterminate create, update, or batch-create also reports a mode-0600 `replay_metadata` file and a `replay_before` Unix timestamp. Retry the same request file before that deadline with `--file PATH --operation-id OPERATION_ID --replay-metadata REPLAY_METADATA`; the CLI verifies the frozen request, API origin, endpoint, operation ID, and receipt deadline before sending. When request JSON comes from standard input or another non-regular source such as a FIFO, or when transcript input is merged or cleared, the error also reports a mode-0600 `replay_file` containing the exact final request; use that path as `--file` without transcript flags. A complete 0700 recovery bundle may be copied to durable storage before replay; its fixed mode-0600 `request.json` and `metadata.json` files remain operator-owned and are not removed. After the deadline, reconcile mutation state before any new submission because API receipts expire after 24 hours. Retry an indeterminate archive or restore within 24 hours using the same content ID, revision, and reported operation ID. A terminal API rejection for a generated frozen request reports the same snapshot as `request_file` instead: inspect or correct it, then remove it explicitly because exact replay cannot resolve the rejection. A successful mutation removes CLI-owned recovery files but preserves operator-supplied request and metadata files. `--transcript-file -` reads the transcript from standard input; `--clear-transcript` sends an explicit empty string. They are mutually exclusive.
+Create and update files use the matching API request shape without requiring `operation_id`. Batch files contain the API `items` array. The CLI generates the operation ID, freezes the final JSON bytes, and reuses both for timeout retries. If a mutation fails, stable human and JSON errors include that operation ID. An indeterminate create, update, or batch-create also reports a mode-0600 `replay_metadata` file and a `replay_before` Unix timestamp. Retry the same request file before that deadline with `--file PATH --operation-id OPERATION_ID --replay-metadata REPLAY_METADATA`; the CLI verifies the frozen request, API origin, endpoint, operation ID, and receipt deadline before sending. When request JSON comes from standard input or another non-regular source such as a FIFO, or when transcript input is merged or cleared, the error also reports a mode-0600 `replay_file` containing the exact final request; use that path as `--file` without transcript flags. A complete 0700 recovery bundle may be copied to durable storage before replay; its fixed mode-0600 `request.json` and `metadata.json` files remain operator-owned and are not removed. After the deadline, reconcile mutation state before any new submission because API receipts expire after 24 hours. A terminal API rejection for a generated frozen request reports the same snapshot as `request_file` instead: inspect or correct it, then remove it explicitly because exact replay cannot resolve the rejection. A successful mutation removes CLI-owned recovery files but preserves operator-supplied request and metadata files. `--transcript-file -` reads the transcript from standard input; `--clear-transcript` sends an explicit empty string. They are mutually exclusive.
 
 Every command accepts `--json`. Human transcript output is the exact transcript bytes and contains no script fallback. Machine errors are stable JSON on standard error. Exit codes are:
 

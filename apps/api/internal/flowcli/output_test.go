@@ -17,7 +17,7 @@ func TestHumanOutputGoldens(t *testing.T) {
 		{
 			name:   "list",
 			render: func(output *bytes.Buffer, body []byte) error { return renderList(output, body) },
-			body:   `{"items":[{"id":"01J00000000000000000000001","type":"youtube","status":"draft","working_title":"A useful title","revision":2,"created_at":"2026-08-15T09:00:00Z","updated_at":"2026-08-15T10:00:00Z","expires_at":"2026-10-10T09:00:00Z","asset_counts":{}},{"id":"01J00000000000000000000002","type":"x","status":"ready","working_title":"Tabs\tand\nlines\u001b[31mred","revision":7,"created_at":"2026-08-15T09:00:00Z","updated_at":"2026-08-15T10:00:00Z","expires_at":"2026-10-10T09:00:00Z","archived_at":"2026-08-15T10:00:00Z","asset_counts":{"image":2,"video":1}}]}`,
+			body:   `{"items":[{"id":"01J00000000000000000000001","type":"youtube","status":"draft","working_title":"A useful title","revision":2,"created_at":"2026-08-15T09:00:00Z","updated_at":"2026-08-15T10:00:00Z","expires_at":"2026-10-10T09:00:00Z","asset_counts":{}},{"id":"01J00000000000000000000002","type":"x","status":"ready","working_title":"Tabs\tand\nlines\u001b[31mred","revision":7,"created_at":"2026-08-15T09:00:00Z","updated_at":"2026-08-15T10:00:00Z","expires_at":"2026-10-10T09:00:00Z","asset_counts":{"image":2,"video":1}}]}`,
 			golden: "list.golden",
 		},
 		{
