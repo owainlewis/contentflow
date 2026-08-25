@@ -11,6 +11,7 @@ import {
   FileVideo,
   ImagePlus,
   Inbox,
+  LayoutGrid,
   Lightbulb,
   LoaderCircle,
   Menu,
@@ -56,29 +57,40 @@ import {
   type YouTubeContent,
 } from "./api";
 import AutoTextarea from "./AutoTextarea";
-import Calendar from "./Calendar";
+import Calendar, { dayKey } from "./Calendar";
 import Settings from "./Settings";
+import WeeklyMatrix from "./WeeklyMatrix";
 import { TypeIcon, displayTitle, statusLabels, typeMeta } from "./content-meta";
 import { AutosaveManager, type ConflictView, type SaveState } from "./autosave";
 import { normalizeUnicode15Title } from "./unicode-normalization";
 
 type Theme = "light" | "dark";
-type View = "workspace" | "calendar" | "settings";
+type View = "workspace" | "weekly" | "calendar" | "settings";
 
 // The server serves index.html for any extensionless path, so views are real
 // URLs: deep links and the browser back button both work.
 function viewFromPath(pathname: string): View {
+  if (pathname.startsWith("/weekly")) return "weekly";
   if (pathname.startsWith("/calendar")) return "calendar";
   if (pathname.startsWith("/settings")) return "settings";
   return "workspace";
 }
 
-const viewPaths: Record<View, string> = { workspace: "/", calendar: "/calendar", settings: "/settings" };
+const viewPaths: Record<View, string> = { workspace: "/", weekly: "/weekly", calendar: "/calendar", settings: "/settings" };
 type LifecycleAction = "delete";
 type PendingLifecycle = { id: string; action: LifecycleAction };
 type LibraryFilters = { query: string; type: ContentType | "all"; status: ContentStatus | "all" };
 type Attachment = { id: string; kind: "image" | "video" | "pdf"; name: string; size: number };
 type ThumbnailPreview = { dataUrl?: string; requestId: string };
+
+class ScheduleLock {
+  private readonly ids = new Set<string>();
+
+  has(id: string) { return this.ids.has(id); }
+  add(id: string) { this.ids.add(id); }
+  remove(id: string) { this.ids.delete(id); }
+  snapshot(): ReadonlySet<string> { return new Set(this.ids); }
+}
 
 const enabledTypesKey = "contentflow-enabled-types";
 const sidebarCollapsedKey = "contentflow-sidebar-collapsed";
@@ -233,7 +245,8 @@ export default function Home() {
   const [createOpen, setCreateOpen] = useState(false);
   const [view, setView] = useState<View>(() => viewFromPath(window.location.pathname));
   const [calendarError, setCalendarError] = useState("");
-  const [schedulingIds, setSchedulingIds] = useState<Set<string>>(() => new Set());
+  const [schedulePendingIds, setSchedulePendingIds] = useState<ReadonlySet<string>>(() => new Set());
+  const [scheduleUncertainIds, setScheduleUncertainIds] = useState<ReadonlySet<string>>(() => new Set());
   const [workspaceId, setWorkspaceId] = useState<string>();
   const [enabledTypes, setEnabledTypes] = useState<ContentType[]>(readEnabledTypes);
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(readSidebarCollapsed);
@@ -279,7 +292,7 @@ export default function Home() {
   const requestSequence = useRef(0);
   const sessionGenerationRef = useRef(0);
   const activeFiltersRef = useRef<LibraryFilters>({ query: "", type: "all", status: "all" });
-  const schedulingIdsRef = useRef(new Set<string>());
+  const [scheduleLock] = useState(() => new ScheduleLock());
 
   const refreshLibrary = useCallback(async (filtersOverride?: LibraryFilters) => {
     const sequence = ++requestSequence.current;
@@ -615,6 +628,15 @@ export default function Home() {
     return result;
   }, { youtube: 0, linkedin: 0, x: 0, instagram: 0, tiktok: 0, email: 0, substack: 0 }), [allSummaries]);
 
+  const scheduleBlockedIds = useMemo(() => {
+    const blocked = new Set(schedulePendingIds);
+    for (const [id, state] of Object.entries(saveStates)) if (state !== "saved") blocked.add(id);
+    return blocked;
+  }, [saveStates, schedulePendingIds]);
+  const scheduleError = scheduleUncertainIds.size
+    ? "A schedule update could not be confirmed. Reload before editing or moving the locked item."
+    : calendarError;
+
   function navigate(next: View) {
     if (window.location.pathname !== viewPaths[next]) window.history.pushState({}, "", viewPaths[next]);
     setView(next);
@@ -745,7 +767,7 @@ export default function Home() {
   }
 
   function updateSelected(change: (current: ContentDetail) => ContentDetail) {
-    if (!selected || pendingLifecycle?.id === selected.id || schedulingIds.has(selected.id)) return;
+    if (!selected || pendingLifecycle?.id === selected.id || scheduleLock.has(selected.id)) return;
     const next = change(selected);
     setSelected(next);
     setAllSummaries((items) => items.map((item) => item.id === next.id ? { ...item, working_title: next.working_title, status: next.status, updated_at: new Date().toISOString() } : item));
@@ -843,38 +865,82 @@ export default function Home() {
 
   // A type section is already an answer to "what are you creating?", so skip the
   // picker there and only ask when the writer is in All content.
-  // Scheduling is a plain replacement of the whole item, so it goes straight to
-  // the API rather than through the selected-document autosave queue.
+  // Scheduling is a plain replacement of the whole item. It waits for the
+  // editor queue to become idle, then rebases that queue onto the saved result.
   async function rescheduleItem(id: string, day: string | undefined) {
-    if (csrfToken === undefined || schedulingIdsRef.current.has(id)) return;
-    const manager = autosaveRef.current;
-    if (manager?.getDraft(id) || manager?.getConflict(id)) {
+    if (csrfToken === undefined) return;
+    if (scheduleLock.has(id)) return;
+    if (autosaveRef.current?.isBusy(id)) {
       setCalendarError("Wait for this item's edits to finish saving before rescheduling it.");
       return;
     }
-    schedulingIdsRef.current.add(id);
-    setSchedulingIds(new Set(schedulingIdsRef.current));
+    scheduleLock.add(id);
+    setSchedulePendingIds(scheduleLock.snapshot());
     setCalendarError("");
+    let releaseScheduleLock = true;
     try {
-      const detail = await getContent(id);
-      const scheduled = day ? new Date(`${day}T09:00:00`).toISOString() : undefined;
-      const body = serializeReplacement({ ...detail, scheduled_at: scheduled }, newOperationId());
-      await replaceContent(id, body, csrfTokenRef.current);
-      const saved = await getContent(id);
-      manager?.discard(id);
-      if (selectedIdRef.current === id) {
-        setSelected(saved);
-        setConflict(undefined);
-        setSaveStates((states) => ({ ...states, [id]: "saved" }));
+      let detail: ContentDetail | undefined;
+      let scheduled: string | undefined;
+      try {
+        detail = await getContent(id);
+        scheduled = day ? new Date(`${day}T09:00:00`).toISOString() : undefined;
+        const body = serializeReplacement({ ...detail, scheduled_at: scheduled }, newOperationId());
+        let result;
+        try {
+          result = await replaceContent(id, body, csrfTokenRef.current);
+        } catch (error) {
+          if (error instanceof ApiError) throw error;
+          // The first request may have committed before its response was lost.
+          // Replaying identical bytes is safe because the operation ID is retained.
+          result = await replaceContent(id, body, csrfTokenRef.current);
+        }
+        const optimistic = {
+          ...detail,
+          scheduled_at: scheduled,
+          revision: result.revisions[0] ?? detail.revision + 1,
+          updated_at: new Date().toISOString(),
+        };
+        if (!(autosaveRef.current?.reconcileExternal(optimistic)) && selectedIdRef.current === id) setSelected(optimistic);
+      } catch (error) {
+        if (isSessionRecoveryError(error)) setSessionExpired(true);
+        else if (error instanceof ApiError) setCalendarError("That item could not be rescheduled. Try again.");
+        else {
+          try {
+            const current = await getContent(id);
+            if (!(autosaveRef.current?.reconcileExternal(current)) && selectedIdRef.current === id) setSelected(current);
+            const requestedDay = day || undefined;
+            const currentDay = current.scheduled_at ? dayKey(new Date(current.scheduled_at)) : undefined;
+            setCalendarError(detail && currentDay === requestedDay && current.revision > detail.revision
+              ? "The item was moved, but the response was lost. Its latest details are now loaded."
+              : "That item could not be rescheduled. Try again.");
+          } catch (confirmationError) {
+            if (isSessionRecoveryError(confirmationError)) setSessionExpired(true);
+            releaseScheduleLock = false;
+            setScheduleUncertainIds((ids) => new Set(ids).add(id));
+          }
+        }
+        return;
       }
-      requestSequence.current += 1;
-      await refreshLibraryRef.current();
-    } catch (error) {
-      if (isSessionRecoveryError(error)) setSessionExpired(true);
-      else setCalendarError("That item could not be rescheduled. Try again.");
+
+      let refreshFailed = false;
+      try {
+        const saved = await getContent(id);
+        if (!(autosaveRef.current?.reconcileExternal(saved)) && selectedIdRef.current === id) setSelected(saved);
+      } catch (error) {
+        refreshFailed = true;
+        if (isSessionRecoveryError(error)) setSessionExpired(true);
+      }
+      try {
+        requestSequence.current += 1;
+        await refreshLibraryRef.current();
+      } catch (error) {
+        refreshFailed = true;
+        if (isSessionRecoveryError(error)) setSessionExpired(true);
+      }
+      if (refreshFailed) setCalendarError("The item was moved, but its latest details could not be refreshed. Reload to confirm.");
     } finally {
-      schedulingIdsRef.current.delete(id);
-      setSchedulingIds(new Set(schedulingIdsRef.current));
+      if (releaseScheduleLock) scheduleLock.remove(id);
+      setSchedulePendingIds(scheduleLock.snapshot());
     }
   }
 
@@ -1176,16 +1242,25 @@ export default function Home() {
   const foreignPendingLifecycleItem = foreignPendingLifecycle ? allSummaries.find((item) => item.id === foreignPendingLifecycle.id) : undefined;
   const foreignPendingLifecycleTitle = foreignPendingLifecycleItem ? displayTitle(foreignPendingLifecycleItem) : undefined;
   const selectedExpiry = selected ? expiry(selected.expires_at) : undefined;
-  const lifecycleDisabled = currentSaveState !== "saved" || Boolean(pendingLifecycle) || Boolean(selectedExpiry?.expired);
+  const selectedSchedulePending = Boolean(selected && schedulePendingIds.has(selected.id));
+  const editorLocked = selectedSchedulePending || Boolean(selectedPendingLifecycle) || Boolean(selectedExpiry?.expired);
+  const lifecycleDisabled = currentSaveState !== "saved" || Boolean(pendingLifecycle) || selectedSchedulePending || Boolean(selectedExpiry?.expired);
 
   return <main className={`app-shell ${sidebarCollapsed ? "sidebar-is-collapsed" : ""} ${libraryCollapsed ? "library-is-collapsed" : ""}`}>
     <aside className="sidebar" aria-label="Main navigation">
       <div className="brand-row"><div className="brand-mark"><Zap size={17} fill="currentColor" /></div><span className="brand-name">ContentFlow</span><button className="icon-button sidebar-collapse" onClick={toggleSidebar} aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"} aria-expanded={!sidebarCollapsed}>{sidebarCollapsed ? <PanelLeftOpen size={17} /> : <PanelLeftClose size={17} />}</button></div>
       <button className="new-content-button" onClick={() => setCreateOpen(true)} title={sidebarCollapsed ? "New content" : undefined}><Plus size={18} /><span>New content</span><span className="key-hint">N</span></button>
-      <nav className="primary-nav"><button className={`nav-item ${view === "workspace" && typeFilter === "all" ? "active" : ""}`} onClick={() => { setTypeFilter("all"); navigate("workspace"); }} title={sidebarCollapsed ? "All content" : undefined}><Inbox size={18} /><span>All content</span><span className="nav-count">{allSummaries.length}</span></button><button className={`nav-item ${view === "calendar" ? "active" : ""}`} onClick={() => navigate("calendar")} title={sidebarCollapsed ? "Calendar" : undefined}><CalendarDays size={18} /><span>Calendar</span></button></nav>
+      <nav className="primary-nav"><button className={`nav-item ${view === "workspace" && typeFilter === "all" ? "active" : ""}`} onClick={() => { setTypeFilter("all"); navigate("workspace"); }} title={sidebarCollapsed ? "All content" : undefined}><Inbox size={18} /><span>All content</span><span className="nav-count">{allSummaries.length}</span></button><button className={`nav-item ${view === "weekly" ? "active" : ""}`} onClick={() => navigate("weekly")} title={sidebarCollapsed ? "Weekly" : undefined}><LayoutGrid size={18} /><span>Weekly</span></button><button className={`nav-item ${view === "calendar" ? "active" : ""}`} onClick={() => navigate("calendar")} title={sidebarCollapsed ? "Calendar" : undefined}><CalendarDays size={18} /><span>Calendar</span></button></nav>
       <div className="nav-section"><p className="nav-label">Content types</p>{enabledTypes.map((type) => <button key={type} className={`nav-item ${typeFilter === type ? "active" : ""}`} onClick={() => { setTypeFilter(type); navigate("workspace"); }} title={sidebarCollapsed ? typeMeta[type].label : undefined}><span className="nav-type-icon" style={{ color: typeMeta[type].color }}><TypeIcon type={type} /></span><span>{typeMeta[type].label}</span><span className="nav-count">{counts[type]}</span></button>)}</div>
       <div className="sidebar-bottom"><button className={`nav-item ${view === "settings" ? "active" : ""}`} onClick={() => navigate("settings")} title={sidebarCollapsed ? "Settings" : undefined}><SettingsIcon size={18} /><span>Settings</span></button><div className="profile-row"><div className="avatar">OL</div><div><strong>Owain Lewis</strong><span>Personal workspace</span></div><MoreHorizontal size={17} /></div></div>
     </aside>
+
+    <nav className="mobile-view-nav" aria-label="Mobile navigation">
+      <button className={view === "workspace" ? "active" : ""} aria-current={view === "workspace" ? "page" : undefined} aria-label="Open all content" onClick={() => { setTypeFilter("all"); navigate("workspace"); }}><Inbox size={18} /><span>Content</span></button>
+      <button className={view === "weekly" ? "active" : ""} aria-current={view === "weekly" ? "page" : undefined} aria-label="Open weekly view" onClick={() => navigate("weekly")}><LayoutGrid size={18} /><span>Weekly</span></button>
+      <button className={view === "calendar" ? "active" : ""} aria-current={view === "calendar" ? "page" : undefined} aria-label="Open calendar view" onClick={() => navigate("calendar")}><CalendarDays size={18} /><span>Calendar</span></button>
+      <button className={view === "settings" ? "active" : ""} aria-current={view === "settings" ? "page" : undefined} aria-label="Open settings view" onClick={() => navigate("settings")}><SettingsIcon size={18} /><span>Settings</span></button>
+    </nav>
 
     {view === "workspace" && <>
     <section id="content-library" ref={libraryPanelRef} className={`library-panel ${libraryOpen ? "open" : ""}`} aria-label="Content library" aria-hidden={isCompact ? !libraryOpen : libraryCollapsed || undefined} inert={isCompact ? !libraryOpen : libraryCollapsed}>
@@ -1203,20 +1278,22 @@ export default function Home() {
     <section className="editor-panel" aria-label="Content editor" aria-hidden={isCompact && libraryOpen ? true : undefined} inert={isCompact && libraryOpen ? true : undefined}>
       <header className="mobile-app-header"><button ref={mobileLibraryButtonRef} className="icon-button" onClick={() => setLibraryOpen(true)} aria-label="Open content library"><Menu size={20} /></button><div className="brand-mark"><Zap size={15} fill="currentColor" /></div><strong>ContentFlow</strong><button className="icon-button mobile-theme-toggle" onClick={toggleTheme} aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}>{theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}</button><button className="icon-button" onClick={startCreate} aria-label={createLabel}><Plus size={20} /></button></header>
       {selected ? <>
-        <div className="editor-toolbar"><div className="editor-context">{libraryCollapsed && !isCompact && <button ref={libraryExpandButtonRef} className="icon-button editor-library-toggle" onClick={toggleLibrary} aria-label="Expand content library" aria-controls="content-library" aria-expanded="false"><PanelLeftOpen size={18} /></button>}<span className="type-pill" style={{ color: typeMeta[selected.type].color }}><TypeIcon type={selected.type} />{typeMeta[selected.type].label}</span><span className="toolbar-divider" /><label className="status-select"><span className={`status-dot ${selected.status}`} /><select aria-label="Content status" value={selected.status} disabled={Boolean(selectedPendingLifecycle) || Boolean(selectedExpiry?.expired)} onChange={(event) => updateSelected((current) => ({ ...current, status: event.target.value as ContentStatus }))}>{contentStatuses.map((status) => <option value={status} key={status}>{statusLabels[status]}</option>)}</select><ChevronDown size={14} /></label></div><div className="editor-actions"><span className={`saved-state ${currentSaveState}`} aria-live="polite">{currentSaveState === "saving" || currentSaveState === "retrying" ? <LoaderCircle className="spin" size={14} /> : currentSaveState === "conflict" || currentSaveState === "error" ? <AlertTriangle size={14} /> : <Check size={14} />}{saveLabel(currentSaveState)}</span></div></div>
+        <div className="editor-toolbar"><div className="editor-context">{libraryCollapsed && !isCompact && <button ref={libraryExpandButtonRef} className="icon-button editor-library-toggle" onClick={toggleLibrary} aria-label="Expand content library" aria-controls="content-library" aria-expanded="false"><PanelLeftOpen size={18} /></button>}<span className="type-pill" style={{ color: typeMeta[selected.type].color }}><TypeIcon type={selected.type} />{typeMeta[selected.type].label}</span><span className="toolbar-divider" /><label className="status-select"><span className={`status-dot ${selected.status}`} /><select aria-label="Content status" value={selected.status} disabled={editorLocked} onChange={(event) => updateSelected((current) => ({ ...current, status: event.target.value as ContentStatus }))}>{contentStatuses.map((status) => <option value={status} key={status}>{statusLabels[status]}</option>)}</select><ChevronDown size={14} /></label></div><div className="editor-actions">{selectedSchedulePending ? <span className="saved-state saving" role="status"><LoaderCircle className="spin" size={14} />Updating schedule…</span> : <span className={`saved-state ${currentSaveState}`} aria-live="polite">{currentSaveState === "saving" || currentSaveState === "retrying" ? <LoaderCircle className="spin" size={14} /> : currentSaveState === "conflict" || currentSaveState === "error" ? <AlertTriangle size={14} /> : <Check size={14} />}{saveLabel(currentSaveState)}</span>}</div></div>
         {foreignPendingLifecycle && <div className="inline-error" role="alert">Review the {foreignPendingLifecycle.action} conflict for “{foreignPendingLifecycleTitle ?? "another item"}” before continuing. <button onClick={() => { setActionError(""); setSelectedId(foreignPendingLifecycle.id); setLibraryOpen(false); }}>Review item</button></div>}
         {actionError && <div className="inline-error" role="alert">{actionError}</div>}
         <div className="editor-scroll"><article className="editor-document">
-          <div className="document-heading" inert={Boolean(selectedPendingLifecycle) || Boolean(selectedExpiry?.expired)}>{selected.type === "youtube" ? renderWorkingTitle() : <h1 className={`document-identity ${selected.working_title.trim() ? "" : "document-identity-untitled"}`}>{displayTitle(selected)}</h1>}<div className="document-meta"><span><Clock3 size={14} /> Edited {formatRelativeTime(selected.updated_at)}</span><span>{documentWordCount(selected).toLocaleString()} words</span><span className={selectedExpiry?.warning ? "expiry-warning" : ""}><CalendarDays size={14} /> Expires {selectedExpiry?.label}{selectedExpiry?.warning ? ` · ${selectedExpiry.detail}` : ""}</span></div></div>
+          <div className="document-heading" inert={editorLocked}>{selected.type === "youtube" ? renderWorkingTitle() : <h1 className={`document-identity ${selected.working_title.trim() ? "" : "document-identity-untitled"}`}>{displayTitle(selected)}</h1>}<div className="document-meta"><span><Clock3 size={14} /> Edited {formatRelativeTime(selected.updated_at)}</span><span>{documentWordCount(selected).toLocaleString()} words</span><span className={selectedExpiry?.warning ? "expiry-warning" : ""}><CalendarDays size={14} /> Expires {selectedExpiry?.label}{selectedExpiry?.warning ? ` · ${selectedExpiry.detail}` : ""}</span></div></div>
           {conflict && <section className="conflict-panel" aria-labelledby="conflict-title"><div className="conflict-title"><AlertTriangle size={18} /><div><h2 id="conflict-title">This item changed elsewhere</h2><p>{selectedPendingLifecycle ? `Review the current server version before you retry or cancel ${selectedPendingLifecycle.action}.` : "Compare the saved server version with your unsaved local work. Nothing was overwritten."}</p></div></div><div className="conflict-columns"><div><h3>Server version</h3><pre>{JSON.stringify(editableSnapshot(conflict.server), null, 2)}</pre></div><div><h3>{selectedPendingLifecycle ? "Previous version" : "Your unsaved version"}</h3><pre>{JSON.stringify(editableSnapshot(conflict.local), null, 2)}</pre></div></div><div className="conflict-actions">{selectedPendingLifecycle ? <><button onClick={() => resolveLifecycleConflict(false)}>Cancel action</button><button className="primary-button" onClick={() => resolveLifecycleConflict(true)}>Retry {selectedPendingLifecycle.action}</button></> : <><button onClick={() => resolveSelectedConflict("server")}>Use server version</button><button className="primary-button" onClick={() => resolveSelectedConflict("local")}>Save my version</button></>}</div></section>}
-          <div className="editor-content" inert={Boolean(selectedPendingLifecycle) || Boolean(selectedExpiry?.expired)}>{selected.type === "youtube" ? renderYouTubeEditor() : renderPlainEditor()}</div>
+          <div className="editor-content" inert={editorLocked}>{selected.type === "youtube" ? renderYouTubeEditor() : renderPlainEditor()}</div>
         </article></div>
         <footer className="editor-footer"><span>{typeMeta[selected.type].description}</span><button className="delete-button" disabled={lifecycleDisabled} onClick={() => setDeleteOpen(true)}><Trash2 size={15} /> Delete</button></footer>
       </> : <div className="editor-empty">{libraryCollapsed && !isCompact && <button ref={libraryExpandButtonRef} className="icon-button editor-empty-library-toggle" onClick={toggleLibrary} aria-label="Expand content library" aria-controls="content-library" aria-expanded="false"><PanelLeftOpen size={18} /></button>}{detailLoading ? <><LoaderCircle className="spin" /><p>Loading selected content…</p></> : detailError ? <><AlertTriangle /><h1>Could not open this item</h1><p role="alert">{detailError}</p><button className="primary-button" onClick={() => setDetailReload((value) => value + 1)}>Retry loading item</button></> : <><SquarePen size={28} /><h1>{allSummaries.length ? "Choose an item" : "Start writing"}</h1><p>{allSummaries.length ? "Select content from your library." : "Pick a format to create your first piece."}</p>{actionError && <p className="inline-error" role="alert">{actionError}</p>}<button className="primary-button" onClick={startCreate}><Plus size={16} /> {createLabel}</button></>}</div>}
     </section>
     </>}
 
-    {view === "calendar" && <Calendar items={allSummaries} pendingIds={schedulingIds} onOpen={(id) => { if (!schedulingIdsRef.current.has(id)) { setSelectedId(id); navigate("workspace"); } }} onSchedule={(id, day) => void rescheduleItem(id, day)} error={calendarError} />}
+    {view === "calendar" && <Calendar items={allSummaries} onOpen={(id) => { setSelectedId(id); navigate("workspace"); }} onSchedule={(id, day) => void rescheduleItem(id, day)} blockedIds={scheduleBlockedIds} pendingIds={schedulePendingIds} error={scheduleError} />}
+
+    {view === "weekly" && <WeeklyMatrix items={allSummaries} enabledTypes={enabledTypes} onOpen={(id) => { setSelectedId(id); navigate("workspace"); }} onSchedule={(id, day) => void rescheduleItem(id, day)} blockedIds={scheduleBlockedIds} pendingIds={schedulePendingIds} error={scheduleError} />}
 
     {view === "settings" && <Settings theme={theme} onThemeChange={setThemeChoice} enabledTypes={enabledTypes} onToggleType={toggleType} counts={counts} workspaceId={workspaceId} />}
 

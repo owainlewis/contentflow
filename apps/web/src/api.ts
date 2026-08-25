@@ -161,8 +161,9 @@ export async function createContent(type: ContentType, csrfToken: string, operat
   return withRequestTimeout((signal) => request<MutationResult>("/api/v1/content", { ...mutationInit("POST", body, csrfToken), signal }), requestTimeout);
 }
 
-export async function replaceContent(id: string, frozenBody: string, csrfToken: string, signal?: AbortSignal): Promise<MutationResult> {
-  return request<MutationResult>(`/api/v1/content/${encodeURIComponent(id)}`, { ...mutationInit("PUT", frozenBody, csrfToken), signal });
+export async function replaceContent(id: string, frozenBody: string, csrfToken: string, signal?: AbortSignal, requestTimeout = 10_000): Promise<MutationResult> {
+  const save = (requestSignal: AbortSignal) => request<MutationResult>(`/api/v1/content/${encodeURIComponent(id)}`, { ...mutationInit("PUT", frozenBody, csrfToken), signal: requestSignal });
+  return signal ? save(signal) : withRequestTimeout(save, requestTimeout);
 }
 
 export async function deleteContent(id: string, revision: number, csrfToken: string, operationId: string, requestTimeout = 10_000): Promise<MutationResult> {

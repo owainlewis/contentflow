@@ -45,6 +45,7 @@ type AutosaveOptions = {
 
 export class AutosaveManager {
   private queues = new Map<string, Queue>();
+  private externalVersions = new Map<string, number>();
   private delay: number;
   private retryDelays: number[];
   private requestTimeout: number;
@@ -91,7 +92,34 @@ export class AutosaveManager {
 
   getVersionStamp(id: string) {
     const queue = this.queues.get(id);
-    return queue ? `${queue.version}:${queue.persistedVersion}` : "0:0";
+    return `${queue?.version ?? 0}:${queue?.persistedVersion ?? 0}:${this.externalVersions.get(id) ?? 0}`;
+  }
+
+  isBusy(id: string) {
+    const queue = this.queues.get(id);
+    return Boolean(queue && (queue.version > queue.persistedVersion || queue.inFlight || queue.conflict || queue.unauthorizedRetry));
+  }
+
+  // Scheduling is saved outside the editor queue. Rebase an idle or debounced
+  // draft onto that server result so the next edit cannot restore stale
+  // metadata or submit an old revision.
+  reconcileExternal(server: ContentDetail) {
+    this.externalVersions.set(server.id, (this.externalVersions.get(server.id) ?? 0) + 1);
+    const queue = this.queues.get(server.id);
+    if (!queue) {
+      this.options.onDocument(server);
+      return true;
+    }
+    if (queue.inFlight || queue.conflict || queue.unauthorizedRetry) return false;
+    if (queue.version > queue.persistedVersion) {
+      queue.draft = rebaseConflictState(queue.draft, server);
+      this.options.onDocument(queue.draft);
+      return true;
+    }
+    queue.draft = server;
+    this.options.onDocument(server);
+    this.options.onState(server.id, "saved");
+    return true;
   }
 
   beginConflict(local: ContentDetail, server: ContentDetail) {
@@ -112,10 +140,10 @@ export class AutosaveManager {
 
   discard(id: string) {
     const queue = this.queues.get(id);
-    if (!queue) return;
-    if (queue.timer) window.clearTimeout(queue.timer);
-    if (queue.retryTimer) window.clearTimeout(queue.retryTimer);
+    if (queue?.timer) window.clearTimeout(queue.timer);
+    if (queue?.retryTimer) window.clearTimeout(queue.retryTimer);
     this.queues.delete(id);
+    this.externalVersions.delete(id);
   }
 
   resolveConflict(id: string, choice: "server" | "local") {
@@ -141,6 +169,7 @@ export class AutosaveManager {
 
   dispose() {
     for (const id of this.queues.keys()) this.discard(id);
+    this.externalVersions.clear();
   }
 
   resumeUnauthorized() {
@@ -309,7 +338,7 @@ export class AutosaveManager {
 
 export function mergeServerState(latest: ContentDetail, server: ContentDetail, frozen: ContentDetail): ContentDetail | undefined {
   if (latest.type !== "youtube" || server.type !== "youtube" || frozen.type !== "youtube") {
-    return { ...latest, revision: server.revision, updated_at: server.updated_at, expires_at: server.expires_at };
+    return mergeMetadata(latest, server);
   }
   const serverContent = server.content as YouTubeContent;
   const frozenContent = frozen.content as YouTubeContent;
@@ -333,6 +362,7 @@ export function mergeServerState(latest: ContentDetail, server: ContentDetail, f
     revision: server.revision,
     updated_at: server.updated_at,
     expires_at: server.expires_at,
+    scheduled_at: server.scheduled_at,
     content: {
       ...latestContent,
       sections: latestContent.sections.map((section, position) => ({
@@ -367,5 +397,6 @@ function mergeMetadata(local: ContentDetail, server: ContentDetail): ContentDeta
     revision: server.revision,
     updated_at: server.updated_at,
     expires_at: server.expires_at,
+    scheduled_at: server.scheduled_at,
   };
 }
