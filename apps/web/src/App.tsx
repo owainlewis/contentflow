@@ -224,6 +224,7 @@ export default function Home() {
   const [createOpen, setCreateOpen] = useState(false);
   const [view, setView] = useState<View>(() => viewFromPath(window.location.pathname));
   const [calendarError, setCalendarError] = useState("");
+  const [schedulingIds, setSchedulingIds] = useState<Set<string>>(() => new Set());
   const [workspaceId, setWorkspaceId] = useState<string>();
   const [enabledTypes, setEnabledTypes] = useState<ContentType[]>(readEnabledTypes);
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(readSidebarCollapsed);
@@ -263,6 +264,7 @@ export default function Home() {
   const requestSequence = useRef(0);
   const sessionGenerationRef = useRef(0);
   const activeFiltersRef = useRef<LibraryFilters>({ query: "", type: "all", status: "all" });
+  const schedulingIdsRef = useRef(new Set<string>());
 
   const refreshLibrary = useCallback(async (filtersOverride?: LibraryFilters) => {
     const sequence = ++requestSequence.current;
@@ -618,20 +620,22 @@ export default function Home() {
   }
 
   function toggleSidebar() {
-    setSidebarCollapsed((current) => {
-      const next = !current;
-      try {
-        window.localStorage.setItem(sidebarCollapsedKey, String(next));
-      } catch {
-        // Collapse still applies for this session.
-      }
-      return next;
-    });
+    const next = !sidebarCollapsed;
+    setSidebarCollapsed(next);
+    try {
+      window.localStorage.setItem(sidebarCollapsedKey, String(next));
+    } catch {
+      // Collapse still applies for this session.
+    }
   }
 
   function setThemeChoice(next: Theme) {
     document.documentElement.dataset.theme = next;
-    window.localStorage.setItem("contentflow-theme", next);
+    try {
+      window.localStorage.setItem("contentflow-theme", next);
+    } catch {
+      // Theme still applies for this session.
+    }
     setTheme(next);
   }
 
@@ -639,7 +643,11 @@ export default function Home() {
     const current = document.documentElement.dataset.theme === "light" ? "light" : "dark";
     const next = current === "dark" ? "light" : "dark";
     document.documentElement.dataset.theme = next;
-    window.localStorage.setItem("contentflow-theme", next);
+    try {
+      window.localStorage.setItem("contentflow-theme", next);
+    } catch {
+      // Theme still applies for this session.
+    }
     setTheme(next);
   }
 
@@ -678,7 +686,7 @@ export default function Home() {
   }
 
   function updateSelected(change: (current: ContentDetail) => ContentDetail) {
-    if (!selected || pendingLifecycle?.id === selected.id) return;
+    if (!selected || pendingLifecycle?.id === selected.id || schedulingIds.has(selected.id)) return;
     const next = change(selected);
     setSelected(next);
     setAllSummaries((items) => items.map((item) => item.id === next.id ? { ...item, working_title: next.working_title, status: next.status, updated_at: new Date().toISOString() } : item));
@@ -779,18 +787,35 @@ export default function Home() {
   // Scheduling is a plain replacement of the whole item, so it goes straight to
   // the API rather than through the selected-document autosave queue.
   async function rescheduleItem(id: string, day: string | undefined) {
-    if (csrfToken === undefined) return;
+    if (csrfToken === undefined || schedulingIdsRef.current.has(id)) return;
+    const manager = autosaveRef.current;
+    if (manager?.getDraft(id) || manager?.getConflict(id)) {
+      setCalendarError("Wait for this item's edits to finish saving before rescheduling it.");
+      return;
+    }
+    schedulingIdsRef.current.add(id);
+    setSchedulingIds(new Set(schedulingIdsRef.current));
     setCalendarError("");
     try {
       const detail = await getContent(id);
       const scheduled = day ? new Date(`${day}T09:00:00`).toISOString() : undefined;
       const body = serializeReplacement({ ...detail, scheduled_at: scheduled }, newOperationId());
       await replaceContent(id, body, csrfTokenRef.current);
+      const saved = await getContent(id);
+      manager?.discard(id);
+      if (selectedIdRef.current === id) {
+        setSelected(saved);
+        setConflict(undefined);
+        setSaveStates((states) => ({ ...states, [id]: "saved" }));
+      }
       requestSequence.current += 1;
       await refreshLibraryRef.current();
     } catch (error) {
       if (isSessionRecoveryError(error)) setSessionExpired(true);
       else setCalendarError("That item could not be rescheduled. Try again.");
+    } finally {
+      schedulingIdsRef.current.delete(id);
+      setSchedulingIds(new Set(schedulingIdsRef.current));
     }
   }
 
@@ -1132,7 +1157,7 @@ export default function Home() {
     </section>
     </>}
 
-    {view === "calendar" && <Calendar items={allSummaries} onOpen={(id) => { setSelectedId(id); navigate("workspace"); }} onSchedule={(id, day) => void rescheduleItem(id, day)} error={calendarError} />}
+    {view === "calendar" && <Calendar items={allSummaries} pendingIds={schedulingIds} onOpen={(id) => { if (!schedulingIdsRef.current.has(id)) { setSelectedId(id); navigate("workspace"); } }} onSchedule={(id, day) => void rescheduleItem(id, day)} error={calendarError} />}
 
     {view === "settings" && <Settings theme={theme} onThemeChange={setThemeChoice} enabledTypes={enabledTypes} onToggleType={toggleType} counts={counts} workspaceId={workspaceId} />}
 

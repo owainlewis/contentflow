@@ -15,6 +15,7 @@
 *.tsbuildinfo
 
 # builds
+/.vinext/
 /bin/*
 !/bin/.gitkeep
 !/apps/api/web/dist/

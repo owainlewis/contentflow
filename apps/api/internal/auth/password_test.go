@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -52,13 +53,55 @@ func newPasswordService(t *testing.T) (*Service, *MemoryStore) {
 	return service, store
 }
 
-func signIn(service *Service, email, password string) *httptest.ResponseRecorder {
+func signIn(t *testing.T, service *Service, email, password string) *httptest.ResponseRecorder {
+	t.Helper()
 	body, _ := json.Marshal(map[string]string{"email": email, "password": password})
-	request := httptest.NewRequest(http.MethodPost, "/api/v1/auth/password", strings.NewReader(string(body)))
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/api/v1/auth/password", strings.NewReader(string(body)))
 	request.Header.Set("Content-Type", "application/json")
 	response := httptest.NewRecorder()
 	service.HandlePasswordLogin(response, request)
 	return response
+}
+
+func TestVerifyPasswordRejectsUnsafeStoredParameters(t *testing.T) {
+	hash, err := HashPassword("safe password")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, unsafe := range []string{
+		strings.Replace(hash, "m=65536", "m=4294967295", 1),
+		strings.Replace(hash, "t=3", "t=0", 1),
+		strings.Replace(hash, "p=4", "p=0", 1),
+		strings.Replace(hash, "m=65536", "m=65536junk", 1),
+		strings.Replace(hash, "v=19", "v=19junk", 1),
+	} {
+		if _, err := VerifyPassword(unsafe, "safe password"); !errors.Is(err, ErrInvalidPasswordHash) {
+			t.Fatalf("unsafe hash was accepted: %q (%v)", unsafe, err)
+		}
+	}
+}
+
+func TestPasswordSignInHasDedicatedLimitsAndConcurrencyCap(t *testing.T) {
+	service, _ := newPasswordService(t)
+	request := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/api/v1/auth/password", nil)
+	for attempt := 0; attempt < passwordAccountRateLimit; attempt++ {
+		allowed, err := service.allowPasswordAuthentication(request, "owner@example.com")
+		if err != nil || !allowed {
+			t.Fatalf("attempt %d was not allowed: %v, %v", attempt+1, allowed, err)
+		}
+	}
+	allowed, err := service.allowPasswordAuthentication(request, "owner@example.com")
+	if err != nil || allowed {
+		t.Fatalf("account limit did not stop the next attempt: %v, %v", allowed, err)
+	}
+
+	service, _ = newPasswordService(t)
+	for range passwordHashConcurrency {
+		service.passwordSlots <- struct{}{}
+	}
+	if response := signIn(t, service, "owner@example.com", "password"); response.Code != http.StatusTooManyRequests {
+		t.Fatalf("saturated password hashing returned %d", response.Code)
+	}
 }
 
 func TestPasswordSignInIssuesASessionAndRejectsBadCredentials(t *testing.T) {
@@ -75,7 +118,7 @@ func TestPasswordSignInIssuesASessionAndRejectsBadCredentials(t *testing.T) {
 	}
 
 	// Email matching ignores case.
-	response := signIn(service, "owain@example.com", "a-sufficiently-long-password")
+	response := signIn(t, service, "owain@example.com", "a-sufficiently-long-password")
 	if response.Code != http.StatusOK {
 		t.Fatalf("valid credentials returned %d: %s", response.Code, response.Body.String())
 	}
@@ -95,15 +138,15 @@ func TestPasswordSignInIssuesASessionAndRejectsBadCredentials(t *testing.T) {
 		t.Fatalf("the issued session was not stored: %v", err)
 	}
 
-	if wrong := signIn(service, "owain@example.com", "not the password"); wrong.Code != http.StatusUnauthorized {
+	if wrong := signIn(t, service, "owain@example.com", "not the password"); wrong.Code != http.StatusUnauthorized {
 		t.Fatalf("a wrong password returned %d", wrong.Code)
 	}
 	// An unknown account and a wrong password must be indistinguishable.
-	unknown := signIn(service, "nobody@example.com", "not the password")
+	unknown := signIn(t, service, "nobody@example.com", "not the password")
 	if unknown.Code != http.StatusUnauthorized {
 		t.Fatalf("an unknown account returned %d", unknown.Code)
 	}
-	wrong := signIn(service, "owain@example.com", "not the password")
+	wrong := signIn(t, service, "owain@example.com", "not the password")
 	if unknown.Body.String() != wrong.Body.String() {
 		t.Fatalf("unknown account and wrong password differ: %q vs %q", unknown.Body.String(), wrong.Body.String())
 	}
@@ -115,7 +158,7 @@ func TestPasswordSignInRejectsEmptyCredentials(t *testing.T) {
 		{"", "a-sufficiently-long-password"},
 		{"owain@example.com", ""},
 	} {
-		if response := signIn(service, test.email, test.password); response.Code != http.StatusUnauthorized {
+		if response := signIn(t, service, test.email, test.password); response.Code != http.StatusUnauthorized {
 			t.Fatalf("empty credentials returned %d", response.Code)
 		}
 	}

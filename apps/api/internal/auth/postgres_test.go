@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
@@ -124,5 +125,41 @@ func TestPostgresRateLimitsAdmitUntilTheLimitAndResetPerWindow(t *testing.T) {
 	allowed, err = store.AllowRequests(ctx, buckets, now.Add(window), window)
 	if err != nil || !allowed {
 		t.Fatalf("a new window did not reset the buckets: %v, %v", allowed, err)
+	}
+}
+
+func TestPostgresRateLimitHandlesConcurrentRequests(t *testing.T) {
+	store := newPostgresStore(t)
+	now := time.Date(2026, 8, 15, 12, 0, 0, 0, time.UTC)
+	const requests = 12
+	const limit = 5
+	results := make(chan bool, requests)
+	errorsByRequest := make(chan error, requests)
+	var group sync.WaitGroup
+	for range requests {
+		group.Add(1)
+		go func() {
+			defer group.Done()
+			allowed, err := store.AllowRequest(context.Background(), "concurrent", now, limit, time.Minute)
+			results <- allowed
+			errorsByRequest <- err
+		}()
+	}
+	group.Wait()
+	close(results)
+	close(errorsByRequest)
+	for err := range errorsByRequest {
+		if err != nil {
+			t.Fatalf("concurrent rate limit failed: %v", err)
+		}
+	}
+	allowedCount := 0
+	for allowed := range results {
+		if allowed {
+			allowedCount++
+		}
+	}
+	if allowedCount != limit {
+		t.Fatalf("allowed %d concurrent requests, want %d", allowedCount, limit)
 	}
 }

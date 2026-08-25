@@ -9,6 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/owainlewis/contentflow/apps/api/internal/database"
 )
 
 // PostgresStore persists content in PostgreSQL. Sections live inside the content
@@ -54,29 +55,35 @@ func (s *PostgresStore) Receipt(ctx context.Context, workspaceID, operationID, r
 // inTransaction runs body in a serializable transaction, replaying a matching
 // receipt before any work so a retried request never mutates twice.
 func (s *PostgresStore) inTransaction(ctx context.Context, receipt Receipt, body func(pgx.Tx) error) (MutationResult, error) {
-	transaction, err := s.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.Serializable})
-	if err != nil {
-		return MutationResult{}, unavailable(err)
-	}
-	defer func() { _ = transaction.Rollback(ctx) }()
+	result, err := database.RetrySerializable(ctx, func() (MutationResult, error) {
+		transaction, err := s.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.Serializable})
+		if err != nil {
+			return MutationResult{}, err
+		}
+		defer func() { _ = transaction.Rollback(ctx) }()
 
-	replay, found, err := transactionReceipt(ctx, transaction, receipt)
+		replay, found, err := transactionReceipt(ctx, transaction, receipt)
+		if err != nil {
+			return MutationResult{}, err
+		}
+		if found {
+			return replay, nil
+		}
+		if err := body(transaction); err != nil {
+			return MutationResult{}, err
+		}
+		if err := writeReceipt(ctx, transaction, receipt); err != nil {
+			return MutationResult{}, err
+		}
+		if err := transaction.Commit(ctx); err != nil {
+			return MutationResult{}, err
+		}
+		return receipt.MutationResult, nil
+	})
 	if err != nil {
-		return MutationResult{}, err
-	}
-	if found {
-		return replay, nil
-	}
-	if err := body(transaction); err != nil {
-		return MutationResult{}, err
-	}
-	if err := writeReceipt(ctx, transaction, receipt); err != nil {
 		return MutationResult{}, unavailable(err)
 	}
-	if err := transaction.Commit(ctx); err != nil {
-		return MutationResult{}, unavailable(err)
-	}
-	return receipt.MutationResult, nil
+	return result, nil
 }
 
 func transactionReceipt(ctx context.Context, transaction pgx.Tx, receipt Receipt) (MutationResult, bool, error) {
