@@ -227,6 +227,7 @@ components:
         working_title: { $ref: '#/components/schemas/Text' }
         status: { $ref: '#/components/schemas/ContentStatus' }
         operation_id: { $ref: '#/components/schemas/OperationID' }
+        scheduled_at: { type: string, format: date-time, description: Optional planned publish date. Omitting it on replace clears it. }
     ReplaceCommon:
       allOf:
         - { $ref: '#/components/schemas/CreateCommon' }

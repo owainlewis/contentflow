@@ -52,7 +52,6 @@ class FakeAPI {
   expireGatedList = false;
   createResponseLostOnce = false;
   deleteResponseLostOnce = false;
-  lifecycleResponseLostOnce = false;
   replaceAuthFailure?: { status: number; code: string };
   createAuthFailure?: { status: number; code: string };
   gatedCreateFailure?: { status: number; code: string };
@@ -63,7 +62,6 @@ class FakeAPI {
   sessionCounter = 0;
   createReceipts = new Map<string, { result: object; status: number }>();
   deleteReceipts = new Map<string, object>();
-  lifecycleReceipts = new Map<string, { signature: string; result: object }>();
 
   constructor(items: ContentDetail[] = [detail("youtube"), detail("linkedin")]) {
     for (const item of items) this.items.set(item.id, item);
@@ -141,7 +139,7 @@ class FakeAPI {
       }
       return json(result, 201);
     }
-    const match = url.pathname.match(/^\/api\/v1\/content\/([^/]+)(?:\/(archive|restore))?$/);
+    const match = url.pathname.match(/^\/api\/v1\/content\/([^/]+)$/);
     if (!match) return json({ error: "not_found" }, 404);
     const id = decodeURIComponent(match[1]);
     if (method === "DELETE") {
@@ -184,53 +182,20 @@ class FakeAPI {
         this.replaceAuthFailure = undefined;
         return json({ error: failure.code }, failure.status);
       }
-      const request = JSON.parse(body) as { working_title: string; status: ContentStatus; revision: number; content: ContentDetail["content"] };
+      const request = JSON.parse(body) as { working_title: string; status: ContentStatus; revision: number; scheduled_at?: string; content: ContentDetail["content"] };
       if (this.conflictNext) {
         this.conflictNext = false;
         const current = { ...item, working_title: "Server changed title", revision: item.revision + 1 };
         this.items.set(id, current);
         return json({ error: "revision_conflict", current }, 409);
       }
-      const saved = { ...item, working_title: request.working_title, status: request.status, content: request.content, revision: item.revision + 1, updated_at: new Date().toISOString() };
+      const saved = { ...item, working_title: request.working_title, status: request.status, scheduled_at: request.scheduled_at, content: request.content, revision: item.revision + 1, updated_at: new Date().toISOString() };
       if (saved.type === "youtube") {
         const content = saved.content as YouTubeContent;
         saved.content = { ...content, sections: content.sections.map((section, position) => ({ ...section, id: section.id ?? `01KSECTION${String(position).padStart(16, "0")}`, clientKey: section.id ?? section.clientKey, position })) };
       }
       this.items.set(id, saved);
       return json({ operation_id: "op", item_ids: [id], revisions: [saved.revision], expires_at: [expires], status: "updated" });
-    }
-    if (method === "POST" && match[2]) {
-      if (this.lifecycleGate) {
-        const gate = this.lifecycleGate;
-        this.lifecycleGate = undefined;
-        await gate;
-      }
-      if (this.gatedLifecycleFailure) {
-        const failure = this.gatedLifecycleFailure;
-        this.gatedLifecycleFailure = undefined;
-        return json({ error: failure.code }, failure.status);
-      }
-      if (this.lifecycleConflictNext) {
-        this.lifecycleConflictNext = false;
-        const current = { ...item, working_title: "Server lifecycle title", revision: item.revision + 1 };
-        this.items.set(id, current);
-        return json({ error: "revision_conflict", current }, 409);
-      }
-      const archived = match[2] === "archive";
-      const saved = { ...item, revision: item.revision + 1, archived_at: archived ? new Date().toISOString() : undefined };
-      this.items.set(id, saved);
-      if (this.failListAfterLifecycle) {
-        this.failListAfterLifecycle = false;
-        this.failNextList = true;
-      }
-      const request = JSON.parse(body) as { operation_id: string };
-      const result = { operation_id: request.operation_id, item_ids: [id], revisions: [saved.revision], expires_at: [expires], status: archived ? "archived" : "restored" };
-      this.lifecycleReceipts.set(request.operation_id, { signature: `${url.pathname}:${body}`, result });
-      if (this.lifecycleResponseLostOnce) {
-        this.lifecycleResponseLostOnce = false;
-        throw new TypeError("response lost after commit");
-      }
-      return json(result);
     }
     if (method === "DELETE") {
       if (this.lifecycleGate) {
@@ -257,9 +222,8 @@ class FakeAPI {
       }
       const result = { operation_id: request.operation_id, item_ids: [id], revisions: [item.revision + 1], expires_at: [expires], status: "deleted" };
       this.deleteReceipts.set(request.operation_id, result);
-      if (this.deleteResponseLostOnce || this.lifecycleResponseLostOnce) {
+      if (this.deleteResponseLostOnce) {
         this.deleteResponseLostOnce = false;
-        this.lifecycleResponseLostOnce = false;
         throw new TypeError("response lost after commit");
       }
       return json(result);
@@ -450,9 +414,9 @@ describe("persistent ContentFlow workspace", () => {
 
     await waitFor(() => expect(deleteRequests(api).length).toBeGreaterThanOrEqual(1), { timeout: 2500 });
     expect(screen.queryByRole("heading", { name: "Your session expired" })).toBeNull();
-    const archives = deleteRequests(api);
-    expect(archives).toHaveLength(2);
-    expect(JSON.parse(archives[1].body).operation_id).toBe(JSON.parse(archives[0].body).operation_id);
+    const deletes = deleteRequests(api);
+    expect(deletes).toHaveLength(2);
+    expect(JSON.parse(deletes[1].body).operation_id).toBe(JSON.parse(deletes[0].body).operation_id);
   });
 
   it("sends title search, type, and status filters to the list API", async () => {
@@ -985,8 +949,8 @@ describe("persistent ContentFlow workspace", () => {
     await user.click(screen.getByRole("button", { name: "I’ve signed in" }));
 
     await waitFor(() => expect(deleteRequests(api).length).toBeGreaterThanOrEqual(1), { timeout: 2500 });
-    const archives = deleteRequests(api).map((request) => JSON.parse(request.body).operation_id);
-    expect(archives).toEqual([archives[0], archives[0]]);
+    const operationIds = deleteRequests(api).map((request) => JSON.parse(request.body).operation_id);
+    expect(operationIds).toEqual([operationIds[0], operationIds[0]]);
     expect(deleteRequests(api).map((request) => request.csrfToken)).toEqual(["csrf-1", "csrf-2"]);
     expect(api.sessionCounter).toBe(2);
   });
@@ -1295,18 +1259,13 @@ describe("persistent ContentFlow workspace", () => {
     await user.click(screen.getByRole("button", { name: /^X one/ }));
     await screen.findByRole("heading", { name: "X one" });
 
-    expect(screen.queryByText(/Review the archive conflict/)).toBeNull();
+    expect(screen.queryByText(/Review the delete conflict/)).toBeNull();
     expect(screen.queryByRole("button", { name: "Review item" })).toBeNull();
     releaseLifecycle();
     await waitFor(() => expect(screen.getByRole("button", { name: "Delete" })).not.toHaveProperty("disabled", true));
   });
 
-  it.each([
-    ["archive", "failure"],
-    ["archive", "session"],
-    ["delete", "failure"],
-    ["delete", "session"],
-  ])("ignores an older %s library %s after a newer filter succeeds", async (action, outcome) => {
+  it.each(["failure", "session"])("ignores an older delete library %s after a newer filter succeeds", async (outcome) => {
     const api = new FakeAPI([detail("linkedin"), detail("x")]);
     vi.stubGlobal("fetch", api.fetch);
     const user = userEvent.setup();
@@ -1318,12 +1277,7 @@ describe("persistent ContentFlow workspace", () => {
     if (outcome === "failure") api.failGatedList = true;
     else api.expireGatedList = true;
 
-    if (action === "archive") {
-      await runDelete(user);
-    } else {
-      await user.click(screen.getByRole("button", { name: "Delete" }));
-      await user.click(screen.getByRole("button", { name: "Delete permanently" }));
-    }
+    await runDelete(user);
     await waitFor(() => expect(api.listGateStarted).toBe(1));
     await user.type(screen.getByLabelText("Search content titles"), "X");
     await waitFor(() => expect(api.requests.some((request) => request.method === "GET" && request.path === "/api/v1/content?q=X")).toBe(true));
@@ -1688,6 +1642,35 @@ describe("persistent ContentFlow workspace", () => {
     const scheduled = (JSON.parse(api.replaceBodies[0]) as { scheduled_at?: string }).scheduled_at;
     expect(scheduled).toBeTruthy();
     expect(new Date(scheduled!).toDateString()).toBe(today.toDateString());
+    await waitFor(() => expect(within(cell).getByRole("button", { name: "LinkedIn one" })).toBeTruthy());
+  });
+
+  it("schedules with the keyboard-accessible date control", async () => {
+    const api = new FakeAPI([detail("linkedin")]);
+    vi.stubGlobal("fetch", api.fetch);
+    const user = userEvent.setup();
+    render(<Home />);
+    await screen.findByRole("heading", { name: "LinkedIn one" });
+    await user.click(screen.getByRole("button", { name: /^Calendar/ }));
+
+    fireEvent.change(await screen.findByLabelText("Schedule LinkedIn one"), { target: { value: "2026-09-14" } });
+
+    await waitFor(() => expect(api.replaceBodies.some((body) => JSON.parse(body).scheduled_at?.startsWith("2026-09-14"))).toBe(true));
+  });
+
+  it("does not reschedule over queued editor changes", async () => {
+    const api = new FakeAPI([detail("linkedin")]);
+    vi.stubGlobal("fetch", api.fetch);
+    const user = userEvent.setup();
+    render(<Home />);
+    const body = await screen.findByLabelText("LinkedIn post");
+    await user.type(body, "unsaved draft");
+    await user.click(screen.getByRole("button", { name: /^Calendar/ }));
+
+    fireEvent.change(await screen.findByLabelText("Schedule LinkedIn one"), { target: { value: "2026-09-14" } });
+
+    expect(await screen.findByText("Wait for this item's edits to finish saving before rescheduling it.")).toBeTruthy();
+    expect(api.replaceBodies.some((requestBody) => JSON.parse(requestBody).scheduled_at)).toBe(false);
   });
 
   it("hides a content type from the sidebar through the settings page", async () => {

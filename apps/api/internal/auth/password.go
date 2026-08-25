@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"golang.org/x/crypto/argon2"
@@ -20,6 +21,13 @@ const (
 	argonThreads = 4
 	argonKeyLen  = 32
 	argonSaltLen = 16
+
+	argonMinMemory  = 8 * 1024
+	argonMaxMemory  = 256 * 1024
+	argonMinTime    = 1
+	argonMaxTime    = 10
+	argonMinThreads = 1
+	argonMaxThreads = 16
 )
 
 var ErrInvalidPasswordHash = errors.New("invalid password hash")
@@ -45,26 +53,49 @@ func VerifyPassword(encoded, password string) (bool, error) {
 	if len(parts) != 6 || parts[1] != "argon2id" {
 		return false, ErrInvalidPasswordHash
 	}
-	var version int
-	if _, err := fmt.Sscanf(parts[2], "v=%d", &version); err != nil || version != argon2.Version {
+	versionText, found := strings.CutPrefix(parts[2], "v=")
+	version, err := strconv.Atoi(versionText)
+	if !found || err != nil || version != argon2.Version || parts[2] != fmt.Sprintf("v=%d", version) {
 		return false, ErrInvalidPasswordHash
 	}
-	var memory uint32
-	var time uint32
-	var threads uint8
-	if _, err := fmt.Sscanf(parts[3], "m=%d,t=%d,p=%d", &memory, &time, &threads); err != nil {
+	parameters := strings.Split(parts[3], ",")
+	if len(parameters) != 3 {
 		return false, ErrInvalidPasswordHash
+	}
+	memory, err := parseHashParameter(parameters[0], "m=", argonMinMemory, argonMaxMemory)
+	if err != nil {
+		return false, err
+	}
+	timeCost, err := parseHashParameter(parameters[1], "t=", argonMinTime, argonMaxTime)
+	if err != nil {
+		return false, err
+	}
+	threads, err := parseHashParameter(parameters[2], "p=", argonMinThreads, argonMaxThreads)
+	if err != nil {
+		return false, err
 	}
 	salt, err := base64.RawStdEncoding.DecodeString(parts[4])
-	if err != nil {
+	if err != nil || len(salt) != argonSaltLen {
 		return false, ErrInvalidPasswordHash
 	}
 	want, err := base64.RawStdEncoding.DecodeString(parts[5])
-	if err != nil {
+	if err != nil || len(want) != argonKeyLen {
 		return false, ErrInvalidPasswordHash
 	}
-	got := argon2.IDKey([]byte(password), salt, time, memory, threads, uint32(len(want)))
+	got := argon2.IDKey([]byte(password), salt, uint32(timeCost), uint32(memory), uint8(threads), argonKeyLen)
 	return subtle.ConstantTimeCompare(got, want) == 1, nil
+}
+
+func parseHashParameter(value, prefix string, minimum, maximum uint64) (uint64, error) {
+	number, found := strings.CutPrefix(value, prefix)
+	if !found || number == "" || strings.HasPrefix(number, "+") || (len(number) > 1 && number[0] == '0') {
+		return 0, ErrInvalidPasswordHash
+	}
+	parsed, err := strconv.ParseUint(number, 10, 32)
+	if err != nil || parsed < minimum || parsed > maximum {
+		return 0, ErrInvalidPasswordHash
+	}
+	return parsed, nil
 }
 
 // dummyPasswordHash is verified against when no user matches, so a missing

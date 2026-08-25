@@ -5,6 +5,7 @@ package database
 import (
 	"context"
 	"embed"
+	"errors"
 	"fmt"
 	"sort"
 	"strconv"
@@ -17,6 +18,8 @@ import (
 
 //go:embed migrations/*.sql
 var migrationFiles embed.FS
+
+const migrationAdvisoryLockKey int64 = 0x43464c4f57
 
 // Open connects, verifies the connection, and applies any pending migrations.
 func Open(ctx context.Context, url string) (*pgxpool.Pool, error) {
@@ -50,8 +53,24 @@ type migration struct {
 
 // Migrate applies every migration the database has not seen, each in its own
 // transaction, in version order. Applying twice is a no-op.
-func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
-	if _, err := pool.Exec(ctx,
+func Migrate(ctx context.Context, pool *pgxpool.Pool) (resultErr error) {
+	connection, err := pool.Acquire(ctx)
+	if err != nil {
+		return fmt.Errorf("acquire migration connection: %w", err)
+	}
+	defer connection.Release()
+	if _, err := connection.Exec(ctx, `select pg_advisory_lock($1)`, migrationAdvisoryLockKey); err != nil {
+		return fmt.Errorf("acquire migration lock: %w", err)
+	}
+	defer func() {
+		unlockContext, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if _, err := connection.Exec(unlockContext, `select pg_advisory_unlock($1)`, migrationAdvisoryLockKey); err != nil {
+			resultErr = errors.Join(resultErr, fmt.Errorf("release migration lock: %w", err))
+		}
+	}()
+
+	if _, err := connection.Exec(ctx,
 		`create table if not exists schema_migrations (
 			version    integer     primary key,
 			name       text        not null,
@@ -61,7 +80,7 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
 	}
 
 	applied := map[int]bool{}
-	rows, err := pool.Query(ctx, `select version from schema_migrations`)
+	rows, err := connection.Query(ctx, `select version from schema_migrations`)
 	if err != nil {
 		return fmt.Errorf("read schema_migrations: %w", err)
 	}
@@ -86,15 +105,15 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
 		if applied[step.version] {
 			continue
 		}
-		if err := applyMigration(ctx, pool, step); err != nil {
+		if err := applyMigration(ctx, connection, step); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func applyMigration(ctx context.Context, pool *pgxpool.Pool, step migration) error {
-	transaction, err := pool.BeginTx(ctx, pgx.TxOptions{})
+func applyMigration(ctx context.Context, connection *pgxpool.Conn, step migration) error {
+	transaction, err := connection.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return fmt.Errorf("begin migration %d: %w", step.version, err)
 	}
@@ -150,12 +169,21 @@ func loadMigrations() ([]migration, error) {
 // Cleanup removes rows past their expiry. Reads already filter on expires_at, so
 // this reclaims space rather than enforcing correctness.
 func Cleanup(ctx context.Context, pool *pgxpool.Pool, now time.Time) (int64, error) {
-	tables := []string{"content_items", "mutation_receipts", "oauth_login_attempts", "sessions", "api_token_rate_limits"}
+	statements := []struct {
+		table string
+		query string
+	}{
+		{"content_items", "delete from content_items where expires_at <= $1"},
+		{"mutation_receipts", "delete from mutation_receipts where expires_at <= $1"},
+		{"oauth_login_attempts", "delete from oauth_login_attempts where expires_at <= $1"},
+		{"sessions", "delete from sessions where expires_at <= $1"},
+		{"api_token_rate_limits", "delete from api_token_rate_limits where expires_at <= $1"},
+	}
 	var removed int64
-	for _, table := range tables {
-		tag, err := pool.Exec(ctx, "delete from "+table+" where expires_at <= $1", now)
+	for _, statement := range statements {
+		tag, err := pool.Exec(ctx, statement.query, now)
 		if err != nil {
-			return removed, fmt.Errorf("cleanup %s: %w", table, err)
+			return removed, fmt.Errorf("cleanup %s: %w", statement.table, err)
 		}
 		removed += tag.RowsAffected()
 	}

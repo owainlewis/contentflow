@@ -18,8 +18,8 @@ import (
 )
 
 const (
-	MaxRequestBytes        = 1 << 20
-	MaxTextBytes           = 500 << 10
+	MaxRequestBytes = 1 << 20
+	MaxTextBytes    = 500 << 10
 	// Firestore rejects a 1,500-byte query operand. Searchable values reserve
 	// one additional byte because a lexicographic successor can grow in UTF-8.
 	MaxIndexedStringBytes = 1498
@@ -499,7 +499,7 @@ func validateBatchOperation(operationID string, itemCount int) error {
 func validateBatchItem(item BatchItemRequest, operationID string) error {
 	request := CreateRequest{
 		Type: item.Type, WorkingTitle: item.WorkingTitle, Status: item.Status,
-		OperationID: operationID, Content: item.Content,
+		OperationID: operationID, ScheduledAt: item.ScheduledAt, Content: item.Content,
 	}
 	if err := validateRequest(request); err != nil {
 		return err
