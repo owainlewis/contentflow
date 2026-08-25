@@ -36,7 +36,10 @@ class FakeAPI {
   requests: Array<{ method: string; path: string; body: string; csrfToken: string | null }> = [];
   replaceBodies: string[] = [];
   replaceGate?: Promise<void>;
+  replaceGates: Promise<void>[] = [];
   replaceGateStarted = 0;
+  replaceReceipts = new Map<string, object>();
+  replaceResponseLostOnce = false;
   enforceRevisions = false;
   conflictNext = false;
   lifecycleConflictNext = false;
@@ -48,6 +51,7 @@ class FakeAPI {
   detailFailures = new Set<string>();
   failNextList = false;
   failDetailAfterReplace = false;
+  failDetailAfterTwoReplaceAttempts = false;
   expireNextList = false;
   failListAfterLifecycle = false;
   listGate?: Promise<void>;
@@ -159,6 +163,10 @@ class FakeAPI {
     const item = this.items.get(id);
     if (!item) return json({ error: "content_not_found" }, 404);
     if (method === "GET") {
+      if (this.failDetailAfterTwoReplaceAttempts && this.replaceBodies.length >= 2) {
+        this.failDetailAfterTwoReplaceAttempts = false;
+        return json({ error: "unavailable" }, 503);
+      }
       if (this.expireNextDetail) {
         this.expireNextDetail = false;
         return json({ error: "session_expired" }, 401);
@@ -181,8 +189,9 @@ class FakeAPI {
     }
     if (method === "PUT") {
       this.replaceBodies.push(body);
-      if (this.replaceGate) {
-        const gate = this.replaceGate;
+      const queuedGate = this.replaceGates.shift();
+      if (queuedGate || this.replaceGate) {
+        const gate = queuedGate ?? this.replaceGate!;
         this.replaceGate = undefined;
         this.replaceGateStarted += 1;
         await gate;
@@ -192,7 +201,9 @@ class FakeAPI {
         this.replaceAuthFailure = undefined;
         return json({ error: failure.code }, failure.status);
       }
-      const request = JSON.parse(body) as { working_title: string; status: ContentStatus; revision: number; scheduled_at?: string; content: ContentDetail["content"] };
+      const request = JSON.parse(body) as { operation_id: string; working_title: string; status: ContentStatus; revision: number; scheduled_at?: string; content: ContentDetail["content"] };
+      const receipt = this.replaceReceipts.get(request.operation_id);
+      if (receipt) return json(receipt);
       if (this.enforceRevisions && request.revision !== item.revision) return json({ error: "revision_conflict", current: item }, 409);
       if (this.conflictNext) {
         this.conflictNext = false;
@@ -210,7 +221,13 @@ class FakeAPI {
         this.failDetailAfterReplace = false;
         this.detailFailures.add(id);
       }
-      return json({ operation_id: "op", item_ids: [id], revisions: [saved.revision], expires_at: [expires], status: "updated" });
+      const result = { operation_id: request.operation_id, item_ids: [id], revisions: [saved.revision], expires_at: [expires], status: "updated" };
+      this.replaceReceipts.set(request.operation_id, result);
+      if (this.replaceResponseLostOnce) {
+        this.replaceResponseLostOnce = false;
+        throw new TypeError("response lost after commit");
+      }
+      return json(result);
     }
     if (method === "DELETE") {
       if (this.lifecycleGate) {
@@ -1842,7 +1859,7 @@ describe("persistent ContentFlow workspace", () => {
     tuesday.setDate(monday.getDate() + 1);
     const linkedin = { ...detail("linkedin"), scheduled_at: monday.toISOString() };
     const api = new FakeAPI([linkedin]);
-    api.replaceGate = new Promise<void>(() => undefined);
+    api.replaceGates = [new Promise<void>(() => undefined), new Promise<void>(() => undefined)];
     vi.stubGlobal("fetch", api.fetch);
     const user = userEvent.setup();
     render(<Home />);
@@ -1853,8 +1870,94 @@ describe("persistent ContentFlow workspace", () => {
     await user.selectOptions(move, `${tuesday.getFullYear()}-${String(tuesday.getMonth() + 1).padStart(2, "0")}-${String(tuesday.getDate()).padStart(2, "0")}`);
 
     expect((await screen.findByRole("alert")).textContent).toContain("That item could not be rescheduled. Try again.");
+    expect(api.replaceBodies).toHaveLength(2);
+    expect(api.replaceBodies[1]).toBe(api.replaceBodies[0]);
     await waitFor(() => expect(move.disabled).toBe(false));
     expect((screen.getByRole("button", { name: "Open LinkedIn one" }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("replays the same schedule mutation when its committed response is lost", async () => {
+    const monday = new Date();
+    monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
+    monday.setHours(9, 0, 0, 0);
+    const tuesday = new Date(monday);
+    tuesday.setDate(monday.getDate() + 1);
+    const linkedin = { ...detail("linkedin"), scheduled_at: monday.toISOString() };
+    const api = new FakeAPI([linkedin]);
+    api.enforceRevisions = true;
+    api.replaceResponseLostOnce = true;
+    vi.stubGlobal("fetch", api.fetch);
+    const user = userEvent.setup();
+    render(<Home />);
+    await screen.findByRole("heading", { name: "LinkedIn one" });
+    await user.click(screen.getByRole("button", { name: /^Weekly/ }));
+
+    await user.selectOptions(screen.getByLabelText("Move LinkedIn one"), `${tuesday.getFullYear()}-${String(tuesday.getMonth() + 1).padStart(2, "0")}-${String(tuesday.getDate()).padStart(2, "0")}`);
+
+    await waitFor(() => expect(api.replaceBodies).toHaveLength(2));
+    expect(api.replaceBodies[1]).toBe(api.replaceBodies[0]);
+    expect(api.items.get(linkedin.id)?.revision).toBe(2);
+    expect(new Date(api.items.get(linkedin.id)!.scheduled_at!).toDateString()).toBe(tuesday.toDateString());
+    await waitFor(() => expect((screen.getByLabelText("Move LinkedIn one") as HTMLSelectElement).disabled).toBe(false));
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("keeps a weekly item locked when a timed-out schedule cannot be confirmed", async () => {
+    expireRequestTimersImmediately();
+    const monday = new Date();
+    monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
+    monday.setHours(9, 0, 0, 0);
+    const tuesday = new Date(monday);
+    tuesday.setDate(monday.getDate() + 1);
+    const linkedin = { ...detail("linkedin"), scheduled_at: monday.toISOString() };
+    const api = new FakeAPI([linkedin]);
+    api.replaceGates = [new Promise<void>(() => undefined), new Promise<void>(() => undefined)];
+    api.failDetailAfterTwoReplaceAttempts = true;
+    vi.stubGlobal("fetch", api.fetch);
+    const user = userEvent.setup();
+    render(<Home />);
+    await screen.findByRole("heading", { name: "LinkedIn one" });
+    await user.click(screen.getByRole("button", { name: /^Weekly/ }));
+    const move = screen.getByLabelText("Move LinkedIn one") as HTMLSelectElement;
+    await user.selectOptions(move, `${tuesday.getFullYear()}-${String(tuesday.getMonth() + 1).padStart(2, "0")}-${String(tuesday.getDate()).padStart(2, "0")}`);
+
+    expect((await screen.findByRole("alert")).textContent).toContain("A schedule update could not be confirmed. Reload before editing or moving the locked item.");
+    expect(api.replaceBodies).toHaveLength(2);
+    expect(move.disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "Open LinkedIn one" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("keeps an uncertain schedule warning visible while another item moves", async () => {
+    expireRequestTimersImmediately();
+    const monday = new Date();
+    monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
+    monday.setHours(9, 0, 0, 0);
+    const tuesday = new Date(monday);
+    tuesday.setDate(monday.getDate() + 1);
+    const wednesday = new Date(monday);
+    wednesday.setDate(monday.getDate() + 2);
+    const linkedin = { ...detail("linkedin"), scheduled_at: monday.toISOString() };
+    const youtube = { ...detail("youtube"), scheduled_at: monday.toISOString() };
+    const api = new FakeAPI([linkedin, youtube]);
+    api.replaceGates = [new Promise<void>(() => undefined), new Promise<void>(() => undefined)];
+    api.failDetailAfterTwoReplaceAttempts = true;
+    vi.stubGlobal("fetch", api.fetch);
+    const user = userEvent.setup();
+    render(<Home />);
+    await screen.findByRole("heading", { name: "LinkedIn one" });
+    await user.click(screen.getByRole("button", { name: /^Weekly/ }));
+
+    const linkedinMove = screen.getByLabelText("Move LinkedIn one") as HTMLSelectElement;
+    await user.selectOptions(linkedinMove, `${tuesday.getFullYear()}-${String(tuesday.getMonth() + 1).padStart(2, "0")}-${String(tuesday.getDate()).padStart(2, "0")}`);
+    const warning = "A schedule update could not be confirmed. Reload before editing or moving the locked item.";
+    expect((await screen.findByRole("alert")).textContent).toContain(warning);
+
+    await user.selectOptions(screen.getByLabelText("Move YouTube one"), `${wednesday.getFullYear()}-${String(wednesday.getMonth() + 1).padStart(2, "0")}-${String(wednesday.getDate()).padStart(2, "0")}`);
+
+    await waitFor(() => expect(new Date(api.items.get(youtube.id)!.scheduled_at!).toDateString()).toBe(wednesday.toDateString()));
+    expect(screen.getByRole("alert").textContent).toContain(warning);
+    expect(linkedinMove.disabled).toBe(true);
+    expect((screen.getByLabelText("Move YouTube one") as HTMLSelectElement).disabled).toBe(false);
   });
 
   it("locks the selected editor while its weekly move is pending", async () => {

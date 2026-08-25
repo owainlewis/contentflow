@@ -57,7 +57,7 @@ import {
   type YouTubeContent,
 } from "./api";
 import AutoTextarea from "./AutoTextarea";
-import Calendar from "./Calendar";
+import Calendar, { dayKey } from "./Calendar";
 import Settings from "./Settings";
 import WeeklyMatrix from "./WeeklyMatrix";
 import { TypeIcon, displayTitle, statusLabels, typeMeta } from "./content-meta";
@@ -246,6 +246,7 @@ export default function Home() {
   const [view, setView] = useState<View>(() => viewFromPath(window.location.pathname));
   const [calendarError, setCalendarError] = useState("");
   const [schedulePendingIds, setSchedulePendingIds] = useState<ReadonlySet<string>>(() => new Set());
+  const [scheduleUncertainIds, setScheduleUncertainIds] = useState<ReadonlySet<string>>(() => new Set());
   const [workspaceId, setWorkspaceId] = useState<string>();
   const [enabledTypes, setEnabledTypes] = useState<ContentType[]>(readEnabledTypes);
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(readSidebarCollapsed);
@@ -632,6 +633,9 @@ export default function Home() {
     for (const [id, state] of Object.entries(saveStates)) if (state !== "saved") blocked.add(id);
     return blocked;
   }, [saveStates, schedulePendingIds]);
+  const scheduleError = scheduleUncertainIds.size
+    ? "A schedule update could not be confirmed. Reload before editing or moving the locked item."
+    : calendarError;
 
   function navigate(next: View) {
     if (window.location.pathname !== viewPaths[next]) window.history.pushState({}, "", viewPaths[next]);
@@ -873,14 +877,23 @@ export default function Home() {
     scheduleLock.add(id);
     setSchedulePendingIds(scheduleLock.snapshot());
     setCalendarError("");
+    let releaseScheduleLock = true;
     try {
-      let detail: ContentDetail;
+      let detail: ContentDetail | undefined;
       let scheduled: string | undefined;
       try {
         detail = await getContent(id);
         scheduled = day ? new Date(`${day}T09:00:00`).toISOString() : undefined;
         const body = serializeReplacement({ ...detail, scheduled_at: scheduled }, newOperationId());
-        const result = await replaceContent(id, body, csrfTokenRef.current);
+        let result;
+        try {
+          result = await replaceContent(id, body, csrfTokenRef.current);
+        } catch (error) {
+          if (error instanceof ApiError) throw error;
+          // The first request may have committed before its response was lost.
+          // Replaying identical bytes is safe because the operation ID is retained.
+          result = await replaceContent(id, body, csrfTokenRef.current);
+        }
         const optimistic = {
           ...detail,
           scheduled_at: scheduled,
@@ -890,7 +903,22 @@ export default function Home() {
         if (!(autosaveRef.current?.reconcileExternal(optimistic)) && selectedIdRef.current === id) setSelected(optimistic);
       } catch (error) {
         if (isSessionRecoveryError(error)) setSessionExpired(true);
-        else setCalendarError("That item could not be rescheduled. Try again.");
+        else if (error instanceof ApiError) setCalendarError("That item could not be rescheduled. Try again.");
+        else {
+          try {
+            const current = await getContent(id);
+            if (!(autosaveRef.current?.reconcileExternal(current)) && selectedIdRef.current === id) setSelected(current);
+            const requestedDay = day || undefined;
+            const currentDay = current.scheduled_at ? dayKey(new Date(current.scheduled_at)) : undefined;
+            setCalendarError(detail && currentDay === requestedDay && current.revision > detail.revision
+              ? "The item was moved, but the response was lost. Its latest details are now loaded."
+              : "That item could not be rescheduled. Try again.");
+          } catch (confirmationError) {
+            if (isSessionRecoveryError(confirmationError)) setSessionExpired(true);
+            releaseScheduleLock = false;
+            setScheduleUncertainIds((ids) => new Set(ids).add(id));
+          }
+        }
         return;
       }
 
@@ -911,7 +939,7 @@ export default function Home() {
       }
       if (refreshFailed) setCalendarError("The item was moved, but its latest details could not be refreshed. Reload to confirm.");
     } finally {
-      scheduleLock.remove(id);
+      if (releaseScheduleLock) scheduleLock.remove(id);
       setSchedulePendingIds(scheduleLock.snapshot());
     }
   }
@@ -1263,9 +1291,9 @@ export default function Home() {
     </section>
     </>}
 
-    {view === "calendar" && <Calendar items={allSummaries} onOpen={(id) => { setSelectedId(id); navigate("workspace"); }} onSchedule={(id, day) => void rescheduleItem(id, day)} blockedIds={scheduleBlockedIds} pendingIds={schedulePendingIds} error={calendarError} />}
+    {view === "calendar" && <Calendar items={allSummaries} onOpen={(id) => { setSelectedId(id); navigate("workspace"); }} onSchedule={(id, day) => void rescheduleItem(id, day)} blockedIds={scheduleBlockedIds} pendingIds={schedulePendingIds} error={scheduleError} />}
 
-    {view === "weekly" && <WeeklyMatrix items={allSummaries} enabledTypes={enabledTypes} onOpen={(id) => { setSelectedId(id); navigate("workspace"); }} onSchedule={(id, day) => void rescheduleItem(id, day)} blockedIds={scheduleBlockedIds} pendingIds={schedulePendingIds} error={calendarError} />}
+    {view === "weekly" && <WeeklyMatrix items={allSummaries} enabledTypes={enabledTypes} onOpen={(id) => { setSelectedId(id); navigate("workspace"); }} onSchedule={(id, day) => void rescheduleItem(id, day)} blockedIds={scheduleBlockedIds} pendingIds={schedulePendingIds} error={scheduleError} />}
 
     {view === "settings" && <Settings theme={theme} onThemeChange={setThemeChoice} enabledTypes={enabledTypes} onToggleType={toggleType} counts={counts} workspaceId={workspaceId} />}
 
