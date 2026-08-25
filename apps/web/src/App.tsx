@@ -250,6 +250,7 @@ export default function Home() {
   const [actionError, setActionError] = useState("");
   const [filterError, setFilterError] = useState("");
   const [expiryClock, setExpiryClock] = useState(0);
+  const [searchFocusRequest, setSearchFocusRequest] = useState(0);
   const [attachments, setAttachments] = useState<Record<string, Attachment[]>>({});
   const [thumbnailPreviews, setThumbnailPreviews] = useState<Record<string, ThumbnailPreview>>({});
   const createModalRef = useRef<HTMLElement>(null);
@@ -541,11 +542,14 @@ export default function Home() {
 
   useEffect(() => {
     if (!searchFocusRequestedRef.current) return;
+    if (view !== "workspace") return;
     const libraryAccessible = isCompact ? libraryOpen : !libraryCollapsed;
     if (!libraryAccessible) return;
-    searchFocusRequestedRef.current = false;
-    searchRef.current?.focus();
-  }, [isCompact, libraryCollapsed, libraryOpen]);
+    const search = searchRef.current;
+    if (!search) return;
+    search.focus();
+    if (document.activeElement === search) searchFocusRequestedRef.current = false;
+  }, [isCompact, libraryCollapsed, libraryOpen, searchFocusRequest, view]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => setTheme(document.documentElement.dataset.theme === "light" ? "light" : "dark"), 0);
@@ -580,7 +584,12 @@ export default function Home() {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
         event.preventDefault();
         searchFocusRequestedRef.current = true;
+        setSearchFocusRequest((request) => request + 1);
         const compactNow = typeof window.matchMedia === "function" && window.matchMedia("(max-width: 900px)").matches;
+        if (view !== "workspace") {
+          if (window.location.pathname !== viewPaths.workspace) window.history.pushState({}, "", viewPaths.workspace);
+          setView("workspace");
+        }
         if (compactNow && !libraryOpen) {
           setLibraryOpen(true);
         } else if (!compactNow && libraryCollapsed) {
@@ -590,9 +599,6 @@ export default function Home() {
           } catch {
             // The library still opens for this session.
           }
-        } else {
-          searchFocusRequestedRef.current = false;
-          searchRef.current?.focus();
         }
       } else if (!event.metaKey && !event.ctrlKey && !event.altKey && event.key.toLowerCase() === "n" && !(event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLSelectElement)) {
         event.preventDefault();
@@ -602,7 +608,7 @@ export default function Home() {
     }
     document.addEventListener("keydown", shortcut);
     return () => document.removeEventListener("keydown", shortcut);
-  }, [createOpen, deleteOpen, isCompact, libraryCollapsed, libraryOpen]);
+  }, [createOpen, deleteOpen, libraryCollapsed, libraryOpen, view]);
 
   const counts = useMemo(() => allSummaries.reduce<Record<ContentType, number>>((result, item) => {
     result[item.type] += 1;
