@@ -516,7 +516,7 @@ export default function Home() {
     if (!panel) return;
     libraryWasOpenRef.current = true;
     const focusable = Array.from(panel.querySelectorAll<HTMLElement>('button:not([disabled]), input, textarea, select, [tabindex]:not([tabindex="-1"])'));
-    focusable[0]?.focus();
+    if (!searchFocusRequestedRef.current && !panel.contains(document.activeElement)) focusable[0]?.focus();
     function handleKey(event: KeyboardEvent) {
       if (event.key === "Escape") {
         event.preventDefault();
@@ -580,9 +580,10 @@ export default function Home() {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
         event.preventDefault();
         searchFocusRequestedRef.current = true;
-        if (isCompact && !libraryOpen) {
+        const compactNow = typeof window.matchMedia === "function" && window.matchMedia("(max-width: 900px)").matches;
+        if (compactNow && !libraryOpen) {
           setLibraryOpen(true);
-        } else if (!isCompact && libraryCollapsed) {
+        } else if (!compactNow && libraryCollapsed) {
           setLibraryCollapsed(false);
           try {
             window.localStorage.setItem(libraryCollapsedKey, "false");

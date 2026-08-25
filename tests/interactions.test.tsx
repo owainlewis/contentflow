@@ -1959,6 +1959,39 @@ describe("persistent ContentFlow workspace", () => {
     expect(document.querySelector(".editor-panel")?.hasAttribute("inert")).toBe(true);
   });
 
+  it.each([
+    ["expanded", false],
+    ["collapsed", true],
+  ])("keeps search focus while crossing from an %s desktop library into the mobile breakpoint", async (_state, collapsed) => {
+    if (collapsed) window.localStorage.setItem("contentflow-library-collapsed", "true");
+    let compact = false;
+    let notifyChange: (() => void) | undefined;
+    const media = {
+      get matches() { return compact; },
+      media: "(max-width: 900px)",
+      onchange: null,
+      addEventListener: vi.fn((_event: string, listener: () => void) => { notifyChange = listener; }),
+      removeEventListener: vi.fn(),
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    };
+    vi.stubGlobal("matchMedia", vi.fn(() => media));
+    const api = new FakeAPI([detail("email")]);
+    vi.stubGlobal("fetch", api.fetch);
+    const user = userEvent.setup();
+    render(<Home />);
+    await screen.findByRole("heading", { name: "Email one" });
+
+    compact = true;
+    await user.keyboard("{Control>}k{/Control}");
+    act(() => notifyChange?.());
+
+    const search = screen.getByRole("textbox", { name: "Search content titles" });
+    await waitFor(() => expect(document.activeElement).toBe(search));
+    expect(document.querySelector(".editor-panel")?.hasAttribute("inert")).toBe(true);
+  });
+
   it("can restore a collapsed library from an empty workspace", async () => {
     window.localStorage.setItem("contentflow-library-collapsed", "true");
     const api = new FakeAPI([]);
