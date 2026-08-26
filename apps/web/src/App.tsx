@@ -78,6 +78,12 @@ function viewFromPath(pathname: string): View {
 
 const viewPaths: Record<View, string> = { workspace: "/", weekly: "/weekly", calendar: "/calendar", settings: "/settings" };
 type LifecycleAction = "delete";
+type CreatePlan = { day: string; title: string; attemptId: string };
+
+function scheduledAtFor(day: string) {
+  return new Date(`${day}T09:00:00`).toISOString();
+}
+
 type PendingLifecycle = { id: string; action: LifecycleAction };
 type LibraryFilters = { query: string; type: ContentType | "all"; status: ContentStatus | "all" };
 type Attachment = { id: string; kind: "image" | "video" | "pdf"; name: string; size: number };
@@ -236,7 +242,7 @@ export default function Home() {
   const [signInPassword, setSignInPassword] = useState("");
   const [signInError, setSignInError] = useState("");
   const [signInPending, setSignInPending] = useState(false);
-  const [pendingSessionCreate, setPendingSessionCreate] = useState<ContentType>();
+  const [pendingSessionCreate, setPendingSessionCreate] = useState<{ type: ContentType; plan?: CreatePlan }>();
   const [pendingSessionLifecycle, setPendingSessionLifecycle] = useState<{ document: ContentDetail; action: LifecycleAction }>();
   const [loadError, setLoadError] = useState("");
   const [detailError, setDetailError] = useState("");
@@ -245,6 +251,8 @@ export default function Home() {
   const [createOpen, setCreateOpen] = useState(false);
   const [view, setView] = useState<View>(() => viewFromPath(window.location.pathname));
   const [calendarError, setCalendarError] = useState("");
+  const [weeklyCreateError, setWeeklyCreateError] = useState("");
+  const [completedWeeklyAttemptId, setCompletedWeeklyAttemptId] = useState("");
   const [schedulePendingIds, setSchedulePendingIds] = useState<ReadonlySet<string>>(() => new Set());
   const [scheduleUncertainIds, setScheduleUncertainIds] = useState<ReadonlySet<string>>(() => new Set());
   const [workspaceId, setWorkspaceId] = useState<string>();
@@ -282,7 +290,7 @@ export default function Home() {
   const autosaveRef = useRef<AutosaveManager | undefined>(undefined);
   const csrfTokenRef = useRef("");
   const createPendingRef = useRef(false);
-  const createOperationIdsRef = useRef(new Map<ContentType, string>());
+  const createOperationIdsRef = useRef(new Map<string, string>());
   const lifecycleOperationIdsRef = useRef(new Map<string, string>());
   const lifecycleSynchronizationRef = useRef(0);
   const pendingLifecycleRef = useRef<PendingLifecycle | undefined>(undefined);
@@ -746,7 +754,7 @@ export default function Home() {
       autosaveRef.current?.resumeUnauthorized();
       setPendingSessionCreate(undefined);
       setPendingSessionLifecycle(undefined);
-      if (pendingSessionCreate) void createItem(pendingSessionCreate);
+      if (pendingSessionCreate) void createItem(pendingSessionCreate.type, pendingSessionCreate.plan);
       if (pendingSessionLifecycle) void performLifecycle(pendingSessionLifecycle.document, pendingSessionLifecycle.action);
       setDetailReload((current) => current + 1);
       const refresh = refreshLibraryRef.current();
@@ -808,59 +816,67 @@ export default function Home() {
     updateYouTubeSections((selected.content as YouTubeContent).sections.filter((section) => section.clientKey !== clientKey));
   }
 
-  async function createItem(type: ContentType) {
-    if (csrfToken === undefined || createPendingRef.current) return;
+  async function createItem(type: ContentType, plan?: CreatePlan): Promise<boolean> {
+    if (csrfToken === undefined || createPendingRef.current) return false;
     lifecycleSynchronizationRef.current += 1;
     createPendingRef.current = true;
     setCreatePending(true);
-    setActionError("");
-    const operationId = createOperationIdsRef.current.get(type) ?? newOperationId();
-    createOperationIdsRef.current.set(type, operationId);
+    const setCreateError = plan ? setWeeklyCreateError : setActionError;
+    setCreateError("");
+    const operationKey = plan ? `weekly:${plan.attemptId}` : type;
+    const operationId = createOperationIdsRef.current.get(operationKey) ?? newOperationId();
+    createOperationIdsRef.current.set(operationKey, operationId);
     const mutationSessionGeneration = sessionGenerationRef.current;
     let retryAfterStaleSession = false;
+    let created = false;
     try {
-      const result = await createContent(type, csrfTokenRef.current, operationId);
+      const result = await createContent(type, csrfTokenRef.current, operationId, plan ? { workingTitle: plan.title, scheduledAt: scheduledAtFor(plan.day) } : {});
+      created = true;
+      if (plan) setCompletedWeeklyAttemptId(plan.attemptId);
       requestSequence.current += 1;
-      setActionError("");
-      createOperationIdsRef.current.delete(type);
+      setCreateError("");
+      createOperationIdsRef.current.delete(operationKey);
       // Stay in the section the item was created from; clearing to "all" would
       // bounce the writer out of the type they deliberately filtered to.
       const retainedType = typeFilter === type ? type : "all";
-      const clearedFilters: LibraryFilters = { query: "", type: retainedType, status: "all" };
-      activeFiltersRef.current = clearedFilters;
-      setQuery("");
-      setTypeFilter(retainedType);
-      setStatusFilter("all");
-      setSelectedId(result.item_ids[0]);
-      setCreateOpen(false);
-      setLibraryOpen(false);
+      const clearedFilters: LibraryFilters = plan ? activeFiltersRef.current : { query: "", type: retainedType, status: "all" };
+      if (!plan) {
+        activeFiltersRef.current = clearedFilters;
+        setQuery("");
+        setTypeFilter(retainedType);
+        setStatusFilter("all");
+        setSelectedId(result.item_ids[0]);
+        setCreateOpen(false);
+        setLibraryOpen(false);
+      }
       const refresh = refreshLibraryRef.current(clearedFilters);
       const refreshSequence = requestSequence.current;
       try {
         await refresh;
       } catch (error) {
-        if (refreshSequence !== requestSequence.current) return;
+        if (refreshSequence !== requestSequence.current) return created;
         if (isSessionRecoveryError(error)) {
           setSessionExpired(true);
         } else {
-          setActionError("The item was created, but the library could not be refreshed.");
+          setCreateError("The item was created, but the library could not be refreshed.");
         }
       }
     } catch (error) {
       if (isSessionRecoveryError(error)) {
         if (mutationSessionGeneration !== sessionGenerationRef.current) retryAfterStaleSession = true;
         else {
-          setPendingSessionCreate(type);
+          setPendingSessionCreate({ type, plan });
           setSessionExpired(true);
         }
       }
-      if (error instanceof ApiError && error.status < 500 && !isSessionRecoveryError(error)) createOperationIdsRef.current.delete(type);
-      if (!isSessionRecoveryError(error)) setActionError("The new item could not be created.");
+      if (error instanceof ApiError && error.status < 500 && !isSessionRecoveryError(error)) createOperationIdsRef.current.delete(operationKey);
+      if (!isSessionRecoveryError(error)) setCreateError("The new item could not be created.");
     } finally {
       createPendingRef.current = false;
       setCreatePending(false);
     }
-    if (retryAfterStaleSession) void createItem(type);
+    if (retryAfterStaleSession) return createItem(type, plan);
+    return created;
   }
 
   // A type section is already an answer to "what are you creating?", so skip the
@@ -1295,7 +1311,7 @@ export default function Home() {
 
     {view === "calendar" && <Calendar items={allSummaries} onOpen={(id) => { setSelectedId(id); navigate("workspace"); }} onSchedule={(id, day) => void rescheduleItem(id, day)} blockedIds={scheduleBlockedIds} pendingIds={schedulePendingIds} error={scheduleError} />}
 
-    {view === "weekly" && <WeeklyMatrix items={allSummaries} enabledTypes={enabledTypes} onOpen={(id) => { setSelectedId(id); navigate("workspace"); }} onSchedule={(id, day) => void rescheduleItem(id, day)} blockedIds={scheduleBlockedIds} pendingIds={schedulePendingIds} error={scheduleError} />}
+    {view === "weekly" && <WeeklyMatrix items={allSummaries} enabledTypes={enabledTypes} onOpen={(id) => { setSelectedId(id); navigate("workspace"); }} onSchedule={(id, day) => void rescheduleItem(id, day)} onCreate={(type, day, title, attemptId) => createItem(type, { day, title, attemptId })} createPending={createPending} createError={weeklyCreateError} completedAttemptId={completedWeeklyAttemptId} blockedIds={scheduleBlockedIds} pendingIds={schedulePendingIds} error={scheduleError} />}
 
     {view === "settings" && <Settings theme={theme} onThemeChange={setThemeChoice} enabledTypes={enabledTypes} onToggleType={toggleType} counts={counts} workspaceId={workspaceId} />}
 

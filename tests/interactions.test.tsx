@@ -133,11 +133,11 @@ class FakeAPI {
         this.gatedCreateFailure = undefined;
         return json({ error: failure.code }, failure.status);
       }
-      const request = JSON.parse(body) as { type: ContentType; working_title: string; status: ContentStatus; operation_id: string; content: ContentDetail["content"] };
+      const request = JSON.parse(body) as { type: ContentType; working_title: string; status: ContentStatus; operation_id: string; scheduled_at?: string; content: ContentDetail["content"] };
       const receipt = this.createReceipts.get(request.operation_id);
       if (receipt) return json(receipt.result, receipt.status);
       const id = `01KCREATED${String(this.items.size).padStart(16, "0")}`;
-      const created = { ...detail(request.type, id), working_title: request.working_title, status: request.status, content: request.content };
+      const created = { ...detail(request.type, id), working_title: request.working_title, status: request.status, content: request.content, ...(request.scheduled_at ? { scheduled_at: request.scheduled_at } : {}) };
       this.items.set(id, created);
       const result = { operation_id: request.operation_id, item_ids: [id], revisions: [1], expires_at: [expires], status: "created" };
       this.createReceipts.set(request.operation_id, { result, status: 201 });
@@ -1752,6 +1752,121 @@ describe("persistent ContentFlow workspace", () => {
 
     expect(await screen.findByText("1 piece scheduled this week")).toBeTruthy();
     expect(screen.queryByRole("row", { name: /^TikTok/ })).toBeNull();
+  });
+
+  it("creates content in a weekly matrix cell and can open the same composer after remounting", async () => {
+    const monday = new Date();
+    monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
+    monday.setHours(9, 0, 0, 0);
+    const wednesday = new Date(monday);
+    wednesday.setDate(monday.getDate() + 2);
+    const fullDate = new Intl.DateTimeFormat(undefined, { weekday: "long", day: "numeric", month: "long", year: "numeric" });
+    const api = new FakeAPI([detail("linkedin")]);
+    vi.stubGlobal("fetch", api.fetch);
+    const user = userEvent.setup();
+    render(<Home />);
+    await screen.findByRole("heading", { name: "LinkedIn one" });
+    await user.click(screen.getByRole("button", { name: /^Weekly/ }));
+
+    await user.click(await screen.findByRole("button", { name: `Add LinkedIn for ${fullDate.format(wednesday)}` }));
+    await user.type(screen.getByLabelText(`New LinkedIn title for ${fullDate.format(wednesday)}`), "Launch teaser");
+    await user.click(screen.getByRole("button", { name: "Add" }));
+
+    const created = await waitFor(() => {
+      const match = [...api.items.values()].find((item) => item.working_title === "Launch teaser");
+      expect(match).toBeTruthy();
+      return match!;
+    });
+    expect(created.type).toBe("linkedin");
+    expect(created.status).toBe("idea");
+    expect(new Date(created.scheduled_at!).toDateString()).toBe(wednesday.toDateString());
+    expect(await screen.findByRole("button", { name: "Open Launch teaser" })).toBeTruthy();
+    expect(window.location.pathname).toBe("/weekly");
+    expect(screen.getByRole("heading", { name: "Weekly matrix" })).toBeTruthy();
+    expect(screen.queryByLabelText(`New LinkedIn title for ${fullDate.format(wednesday)}`)).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "Calendar" }));
+    await user.click(screen.getByRole("button", { name: "Weekly" }));
+    await user.click(await screen.findByRole("button", { name: `Add LinkedIn for ${fullDate.format(wednesday)}` }));
+    expect(screen.getByLabelText(`New LinkedIn title for ${fullDate.format(wednesday)}`)).toBeTruthy();
+  });
+
+  it("keeps the typed title in the cell when a matrix create fails", async () => {
+    const monday = new Date();
+    monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
+    monday.setHours(9, 0, 0, 0);
+    const fullDate = new Intl.DateTimeFormat(undefined, { weekday: "long", day: "numeric", month: "long", year: "numeric" });
+    const api = new FakeAPI([detail("linkedin")]);
+    api.gatedCreateFailure = { status: 503, code: "unavailable" };
+    api.createGate = Promise.resolve();
+    vi.stubGlobal("fetch", api.fetch);
+    const user = userEvent.setup();
+    render(<Home />);
+    await screen.findByRole("heading", { name: "LinkedIn one" });
+    await user.click(screen.getByRole("button", { name: /^Weekly/ }));
+
+    await user.click(await screen.findByRole("button", { name: `Add LinkedIn for ${fullDate.format(monday)}` }));
+    await user.type(screen.getByLabelText(`New LinkedIn title for ${fullDate.format(monday)}`), "Retry me");
+    await user.click(screen.getByRole("button", { name: "Add" }));
+
+    expect(await screen.findByText("The new item could not be created.")).toBeTruthy();
+    expect((screen.getByLabelText(`New LinkedIn title for ${fullDate.format(monday)}`) as HTMLInputElement).value).toBe("Retry me");
+  });
+
+  it("closes the weekly composer after session recovery retries its create", async () => {
+    const monday = new Date();
+    monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
+    monday.setHours(9, 0, 0, 0);
+    const fullDate = new Intl.DateTimeFormat(undefined, { weekday: "long", day: "numeric", month: "long", year: "numeric" });
+    const api = new FakeAPI([detail("linkedin")]);
+    api.createAuthFailure = { status: 401, code: "session_expired" };
+    vi.stubGlobal("fetch", api.fetch);
+    const user = userEvent.setup();
+    render(<Home />);
+    await screen.findByRole("heading", { name: "LinkedIn one" });
+    await user.click(screen.getByRole("button", { name: /^Weekly/ }));
+
+    await user.click(await screen.findByRole("button", { name: `Add LinkedIn for ${fullDate.format(monday)}` }));
+    const titleInput = screen.getByLabelText(`New LinkedIn title for ${fullDate.format(monday)}`);
+    await user.type(titleInput, "Recovered plan");
+    await user.click(screen.getByRole("button", { name: "Add" }));
+    expect(await screen.findByRole("heading", { name: "Your session expired" })).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "I’ve signed in" }));
+
+    expect(await screen.findByRole("button", { name: "Open Recovered plan" })).toBeTruthy();
+    expect(screen.queryByLabelText(`New LinkedIn title for ${fullDate.format(monday)}`)).toBeNull();
+    const creates = api.requests.filter((request) => request.method === "POST" && request.path === "/api/v1/content").map((request) => JSON.parse(request.body).operation_id);
+    expect(creates).toEqual([creates[0], creates[0]]);
+    expect([...api.items.values()].filter((item) => item.working_title === "Recovered plan")).toHaveLength(1);
+  });
+
+  it("keeps one weekly create operation when its title changes after a lost response", async () => {
+    const monday = new Date();
+    monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
+    monday.setHours(9, 0, 0, 0);
+    const fullDate = new Intl.DateTimeFormat(undefined, { weekday: "long", day: "numeric", month: "long", year: "numeric" });
+    const api = new FakeAPI([detail("linkedin")]);
+    api.createResponseLostOnce = true;
+    vi.stubGlobal("fetch", api.fetch);
+    const user = userEvent.setup();
+    render(<Home />);
+    await screen.findByRole("heading", { name: "LinkedIn one" });
+    await user.click(screen.getByRole("button", { name: /^Weekly/ }));
+
+    await user.click(await screen.findByRole("button", { name: `Add LinkedIn for ${fullDate.format(monday)}` }));
+    const titleInput = screen.getByLabelText(`New LinkedIn title for ${fullDate.format(monday)}`);
+    await user.type(titleInput, "Original plan");
+    await user.click(screen.getByRole("button", { name: "Add" }));
+    expect(await screen.findByText("The new item could not be created.")).toBeTruthy();
+    await user.clear(titleInput);
+    await user.type(titleInput, "Changed after timeout");
+    await user.click(screen.getByRole("button", { name: "Add" }));
+
+    expect(await screen.findByRole("button", { name: "Open Original plan" })).toBeTruthy();
+    expect(screen.queryByLabelText(`New LinkedIn title for ${fullDate.format(monday)}`)).toBeNull();
+    const creates = api.requests.filter((request) => request.method === "POST" && request.path === "/api/v1/content").map((request) => JSON.parse(request.body).operation_id);
+    expect(creates).toEqual([creates[0], creates[0]]);
+    expect([...api.items.values()].filter((item) => item.id.startsWith("01KCREATED"))).toHaveLength(1);
   });
 
   it("moves weekly content with the keyboard-friendly control without opening it", async () => {
