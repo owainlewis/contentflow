@@ -13,6 +13,7 @@ type Props = {
   createPending?: boolean;
   createError?: string;
   completedAttemptId?: string;
+  frozenAttemptId?: string;
   blockedIds?: ReadonlySet<string>;
   pendingIds?: ReadonlySet<string>;
   error?: string;
@@ -36,7 +37,7 @@ function weekLabel(start: Date, end: Date) {
   return `${starts} – ${ends}`;
 }
 
-export default function WeeklyMatrix({ items, enabledTypes, onOpen, onSchedule, onCreate, createPending = false, createError, completedAttemptId, blockedIds = new Set(), pendingIds = new Set(), error }: Props) {
+export default function WeeklyMatrix({ items, enabledTypes, onOpen, onSchedule, onCreate, createPending = false, createError, completedAttemptId, frozenAttemptId, blockedIds = new Set(), pendingIds = new Set(), error }: Props) {
   const [weekStart, setWeekStart] = useState(() => mondayOf(new Date()));
   const [dragging, setDragging] = useState<string>();
   const [dragOver, setDragOver] = useState<string>();
@@ -49,6 +50,7 @@ export default function WeeklyMatrix({ items, enabledTypes, onOpen, onSchedule, 
   const label = weekLabel(days[0], days[6]);
   const activeComposer = composer?.attemptId === completedAttemptId ? undefined : composer;
   const composerCellKey = activeComposer?.cell;
+  const composerFrozen = activeComposer?.attemptId === frozenAttemptId;
 
   useEffect(() => {
     if (composerCellKey) composerInput.current?.focus();
@@ -114,12 +116,12 @@ export default function WeeklyMatrix({ items, enabledTypes, onOpen, onSchedule, 
           placeholder="Working title"
           required
           value={activeComposer.title}
-          disabled={createPending}
+          disabled={createPending || composerFrozen}
           onChange={(event) => setComposer({ ...activeComposer, title: event.target.value })}
           onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); setComposer(undefined); } }}
         />
         <div className="weekly-composer-actions">
-          <button type="submit" className="weekly-composer-save" disabled={createPending || !activeComposer.title.trim()}>{createPending ? "Adding…" : "Add"}</button>
+          <button type="submit" className="weekly-composer-save" disabled={createPending || !activeComposer.title.trim()}>{createPending ? "Adding…" : composerFrozen ? "Retry" : "Add"}</button>
           <button type="button" onClick={() => setComposer(undefined)}>Cancel</button>
         </div>
       </form>

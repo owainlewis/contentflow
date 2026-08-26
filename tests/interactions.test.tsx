@@ -1812,8 +1812,11 @@ describe("persistent ContentFlow workspace", () => {
     await user.type(screen.getByLabelText(`New LinkedIn title for ${fullDate.format(monday)}`), "Retry me");
     await user.click(screen.getByRole("button", { name: "Add" }));
 
-    expect(await screen.findByText("The new item could not be created.")).toBeTruthy();
-    expect((screen.getByLabelText(`New LinkedIn title for ${fullDate.format(monday)}`) as HTMLInputElement).value).toBe("Retry me");
+    expect(await screen.findByText("The new item could not be confirmed. Retry with the same title.")).toBeTruthy();
+    const retainedTitle = screen.getByLabelText(`New LinkedIn title for ${fullDate.format(monday)}`) as HTMLInputElement;
+    expect(retainedTitle.value).toBe("Retry me");
+    expect(retainedTitle.disabled).toBe(true);
+    expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy();
   });
 
   it("closes the weekly composer after session recovery retries its create", async () => {
@@ -1843,7 +1846,7 @@ describe("persistent ContentFlow workspace", () => {
     expect([...api.items.values()].filter((item) => item.working_title === "Recovered plan")).toHaveLength(1);
   });
 
-  it("keeps one weekly create operation when its title changes after a lost response", async () => {
+  it("locks a weekly create to its original payload after a lost response", async () => {
     const monday = new Date();
     monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
     monday.setHours(9, 0, 0, 0);
@@ -1860,10 +1863,9 @@ describe("persistent ContentFlow workspace", () => {
     const titleInput = screen.getByLabelText(`New LinkedIn title for ${fullDate.format(monday)}`);
     await user.type(titleInput, "Original plan");
     await user.click(screen.getByRole("button", { name: "Add" }));
-    expect(await screen.findByText("The new item could not be created.")).toBeTruthy();
-    await user.clear(titleInput);
-    await user.type(titleInput, "Changed after timeout");
-    await user.click(screen.getByRole("button", { name: "Add" }));
+    expect(await screen.findByText("The new item could not be confirmed. Retry with the same title.")).toBeTruthy();
+    expect((titleInput as HTMLInputElement).disabled).toBe(true);
+    await user.click(screen.getByRole("button", { name: "Retry" }));
 
     expect(await screen.findByRole("button", { name: "Open Original plan" })).toBeTruthy();
     expect(screen.queryByLabelText(`New LinkedIn title for ${fullDate.format(monday)}`)).toBeNull();

@@ -253,6 +253,7 @@ export default function Home() {
   const [calendarError, setCalendarError] = useState("");
   const [weeklyCreateError, setWeeklyCreateError] = useState("");
   const [completedWeeklyAttemptId, setCompletedWeeklyAttemptId] = useState("");
+  const [frozenWeeklyAttemptId, setFrozenWeeklyAttemptId] = useState("");
   const [schedulePendingIds, setSchedulePendingIds] = useState<ReadonlySet<string>>(() => new Set());
   const [scheduleUncertainIds, setScheduleUncertainIds] = useState<ReadonlySet<string>>(() => new Set());
   const [workspaceId, setWorkspaceId] = useState<string>();
@@ -833,7 +834,10 @@ export default function Home() {
     try {
       const result = await createContent(type, csrfTokenRef.current, operation.operationId, operation.plan ? { workingTitle: operation.plan.title, scheduledAt: scheduledAtFor(operation.plan.day) } : {});
       created = true;
-      if (plan) setCompletedWeeklyAttemptId(plan.attemptId);
+      if (plan) {
+        setCompletedWeeklyAttemptId(plan.attemptId);
+        setFrozenWeeklyAttemptId("");
+      }
       requestSequence.current += 1;
       setCreateError("");
       createOperationsRef.current.delete(operationKey);
@@ -870,8 +874,15 @@ export default function Home() {
           setSessionExpired(true);
         }
       }
-      if (error instanceof ApiError && error.status < 500 && !isSessionRecoveryError(error)) createOperationsRef.current.delete(operationKey);
-      if (!isSessionRecoveryError(error)) setCreateError("The new item could not be created.");
+      if (error instanceof ApiError && error.status < 500 && !isSessionRecoveryError(error)) {
+        createOperationsRef.current.delete(operationKey);
+        if (plan) setFrozenWeeklyAttemptId("");
+      }
+      if (!isSessionRecoveryError(error)) {
+        const uncertain = !(error instanceof ApiError) || error.status >= 500;
+        if (plan && uncertain) setFrozenWeeklyAttemptId(plan.attemptId);
+        setCreateError(plan && uncertain ? "The new item could not be confirmed. Retry with the same title." : "The new item could not be created.");
+      }
     } finally {
       createPendingRef.current = false;
       setCreatePending(false);
@@ -1312,7 +1323,7 @@ export default function Home() {
 
     {view === "calendar" && <Calendar items={allSummaries} onOpen={(id) => { setSelectedId(id); navigate("workspace"); }} onSchedule={(id, day) => void rescheduleItem(id, day)} blockedIds={scheduleBlockedIds} pendingIds={schedulePendingIds} error={scheduleError} />}
 
-    {view === "weekly" && <WeeklyMatrix items={allSummaries} enabledTypes={enabledTypes} onOpen={(id) => { setSelectedId(id); navigate("workspace"); }} onSchedule={(id, day) => void rescheduleItem(id, day)} onCreate={(type, day, title, attemptId) => createItem(type, { day, title, attemptId })} createPending={createPending} createError={weeklyCreateError} completedAttemptId={completedWeeklyAttemptId} blockedIds={scheduleBlockedIds} pendingIds={schedulePendingIds} error={scheduleError} />}
+    {view === "weekly" && <WeeklyMatrix items={allSummaries} enabledTypes={enabledTypes} onOpen={(id) => { setSelectedId(id); navigate("workspace"); }} onSchedule={(id, day) => void rescheduleItem(id, day)} onCreate={(type, day, title, attemptId) => createItem(type, { day, title, attemptId })} createPending={createPending} createError={weeklyCreateError} completedAttemptId={completedWeeklyAttemptId} frozenAttemptId={frozenWeeklyAttemptId} blockedIds={scheduleBlockedIds} pendingIds={schedulePendingIds} error={scheduleError} />}
 
     {view === "settings" && <Settings theme={theme} onThemeChange={setThemeChoice} enabledTypes={enabledTypes} onToggleType={toggleType} counts={counts} workspaceId={workspaceId} />}
 
