@@ -68,7 +68,7 @@ class FakeAPI {
   expireNextDetail = false;
   excludeExpired = false;
   sessionCounter = 0;
-  createReceipts = new Map<string, { result: object; status: number }>();
+  createReceipts = new Map<string, { body: string; result: object; status: number }>();
   deleteReceipts = new Map<string, object>();
 
   constructor(items: ContentDetail[] = [detail("youtube"), detail("linkedin")]) {
@@ -135,12 +135,12 @@ class FakeAPI {
       }
       const request = JSON.parse(body) as { type: ContentType; working_title: string; status: ContentStatus; operation_id: string; scheduled_at?: string; content: ContentDetail["content"] };
       const receipt = this.createReceipts.get(request.operation_id);
-      if (receipt) return json(receipt.result, receipt.status);
+      if (receipt) return receipt.body === body ? json(receipt.result, receipt.status) : json({ error: "operation_id_conflict" }, 409);
       const id = `01KCREATED${String(this.items.size).padStart(16, "0")}`;
       const created = { ...detail(request.type, id), working_title: request.working_title, status: request.status, content: request.content, ...(request.scheduled_at ? { scheduled_at: request.scheduled_at } : {}) };
       this.items.set(id, created);
       const result = { operation_id: request.operation_id, item_ids: [id], revisions: [1], expires_at: [expires], status: "created" };
-      this.createReceipts.set(request.operation_id, { result, status: 201 });
+      this.createReceipts.set(request.operation_id, { body, result, status: 201 });
       if (this.createResponseLostOnce) {
         this.createResponseLostOnce = false;
         throw new TypeError("response lost after commit");
@@ -1769,8 +1769,11 @@ describe("persistent ContentFlow workspace", () => {
     await user.click(screen.getByRole("button", { name: /^Weekly/ }));
 
     await user.click(await screen.findByRole("button", { name: `Add LinkedIn for ${fullDate.format(wednesday)}` }));
+    const addButton = screen.getByRole("button", { name: "Add" }) as HTMLButtonElement;
+    expect(addButton.disabled).toBe(true);
     await user.type(screen.getByLabelText(`New LinkedIn title for ${fullDate.format(wednesday)}`), "Launch teaser");
-    await user.click(screen.getByRole("button", { name: "Add" }));
+    expect(addButton.disabled).toBe(false);
+    await user.click(addButton);
 
     const created = await waitFor(() => {
       const match = [...api.items.values()].find((item) => item.working_title === "Launch teaser");

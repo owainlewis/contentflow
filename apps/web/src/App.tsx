@@ -290,7 +290,7 @@ export default function Home() {
   const autosaveRef = useRef<AutosaveManager | undefined>(undefined);
   const csrfTokenRef = useRef("");
   const createPendingRef = useRef(false);
-  const createOperationIdsRef = useRef(new Map<string, string>());
+  const createOperationsRef = useRef(new Map<string, { operationId: string; plan?: CreatePlan }>());
   const lifecycleOperationIdsRef = useRef(new Map<string, string>());
   const lifecycleSynchronizationRef = useRef(0);
   const pendingLifecycleRef = useRef<PendingLifecycle | undefined>(undefined);
@@ -824,18 +824,19 @@ export default function Home() {
     const setCreateError = plan ? setWeeklyCreateError : setActionError;
     setCreateError("");
     const operationKey = plan ? `weekly:${plan.attemptId}` : type;
-    const operationId = createOperationIdsRef.current.get(operationKey) ?? newOperationId();
-    createOperationIdsRef.current.set(operationKey, operationId);
+    const existingOperation = createOperationsRef.current.get(operationKey);
+    const operation = existingOperation ?? { operationId: newOperationId(), plan };
+    createOperationsRef.current.set(operationKey, operation);
     const mutationSessionGeneration = sessionGenerationRef.current;
     let retryAfterStaleSession = false;
     let created = false;
     try {
-      const result = await createContent(type, csrfTokenRef.current, operationId, plan ? { workingTitle: plan.title, scheduledAt: scheduledAtFor(plan.day) } : {});
+      const result = await createContent(type, csrfTokenRef.current, operation.operationId, operation.plan ? { workingTitle: operation.plan.title, scheduledAt: scheduledAtFor(operation.plan.day) } : {});
       created = true;
       if (plan) setCompletedWeeklyAttemptId(plan.attemptId);
       requestSequence.current += 1;
       setCreateError("");
-      createOperationIdsRef.current.delete(operationKey);
+      createOperationsRef.current.delete(operationKey);
       // Stay in the section the item was created from; clearing to "all" would
       // bounce the writer out of the type they deliberately filtered to.
       const retainedType = typeFilter === type ? type : "all";
@@ -869,7 +870,7 @@ export default function Home() {
           setSessionExpired(true);
         }
       }
-      if (error instanceof ApiError && error.status < 500 && !isSessionRecoveryError(error)) createOperationIdsRef.current.delete(operationKey);
+      if (error instanceof ApiError && error.status < 500 && !isSessionRecoveryError(error)) createOperationsRef.current.delete(operationKey);
       if (!isSessionRecoveryError(error)) setCreateError("The new item could not be created.");
     } finally {
       createPendingRef.current = false;

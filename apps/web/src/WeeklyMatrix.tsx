@@ -88,7 +88,9 @@ export default function WeeklyMatrix({ items, enabledTypes, onOpen, onSchedule, 
 
   async function submitComposer(type: ContentType, date: Date) {
     if (!activeComposer || createPending) return;
-    if (await onCreate(type, dayKey(date), activeComposer.title.trim(), activeComposer.attemptId)) setComposer(undefined);
+    const title = activeComposer.title.trim();
+    if (!title) return;
+    if (await onCreate(type, dayKey(date), title, activeComposer.attemptId)) setComposer(undefined);
   }
 
   function composerCell(type: ContentType, date: Date, cellKey: string, hasEntries: boolean) {
@@ -110,13 +112,14 @@ export default function WeeklyMatrix({ items, enabledTypes, onOpen, onSchedule, 
           ref={composerInput}
           aria-label={`New ${typeMeta[type].label} title for ${fullDate.format(date)}`}
           placeholder="Working title"
+          required
           value={activeComposer.title}
           disabled={createPending}
           onChange={(event) => setComposer({ ...activeComposer, title: event.target.value })}
           onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); setComposer(undefined); } }}
         />
         <div className="weekly-composer-actions">
-          <button type="submit" className="weekly-composer-save" disabled={createPending}>{createPending ? "Adding…" : "Add"}</button>
+          <button type="submit" className="weekly-composer-save" disabled={createPending || !activeComposer.title.trim()}>{createPending ? "Adding…" : "Add"}</button>
           <button type="button" onClick={() => setComposer(undefined)}>Cancel</button>
         </div>
       </form>
