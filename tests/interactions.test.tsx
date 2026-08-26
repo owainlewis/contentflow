@@ -744,6 +744,23 @@ describe("persistent ContentFlow workspace", () => {
     expect(screen.getByRole("button", { name: "Unpublished" })).toHaveProperty("className", expect.stringContaining("active"));
   });
 
+  it("clears a selection when its edited title stops matching the active search", async () => {
+    const api = new FakeAPI([detail("youtube")]);
+    vi.stubGlobal("fetch", api.fetch);
+    const user = userEvent.setup();
+    render(<Home />);
+    const title = await screen.findByDisplayValue("YouTube one");
+
+    await user.type(screen.getByLabelText("Search content titles"), "YouTube");
+    await waitFor(() => expect(api.requests.some((request) => request.path === "/api/v1/content?q=YouTube")).toBe(true));
+    await user.clear(title);
+    await user.type(title, "Changed title");
+
+    expect(await screen.findByText("No content found", {}, { timeout: 2500 })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /^Changed title/ })).toBeNull();
+    expect(screen.queryByDisplayValue("Changed title")).toBeNull();
+  });
+
   it("does not let an older background refresh overwrite newer filters", async () => {
     const api = new FakeAPI([detail("youtube"), detail("x")]);
     vi.stubGlobal("fetch", api.fetch);
@@ -758,10 +775,10 @@ describe("persistent ContentFlow workspace", () => {
 
     await user.type(screen.getByLabelText("Search content titles"), "X");
     await waitFor(() => expect(api.requests.some((request) => request.path === "/api/v1/content?q=X")).toBe(true));
-    expect(await screen.findByText("X one")).toBeTruthy();
+    expect(await screen.findByRole("button", { name: /^X one/ })).toBeTruthy();
     releaseList();
 
-    expect(await screen.findByText("X one")).toBeTruthy();
+    expect(await screen.findByRole("button", { name: /^X one/ })).toBeTruthy();
     await waitFor(() => expect(screen.queryByRole("button", { name: /^YouTube one refreshed/ })).toBeNull());
   });
 

@@ -431,7 +431,7 @@ export default function Home() {
         setAllSummaries(nextAllSummaries);
         setSummaries(nextSummaries);
         if (selectedIdRef.current === detail.id) {
-          if (matchesLibraryStatus(detail, filters.status)) {
+          if (matchesLibraryFilters(detail, filters)) {
             setSelected(detail);
           } else {
             const replacementId = nextSummaries[0]?.id ?? "";
