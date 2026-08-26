@@ -150,6 +150,15 @@ function normalizeSearchTitle(value: string) {
   return normalizeUnicode15Title(value);
 }
 
+function matchesLibraryFilters(item: ContentSummary, filters: LibraryFilters) {
+  const queryPrefix = normalizeSearchTitle(filters.query.trim());
+  const titleMatches = !queryPrefix || normalizeSearchTitle(item.working_title).startsWith(queryPrefix);
+  const typeMatches = filters.type === "all" || item.type === filters.type;
+  const statusMatches = filters.status === "all"
+    || (filters.status === "unpublished" ? item.status !== "published" : item.status === filters.status);
+  return titleMatches && typeMatches && statusMatches;
+}
+
 function documentWordCount(detail: ContentDetail) {
   if (detail.type === "youtube") {
     const content = detail.content as YouTubeContent;
@@ -334,8 +343,11 @@ export default function Home() {
     setAllSummaries(mergedAll);
     setSummaries(mergedVisible);
     const currentSelectedId = selectedIdRef.current;
-    if (currentSelectedId && !mergedAll.some((item) => item.id === currentSelectedId)) {
-      manager?.discard(currentSelectedId);
+    const currentSelected = mergedAll.find((item) => item.id === currentSelectedId);
+    const selectedExists = Boolean(currentSelected);
+    const selectedHiddenByDefault = hidePublished && currentSelected?.status === "published";
+    if (currentSelectedId && (!selectedExists || selectedHiddenByDefault)) {
+      if (!selectedExists) manager?.discard(currentSelectedId);
       const replacementId = mergedVisible[0]?.id ?? "";
       selectedIdRef.current = replacementId;
       setSelectedId(replacementId);
@@ -381,7 +393,7 @@ export default function Home() {
         setCsrfToken(csrfTokenRef.current);
         setWorkspaceId(session.workspace_id);
         allSummariesRef.current = items;
-        const visibleItems = items.filter((item) => item.status !== "published");
+        const visibleItems = items.filter((item) => matchesLibraryFilters(item, { query: "", type: "all", status: defaultLibraryStatus }));
         summariesRef.current = visibleItems;
         setAllSummaries(items);
         setSummaries(visibleItems);
@@ -1019,8 +1031,11 @@ export default function Home() {
         const deletedSelection = selectedIdRef.current === document.id;
         if (deletedSelection) {
           const activeFilters = activeFiltersRef.current;
-          const hasDefaultStatusFilter = activeFilters.status === "all" || activeFilters.status === "unpublished";
-          const immediateReplacementId = !activeFilters.query && activeFilters.type === "all" && hasDefaultStatusFilter ? visibleRemaining[0]?.id : undefined;
+          const immediateReplacementId = visibleRemaining.find((item) => {
+            const draft = autosaveRef.current?.getDraft(item.id);
+            const candidate = draft ? { ...item, working_title: draft.working_title, status: draft.status } : item;
+            return matchesLibraryFilters(candidate, activeFilters);
+          })?.id;
           selectedIdRef.current = immediateReplacementId ?? "";
           setSelectedId(immediateReplacementId ?? "");
           if (!immediateReplacementId) {

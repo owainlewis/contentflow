@@ -356,6 +356,69 @@ describe("persistent ContentFlow workspace", () => {
     expect(screen.getByRole("button", { name: /^Current draft/ })).toBeTruthy();
   });
 
+  it("moves to the next visible item when the selected item is published", async () => {
+    const api = new FakeAPI([detail("linkedin"), detail("x")]);
+    vi.stubGlobal("fetch", api.fetch);
+    const user = userEvent.setup();
+    render(<Home />);
+
+    await screen.findByRole("heading", { name: "LinkedIn one" });
+    await user.selectOptions(screen.getByRole("combobox", { name: "Content status" }), "published");
+
+    await waitFor(() => expect(api.replaceBodies).toHaveLength(1), { timeout: 2500 });
+    expect(await screen.findByRole("heading", { name: "X one" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /^LinkedIn one/ })).toBeNull();
+    expect(screen.getByRole("button", { name: "Unpublished" })).toHaveProperty("className", expect.stringContaining("active"));
+  });
+
+  it("does not select a stale published replacement while the default filter refreshes", async () => {
+    const published = { ...detail("youtube"), status: "published" as ContentStatus, working_title: "Old published video" };
+    const api = new FakeAPI([detail("linkedin"), published]);
+    vi.stubGlobal("fetch", api.fetch);
+    const user = userEvent.setup();
+    render(<Home />);
+
+    await screen.findByRole("heading", { name: "LinkedIn one" });
+    await user.click(screen.getByRole("button", { name: "All" }));
+    expect(await screen.findByRole("button", { name: /^Old published video/ })).toBeTruthy();
+    let releaseRefresh: () => void = () => undefined;
+    api.listGate = new Promise<void>((resolve) => { releaseRefresh = resolve; });
+
+    await user.click(screen.getByRole("button", { name: "Unpublished" }));
+    await user.click(screen.getByRole("button", { name: "Delete" }));
+    await user.click(screen.getByRole("button", { name: "Delete permanently" }));
+    await waitFor(() => expect(api.listGateStarted).toBe(1));
+
+    expect(screen.queryByRole("heading", { name: "Old published video" })).toBeNull();
+    releaseRefresh();
+    await waitFor(() => expect(screen.queryByRole("button", { name: /^Old published video/ })).toBeNull());
+  });
+
+  it("checks queued drafts before selecting a delete replacement", async () => {
+    const api = new FakeAPI([detail("linkedin"), detail("x")]);
+    let releaseSave: () => void = () => undefined;
+    api.replaceGate = new Promise<void>((resolve) => { releaseSave = resolve; });
+    vi.stubGlobal("fetch", api.fetch);
+    const user = userEvent.setup();
+    render(<Home />);
+
+    await screen.findByRole("heading", { name: "LinkedIn one" });
+    await user.selectOptions(screen.getByRole("combobox", { name: "Content status" }), "published");
+    await user.click(screen.getByRole("button", { name: /^X one/ }));
+    await screen.findByRole("heading", { name: "X one" });
+    await waitFor(() => expect(api.replaceGateStarted).toBe(1), { timeout: 2500 });
+    let releaseRefresh: () => void = () => undefined;
+    api.listGate = new Promise<void>((resolve) => { releaseRefresh = resolve; });
+
+    await runDelete(user);
+    await waitFor(() => expect(api.listGateStarted).toBe(1));
+
+    expect(screen.queryByRole("heading", { name: "LinkedIn one" })).toBeNull();
+    releaseSave();
+    releaseRefresh();
+    await waitFor(() => expect(screen.queryByRole("button", { name: /^LinkedIn one/ })).toBeNull());
+  });
+
   it("ignores a stale detail response that started before autosave completed", async () => {
     const api = new FakeAPI([detail("youtube"), detail("x")]);
     vi.stubGlobal("fetch", api.fetch);
