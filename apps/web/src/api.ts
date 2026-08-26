@@ -150,15 +150,18 @@ export async function getContent(id: string, signal?: AbortSignal, requestTimeou
   return normalizeDetail(await (signal ? load(signal) : withRequestTimeout(load, requestTimeout)));
 }
 
-export async function createContent(type: ContentType, csrfToken: string, operationId: string, requestTimeout = 10_000): Promise<MutationResult> {
+export type CreateOptions = { workingTitle?: string; scheduledAt?: string; requestTimeout?: number };
+
+export async function createContent(type: ContentType, csrfToken: string, operationId: string, options: CreateOptions = {}): Promise<MutationResult> {
   const body = JSON.stringify({
     type,
-    working_title: "",
+    working_title: options.workingTitle ?? "",
     status: "idea",
     operation_id: operationId,
+    ...(options.scheduledAt ? { scheduled_at: options.scheduledAt } : {}),
     content: wireContent(type, emptyContent(type)),
   });
-  return withRequestTimeout((signal) => request<MutationResult>("/api/v1/content", { ...mutationInit("POST", body, csrfToken), signal }), requestTimeout);
+  return withRequestTimeout((signal) => request<MutationResult>("/api/v1/content", { ...mutationInit("POST", body, csrfToken), signal }), options.requestTimeout ?? 10_000);
 }
 
 export async function replaceContent(id: string, frozenBody: string, csrfToken: string, signal?: AbortSignal, requestTimeout = 10_000): Promise<MutationResult> {
