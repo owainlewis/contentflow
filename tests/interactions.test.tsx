@@ -854,6 +854,36 @@ describe("persistent ContentFlow workspace", () => {
     expect(api.requests.filter((request) => request.method === "POST" && request.path === "/api/v1/content")).toHaveLength(1);
   });
 
+  it("puts the YouTube script first and supporting material below it", async () => {
+    const api = new FakeAPI([detail("youtube")]);
+    vi.stubGlobal("fetch", api.fetch);
+    const user = userEvent.setup();
+    render(<Home />);
+
+    const intro = await screen.findByLabelText("Intro script");
+    const main = screen.getByLabelText("Main section script");
+    const outro = screen.getByLabelText("Outro script");
+    const addSection = screen.getByRole("button", { name: "Add section" });
+    const brief = screen.getByText("Video brief").closest("details")!;
+    const assets = screen.getByRole("region", { name: "YouTube assets" });
+    const transcript = screen.getByLabelText("YouTube transcript: what was actually said");
+
+    expect(brief.open).toBe(false);
+    expect(intro.compareDocumentPosition(main) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(main.compareDocumentPosition(outro) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(outro.compareDocumentPosition(addSection) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(addSection.compareDocumentPosition(brief) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(brief.compareDocumentPosition(assets) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(assets.compareDocumentPosition(transcript) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.queryByText("Planned script")).toBeNull();
+    expect(screen.queryByText("Build the story, one block at a time")).toBeNull();
+
+    await user.click(screen.getByText("Video brief"));
+    expect(brief.open).toBe(true);
+    await user.type(screen.getByLabelText("YouTube topic"), "Content systems");
+    expect(brief.open).toBe(true);
+  });
+
   it("keeps the spoken transcript independent from planned script and persists after reload", async () => {
     const item = detail("youtube");
     (item.content as YouTubeContent).sections = [{ clientKey: "intro", position: 0, title: "Intro", body: "Planned opening" }];

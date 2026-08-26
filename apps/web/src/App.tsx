@@ -1152,8 +1152,8 @@ export default function Home() {
     const content = selected.content as YouTubeContent;
     const thumbnail = thumbnailPreviews[selected.id]?.dataUrl;
     const thumbnailInput = `thumbnail-${selected.id}`;
-    return <div className="youtube-editor">
-      <details className="planning-card" open>
+    const brief = (
+      <details key={selected.id} className="planning-card">
         <summary><span className="planning-summary-icon"><Target size={17} /></span><span className="planning-summary-copy"><strong>Video brief</strong><small>Decide why this video should exist before writing it.</small></span><ChevronDown className="summary-chevron" size={17} /></summary>
         <div className="planning-content">
           <div className="planning-section-heading"><span>Strategy</span><small>Shape the idea before you shape the script.</small></div>
@@ -1184,14 +1184,9 @@ export default function Home() {
           </div>
         </div>
       </details>
-      {renderAssetPanel()}
-      <section className="transcript-card" aria-labelledby="transcript-heading">
-        <div className="transcript-heading"><div><p className="eyebrow">Recording transcript</p><h2 id="transcript-heading">What was actually said</h2></div><span>Separate from the planned script</span></div>
-        <p>Paste the spoken words here after recording. Editing this transcript never changes the script sections below.</p>
-        <AutoTextarea aria-label="YouTube transcript: what was actually said" value={content.transcript} minRows={6} placeholder="Paste the words that were actually spoken…" onChange={(event) => updateYouTubeField("transcript", event.target.value)} />
-      </section>
-      <div className="section-intro"><div><p className="eyebrow">Planned script</p><h2>Build the story, one block at a time</h2></div><span>{content.sections.length} sections</span></div>
-      {content.sections.map((section, index) => <section className="script-block" key={section.clientKey}>
+    );
+    return <div className="youtube-editor">
+      {content.sections.map((section, index) => <section className="script-block" data-last={index === content.sections.length - 1 ? "true" : undefined} key={section.clientKey}>
         <div className="block-rail"><span>{String(index + 1).padStart(2, "0")}</span><span className="rail-line" /></div>
         <div className="block-content">
           <div className="block-topline"><input aria-label={`Section ${index + 1} name`} value={section.title} onChange={(event) => editYouTubeSection(section.clientKey, { title: event.target.value })} /><span className="section-actions"><button aria-label={`Move ${section.title || `section ${index + 1}`} up`} disabled={index === 0} onClick={() => moveYouTubeSection(index, -1)}><ArrowUp size={15} /></button><button aria-label={`Move ${section.title || `section ${index + 1}`} down`} disabled={index === content.sections.length - 1} onClick={() => moveYouTubeSection(index, 1)}><ArrowDown size={15} /></button><button aria-label={`Remove ${section.title || `section ${index + 1}`}`} onClick={() => removeYouTubeSection(section.clientKey)}><Trash2 size={15} /></button></span></div>
@@ -1200,6 +1195,13 @@ export default function Home() {
         </div>
       </section>)}
       <button className="add-block-button" onClick={() => updateYouTubeSections([...content.sections, { clientKey: newClientKey(), position: content.sections.length, title: `Section ${content.sections.length + 1}`, body: "" }])}><Plus size={17} /> Add section</button>
+      {brief}
+      {renderAssetPanel()}
+      <section className="transcript-card" aria-labelledby="transcript-heading">
+        <div className="transcript-heading"><div><p className="eyebrow">Recording transcript</p><h2 id="transcript-heading">What was actually said</h2></div><span>Separate from the planned script</span></div>
+        <p>Paste the spoken words here after recording. Editing this transcript never changes the script sections above.</p>
+        <AutoTextarea aria-label="YouTube transcript: what was actually said" value={content.transcript} minRows={6} placeholder="Paste the words that were actually spoken…" onChange={(event) => updateYouTubeField("transcript", event.target.value)} />
+      </section>
     </div>;
   }
 
