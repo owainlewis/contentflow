@@ -19,10 +19,10 @@ docs/                 Product and architecture documents
 
 ## Run the complete local stack
 
-Docker with Compose is required. Start the Go application, PostgreSQL 18, and a persistent local asset volume with one command:
+Docker with Compose and [just](https://just.systems/) are required. Start the Go application, PostgreSQL 18, and a persistent local asset volume with one command:
 
 ```bash
-npm run dev
+just dev
 ```
 
 Open `http://127.0.0.1:3100`. The public listener serves the app and proxies same-origin health and API requests to a private listener using a generated secret. The private API port is available only inside the Compose network. Local proxy authentication cannot be enabled when `CONTENTFLOW_ENV=production`.
@@ -30,7 +30,7 @@ Open `http://127.0.0.1:3100`. The public listener serves the app and proxies sam
 Stop the stack with:
 
 ```bash
-npm run dev:down
+just down
 ```
 
 ## Build and run the production binary

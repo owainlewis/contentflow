@@ -10,11 +10,11 @@ install:
 
 # Run the full local stack (Go API + PostgreSQL) in Docker on http://127.0.0.1:3100
 dev:
-    npm run dev
+    ./scripts/local-stack.sh
 
 # Stop the local Docker stack
 down:
-    npm run dev:down
+    docker compose down
 
 # Tail logs from the local Docker stack
 logs:
