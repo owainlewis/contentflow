@@ -335,6 +335,27 @@ describe("persistent ContentFlow workspace", () => {
     expect(JSON.stringify(list)).not.toContain("sections");
   });
 
+  it("hides published content by default and keeps it available through status filters", async () => {
+    const published = { ...detail("youtube"), status: "published" as ContentStatus, working_title: "Old published video" };
+    const current = { ...detail("linkedin"), working_title: "Current draft" };
+    const api = new FakeAPI([published, current]);
+    vi.stubGlobal("fetch", api.fetch);
+    const user = userEvent.setup();
+    render(<Home />);
+
+    expect(await screen.findByRole("button", { name: /^Current draft/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Unpublished" })).toHaveProperty("className", expect.stringContaining("active"));
+    expect(screen.queryByRole("button", { name: /^Old published video/ })).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "Published" }));
+    expect(await screen.findByRole("button", { name: /^Old published video/ })).toBeTruthy();
+    await waitFor(() => expect(api.requests.some((request) => request.path === "/api/v1/content?status=published")).toBe(true));
+
+    await user.click(screen.getByRole("button", { name: "Unpublished" }));
+    await waitFor(() => expect(screen.queryByRole("button", { name: /^Old published video/ })).toBeNull());
+    expect(screen.getByRole("button", { name: /^Current draft/ })).toBeTruthy();
+  });
+
   it("ignores a stale detail response that started before autosave completed", async () => {
     const api = new FakeAPI([detail("youtube"), detail("x")]);
     vi.stubGlobal("fetch", api.fetch);
@@ -625,7 +646,7 @@ describe("persistent ContentFlow workspace", () => {
     expect(await screen.findByRole("heading", { name: /^Email · / })).toBeTruthy();
     expect(screen.getByRole("button", { name: /^Email · / })).toBeTruthy();
     expect((screen.getByLabelText("Search content titles") as HTMLInputElement).value).toBe("");
-    expect(screen.getByRole("button", { name: "All" })).toHaveProperty("className", expect.stringContaining("active"));
+    expect(screen.getByRole("button", { name: "Unpublished" })).toHaveProperty("className", expect.stringContaining("active"));
   });
 
   it("shows a library refresh failure after a successful autosave", async () => {

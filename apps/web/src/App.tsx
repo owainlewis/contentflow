@@ -85,7 +85,9 @@ function scheduledAtFor(day: string) {
 }
 
 type PendingLifecycle = { id: string; action: LifecycleAction };
-type LibraryFilters = { query: string; type: ContentType | "all"; status: ContentStatus | "all" };
+type LibraryStatusFilter = ContentStatus | "unpublished" | "all";
+type LibraryFilters = { query: string; type: ContentType | "all"; status: LibraryStatusFilter };
+const defaultLibraryStatus: LibraryStatusFilter = "unpublished";
 type Attachment = { id: string; kind: "image" | "video" | "pdf"; name: string; size: number };
 type ThumbnailPreview = { dataUrl?: string; requestId: string };
 
@@ -231,7 +233,7 @@ export default function Home() {
   const [selectedId, setSelectedId] = useState("");
   const [selected, setSelected] = useState<ContentDetail>();
   const [typeFilter, setTypeFilter] = useState<ContentType | "all">("all");
-  const [statusFilter, setStatusFilter] = useState<ContentStatus | "all">("all");
+  const [statusFilter, setStatusFilter] = useState<LibraryStatusFilter>(defaultLibraryStatus);
   const [query, setQuery] = useState("");
   const [csrfToken, setCsrfToken] = useState<string>();
   const [authState, setAuthState] = useState<"loading" | "ready" | "signed-out" | "error">("loading");
@@ -300,16 +302,17 @@ export default function Home() {
   const refreshLibraryRef = useRef<(filters?: LibraryFilters) => Promise<void>>(async () => undefined);
   const requestSequence = useRef(0);
   const sessionGenerationRef = useRef(0);
-  const activeFiltersRef = useRef<LibraryFilters>({ query: "", type: "all", status: "all" });
+  const activeFiltersRef = useRef<LibraryFilters>({ query: "", type: "all", status: defaultLibraryStatus });
   const [scheduleLock] = useState(() => new ScheduleLock());
 
   const refreshLibrary = useCallback(async (filtersOverride?: LibraryFilters) => {
     const sequence = ++requestSequence.current;
     const currentFilters = filtersOverride ?? { query, type: typeFilter, status: statusFilter };
     const trimmedQuery = currentFilters.query.trim();
-    const filtered = { q: trimmedQuery || undefined, type: currentFilters.type === "all" ? undefined : currentFilters.type, status: currentFilters.status === "all" ? undefined : currentFilters.status };
-    const hasFilters = Boolean(filtered.q || filtered.type || filtered.status);
-    const [all, visible] = await Promise.all([listContent(), hasFilters ? listContent(filtered) : Promise.resolve(undefined)]);
+    const filtered = { q: trimmedQuery || undefined, type: currentFilters.type === "all" ? undefined : currentFilters.type, status: currentFilters.status === "all" || currentFilters.status === "unpublished" ? undefined : currentFilters.status };
+    const hidePublished = currentFilters.status === "unpublished";
+    const hasServerFilters = Boolean(filtered.q || filtered.type || filtered.status);
+    const [all, visible] = await Promise.all([listContent(), hasServerFilters ? listContent(filtered) : Promise.resolve(undefined)]);
     if (sequence !== requestSequence.current) return;
     const manager = autosaveRef.current;
     const withDraft = (item: ContentSummary) => {
@@ -319,13 +322,12 @@ export default function Home() {
     const mergedAll = all.map(withDraft);
     const visibleIds = new Set((visible ?? all).map((item) => item.id));
     const queryPrefix = filtered.q ? normalizeSearchTitle(filtered.q) : undefined;
-    const mergedVisible = hasFilters ? mergedAll.filter((item) => {
+    const mergedVisible = hasServerFilters || hidePublished ? mergedAll.filter((item) => {
       const draft = manager?.getDraft(item.id);
-      if (!draft) return visibleIds.has(item.id);
-      const titleMatches = !queryPrefix || normalizeSearchTitle(item.working_title).startsWith(queryPrefix);
-      return titleMatches
+      const serverMatches = !draft ? visibleIds.has(item.id) : (!queryPrefix || normalizeSearchTitle(item.working_title).startsWith(queryPrefix))
         && (!filtered.type || item.type === filtered.type)
         && (!filtered.status || item.status === filtered.status);
+      return serverMatches && (!hidePublished || item.status !== "published");
     }) : mergedAll;
     allSummariesRef.current = mergedAll;
     summariesRef.current = mergedVisible;
@@ -379,10 +381,11 @@ export default function Home() {
         setCsrfToken(csrfTokenRef.current);
         setWorkspaceId(session.workspace_id);
         allSummariesRef.current = items;
-        summariesRef.current = items;
+        const visibleItems = items.filter((item) => item.status !== "published");
+        summariesRef.current = visibleItems;
         setAllSummaries(items);
-        setSummaries(items);
-        setSelectedId((current) => current || items[0]?.id || "");
+        setSummaries(visibleItems);
+        setSelectedId((current) => current || visibleItems[0]?.id || "");
         setAuthState("ready");
       } catch (error) {
         if (!active) return;
@@ -844,12 +847,12 @@ export default function Home() {
       // Stay in the section the item was created from; clearing to "all" would
       // bounce the writer out of the type they deliberately filtered to.
       const retainedType = typeFilter === type ? type : "all";
-      const clearedFilters: LibraryFilters = plan ? activeFiltersRef.current : { query: "", type: retainedType, status: "all" };
+      const clearedFilters: LibraryFilters = plan ? activeFiltersRef.current : { query: "", type: retainedType, status: defaultLibraryStatus };
       if (!plan) {
         activeFiltersRef.current = clearedFilters;
         setQuery("");
         setTypeFilter(retainedType);
-        setStatusFilter("all");
+        setStatusFilter(defaultLibraryStatus);
         setSelectedId(result.item_ids[0]);
         setCreateOpen(false);
         setLibraryOpen(false);
@@ -1016,7 +1019,8 @@ export default function Home() {
         const deletedSelection = selectedIdRef.current === document.id;
         if (deletedSelection) {
           const activeFilters = activeFiltersRef.current;
-          const immediateReplacementId = !activeFilters.query && activeFilters.type === "all" && activeFilters.status === "all" ? visibleRemaining[0]?.id : undefined;
+          const hasDefaultStatusFilter = activeFilters.status === "all" || activeFilters.status === "unpublished";
+          const immediateReplacementId = !activeFilters.query && activeFilters.type === "all" && hasDefaultStatusFilter ? visibleRemaining[0]?.id : undefined;
           selectedIdRef.current = immediateReplacementId ?? "";
           setSelectedId(immediateReplacementId ?? "");
           if (!immediateReplacementId) {
@@ -1296,7 +1300,7 @@ export default function Home() {
     <section id="content-library" ref={libraryPanelRef} className={`library-panel ${libraryOpen ? "open" : ""}`} aria-label="Content library" aria-hidden={isCompact ? !libraryOpen : libraryCollapsed || undefined} inert={isCompact ? !libraryOpen : libraryCollapsed}>
       <div className="library-header"><button className="icon-button mobile-close" onClick={() => setLibraryOpen(false)} aria-label="Close library"><ArrowLeft size={19} /></button><div><p className="eyebrow">Workspace</p><h1>{typeFilter === "all" ? "All content" : typeMeta[typeFilter].label}</h1></div><button ref={libraryCollapseButtonRef} className="icon-button library-collapse" onClick={toggleLibrary} aria-label="Collapse content library" aria-controls="content-library" aria-expanded="true"><PanelLeftClose size={18} /></button><button className="icon-button compact-new" onClick={startCreate} aria-label={createLabel}><Plus size={19} /></button></div>
       <label className="search-box"><Search size={17} /><input ref={searchRef} value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search titles" aria-label="Search content titles" /><span className="key-hint">⌘ K</span></label>
-      <div className="filter-row" aria-label="Filter by status"><button className={statusFilter === "all" ? "active" : ""} onClick={() => setStatusFilter("all")}>All</button>{contentStatuses.map((status) => <button key={status} className={statusFilter === status ? "active" : ""} onClick={() => setStatusFilter(status)}>{statusLabels[status]}</button>)}</div>
+      <div className="filter-row" aria-label="Filter by status"><button className={statusFilter === "unpublished" ? "active" : ""} onClick={() => setStatusFilter("unpublished")}>Unpublished</button><button className={statusFilter === "all" ? "active" : ""} onClick={() => setStatusFilter("all")}>All</button>{contentStatuses.map((status) => <button key={status} className={statusFilter === status ? "active" : ""} onClick={() => setStatusFilter(status)}>{statusLabels[status]}</button>)}</div>
       {filterError && <div className="inline-error" role="alert">{filterError}</div>}
       <div className="library-summary"><span>{summaries.length} {summaries.length === 1 ? "item" : "items"}</span><span>Last edited <ChevronDown size={14} /></span></div>
       <div className="content-list">
