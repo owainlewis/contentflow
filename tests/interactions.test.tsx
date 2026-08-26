@@ -1850,6 +1850,10 @@ describe("persistent ContentFlow workspace", () => {
     const monday = new Date();
     monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
     monday.setHours(9, 0, 0, 0);
+    const nextMonday = new Date(monday);
+    nextMonday.setDate(monday.getDate() + 7);
+    const nextTuesday = new Date(nextMonday);
+    nextTuesday.setDate(nextMonday.getDate() + 1);
     const fullDate = new Intl.DateTimeFormat(undefined, { weekday: "long", day: "numeric", month: "long", year: "numeric" });
     const api = new FakeAPI([detail("linkedin")]);
     api.createResponseLostOnce = true;
@@ -1858,20 +1862,33 @@ describe("persistent ContentFlow workspace", () => {
     render(<Home />);
     await screen.findByRole("heading", { name: "LinkedIn one" });
     await user.click(screen.getByRole("button", { name: /^Weekly/ }));
+    await user.click(screen.getByRole("button", { name: "Next week" }));
 
-    await user.click(await screen.findByRole("button", { name: `Add LinkedIn for ${fullDate.format(monday)}` }));
-    const titleInput = screen.getByLabelText(`New LinkedIn title for ${fullDate.format(monday)}`);
+    await user.click(await screen.findByRole("button", { name: `Add LinkedIn for ${fullDate.format(nextMonday)}` }));
+    const titleInput = screen.getByLabelText(`New LinkedIn title for ${fullDate.format(nextMonday)}`);
     await user.type(titleInput, "Original plan");
     await user.click(screen.getByRole("button", { name: "Add" }));
     expect(await screen.findByText("The new item could not be confirmed. Retry with the same title.")).toBeTruthy();
     expect((titleInput as HTMLInputElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "Cancel" }) as HTMLButtonElement).disabled).toBe(true);
+    await user.type(titleInput, "{Escape}");
+    expect(screen.getByLabelText(`New LinkedIn title for ${fullDate.format(nextMonday)}`)).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: "Settings" }));
+    await user.click(await screen.findByRole("button", { name: "Content types" }));
+    await user.click(screen.getByLabelText("Show LinkedIn"));
+    await user.click(screen.getByRole("button", { name: "Calendar" }));
+    await user.click(screen.getByRole("button", { name: "Weekly" }));
+    const restoredTitle = screen.getByLabelText(`New LinkedIn title for ${fullDate.format(nextMonday)}`) as HTMLInputElement;
+    expect(restoredTitle.value).toBe("Original plan");
+    expect(restoredTitle.disabled).toBe(true);
+    expect((screen.getByRole("button", { name: `Add LinkedIn for ${fullDate.format(nextTuesday)}` }) as HTMLButtonElement).disabled).toBe(true);
     await user.click(screen.getByRole("button", { name: "Retry" }));
 
-    expect(await screen.findByRole("button", { name: "Open Original plan" })).toBeTruthy();
-    expect(screen.queryByLabelText(`New LinkedIn title for ${fullDate.format(monday)}`)).toBeNull();
+    await waitFor(() => expect([...api.items.values()].filter((item) => item.id.startsWith("01KCREATED"))).toHaveLength(1));
+    expect(screen.queryByLabelText(`New LinkedIn title for ${fullDate.format(nextMonday)}`)).toBeNull();
     const creates = api.requests.filter((request) => request.method === "POST" && request.path === "/api/v1/content").map((request) => JSON.parse(request.body).operation_id);
     expect(creates).toEqual([creates[0], creates[0]]);
-    expect([...api.items.values()].filter((item) => item.id.startsWith("01KCREATED"))).toHaveLength(1);
   });
 
   it("moves weekly content with the keyboard-friendly control without opening it", async () => {

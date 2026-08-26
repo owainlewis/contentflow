@@ -13,7 +13,7 @@ type Props = {
   createPending?: boolean;
   createError?: string;
   completedAttemptId?: string;
-  frozenAttemptId?: string;
+  frozenPlan?: { type: ContentType; day: string; title: string; attemptId: string };
   blockedIds?: ReadonlySet<string>;
   pendingIds?: ReadonlySet<string>;
   error?: string;
@@ -37,8 +37,8 @@ function weekLabel(start: Date, end: Date) {
   return `${starts} – ${ends}`;
 }
 
-export default function WeeklyMatrix({ items, enabledTypes, onOpen, onSchedule, onCreate, createPending = false, createError, completedAttemptId, frozenAttemptId, blockedIds = new Set(), pendingIds = new Set(), error }: Props) {
-  const [weekStart, setWeekStart] = useState(() => mondayOf(new Date()));
+export default function WeeklyMatrix({ items, enabledTypes, onOpen, onSchedule, onCreate, createPending = false, createError, completedAttemptId, frozenPlan, blockedIds = new Set(), pendingIds = new Set(), error }: Props) {
+  const [weekStart, setWeekStart] = useState(() => mondayOf(frozenPlan ? new Date(`${frozenPlan.day}T12:00:00`) : new Date()));
   const [dragging, setDragging] = useState<string>();
   const [dragOver, setDragOver] = useState<string>();
   const [composer, setComposer] = useState<{ cell: string; title: string; attemptId: string }>();
@@ -48,9 +48,11 @@ export default function WeeklyMatrix({ items, enabledTypes, onOpen, onSchedule, 
   const days = useMemo(() => datesForWeek(weekStart), [weekStart]);
   const today = dayKey(new Date());
   const label = weekLabel(days[0], days[6]);
-  const activeComposer = composer?.attemptId === completedAttemptId ? undefined : composer;
+  const restoredComposer = frozenPlan ? { cell: `${frozenPlan.type}:${frozenPlan.day}`, title: frozenPlan.title, attemptId: frozenPlan.attemptId } : undefined;
+  const activeComposer = composer?.attemptId === completedAttemptId ? undefined : composer ?? restoredComposer;
   const composerCellKey = activeComposer?.cell;
-  const composerFrozen = activeComposer?.attemptId === frozenAttemptId;
+  const composerFrozen = activeComposer?.attemptId === frozenPlan?.attemptId;
+  const displayedTypes = useMemo(() => frozenPlan && !enabledTypes.includes(frozenPlan.type) ? [...enabledTypes, frozenPlan.type] : enabledTypes, [enabledTypes, frozenPlan]);
 
   useEffect(() => {
     if (composerCellKey) composerInput.current?.focus();
@@ -70,9 +72,9 @@ export default function WeeklyMatrix({ items, enabledTypes, onOpen, onSchedule, 
 
   const scheduledThisWeek = useMemo(() => {
     const keys = new Set(days.map(dayKey));
-    const visibleTypes = new Set(enabledTypes);
+    const visibleTypes = new Set(displayedTypes);
     return items.filter((item) => visibleTypes.has(item.type) && item.scheduled_at && keys.has(dayKey(new Date(item.scheduled_at)))).length;
-  }, [days, enabledTypes, items]);
+  }, [days, displayedTypes, items]);
 
   function moveWeek(offset: number) {
     setWeekStart((current) => new Date(current.getFullYear(), current.getMonth(), current.getDate() + (offset * 7)));
@@ -100,6 +102,7 @@ export default function WeeklyMatrix({ items, enabledTypes, onOpen, onSchedule, 
       return (
         <button
           className={`weekly-add ${hasEntries ? "" : "weekly-add-empty"}`}
+          disabled={Boolean(frozenPlan)}
           onClick={() => setComposer({ cell: cellKey, title: "", attemptId: newOperationId() })}
           aria-label={`Add ${typeMeta[type].label} for ${fullDate.format(date)}`}
         >
@@ -118,11 +121,11 @@ export default function WeeklyMatrix({ items, enabledTypes, onOpen, onSchedule, 
           value={activeComposer.title}
           disabled={createPending || composerFrozen}
           onChange={(event) => setComposer({ ...activeComposer, title: event.target.value })}
-          onKeyDown={(event) => { if (event.key === "Escape") { event.preventDefault(); setComposer(undefined); } }}
+          onKeyDown={(event) => { if (event.key === "Escape" && !composerFrozen) { event.preventDefault(); setComposer(undefined); } }}
         />
         <div className="weekly-composer-actions">
           <button type="submit" className="weekly-composer-save" disabled={createPending || !activeComposer.title.trim()}>{createPending ? "Adding…" : composerFrozen ? "Retry" : "Add"}</button>
-          <button type="button" onClick={() => setComposer(undefined)}>Cancel</button>
+          <button type="button" disabled={composerFrozen} onClick={() => setComposer(undefined)}>Cancel</button>
         </div>
       </form>
     );
@@ -203,7 +206,7 @@ export default function WeeklyMatrix({ items, enabledTypes, onOpen, onSchedule, 
             </tr>
           </thead>
           <tbody>
-            {enabledTypes.map((type) => {
+            {displayedTypes.map((type) => {
               const rowCount = days.reduce((count, date) => count + (byCell.get(`${type}:${dayKey(date)}`)?.length ?? 0), 0);
               return (
                 <tr key={type}>

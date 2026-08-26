@@ -253,7 +253,7 @@ export default function Home() {
   const [calendarError, setCalendarError] = useState("");
   const [weeklyCreateError, setWeeklyCreateError] = useState("");
   const [completedWeeklyAttemptId, setCompletedWeeklyAttemptId] = useState("");
-  const [frozenWeeklyAttemptId, setFrozenWeeklyAttemptId] = useState("");
+  const [frozenWeeklyPlan, setFrozenWeeklyPlan] = useState<(CreatePlan & { type: ContentType })>();
   const [schedulePendingIds, setSchedulePendingIds] = useState<ReadonlySet<string>>(() => new Set());
   const [scheduleUncertainIds, setScheduleUncertainIds] = useState<ReadonlySet<string>>(() => new Set());
   const [workspaceId, setWorkspaceId] = useState<string>();
@@ -836,7 +836,7 @@ export default function Home() {
       created = true;
       if (plan) {
         setCompletedWeeklyAttemptId(plan.attemptId);
-        setFrozenWeeklyAttemptId("");
+        setFrozenWeeklyPlan(undefined);
       }
       requestSequence.current += 1;
       setCreateError("");
@@ -876,11 +876,11 @@ export default function Home() {
       }
       if (error instanceof ApiError && error.status < 500 && !isSessionRecoveryError(error)) {
         createOperationsRef.current.delete(operationKey);
-        if (plan) setFrozenWeeklyAttemptId("");
+        if (plan) setFrozenWeeklyPlan(undefined);
       }
       if (!isSessionRecoveryError(error)) {
         const uncertain = !(error instanceof ApiError) || error.status >= 500;
-        if (plan && uncertain) setFrozenWeeklyAttemptId(plan.attemptId);
+        if (plan && uncertain) setFrozenWeeklyPlan({ ...plan, type });
         setCreateError(plan && uncertain ? "The new item could not be confirmed. Retry with the same title." : "The new item could not be created.");
       }
     } finally {
@@ -1323,7 +1323,7 @@ export default function Home() {
 
     {view === "calendar" && <Calendar items={allSummaries} onOpen={(id) => { setSelectedId(id); navigate("workspace"); }} onSchedule={(id, day) => void rescheduleItem(id, day)} blockedIds={scheduleBlockedIds} pendingIds={schedulePendingIds} error={scheduleError} />}
 
-    {view === "weekly" && <WeeklyMatrix items={allSummaries} enabledTypes={enabledTypes} onOpen={(id) => { setSelectedId(id); navigate("workspace"); }} onSchedule={(id, day) => void rescheduleItem(id, day)} onCreate={(type, day, title, attemptId) => createItem(type, { day, title, attemptId })} createPending={createPending} createError={weeklyCreateError} completedAttemptId={completedWeeklyAttemptId} frozenAttemptId={frozenWeeklyAttemptId} blockedIds={scheduleBlockedIds} pendingIds={schedulePendingIds} error={scheduleError} />}
+    {view === "weekly" && <WeeklyMatrix items={allSummaries} enabledTypes={enabledTypes} onOpen={(id) => { setSelectedId(id); navigate("workspace"); }} onSchedule={(id, day) => void rescheduleItem(id, day)} onCreate={(type, day, title, attemptId) => createItem(type, { day, title, attemptId })} createPending={createPending} createError={weeklyCreateError} completedAttemptId={completedWeeklyAttemptId} frozenPlan={frozenWeeklyPlan} blockedIds={scheduleBlockedIds} pendingIds={schedulePendingIds} error={scheduleError} />}
 
     {view === "settings" && <Settings theme={theme} onThemeChange={setThemeChoice} enabledTypes={enabledTypes} onToggleType={toggleType} counts={counts} workspaceId={workspaceId} />}
 
