@@ -150,13 +150,15 @@ function normalizeSearchTitle(value: string) {
   return normalizeUnicode15Title(value);
 }
 
+function matchesLibraryStatus(item: ContentSummary, status: LibraryStatusFilter) {
+  return status === "all" || (status === "unpublished" ? item.status !== "published" : item.status === status);
+}
+
 function matchesLibraryFilters(item: ContentSummary, filters: LibraryFilters) {
   const queryPrefix = normalizeSearchTitle(filters.query.trim());
   const titleMatches = !queryPrefix || normalizeSearchTitle(item.working_title).startsWith(queryPrefix);
   const typeMatches = filters.type === "all" || item.type === filters.type;
-  const statusMatches = filters.status === "all"
-    || (filters.status === "unpublished" ? item.status !== "published" : item.status === filters.status);
-  return titleMatches && typeMatches && statusMatches;
+  return titleMatches && typeMatches && matchesLibraryStatus(item, filters.status);
 }
 
 function documentWordCount(detail: ContentDetail) {
@@ -417,9 +419,28 @@ export default function Home() {
       send: (id, body, signal) => replaceContent(id, body, csrfTokenRef.current, signal),
       resolve: (id, signal) => getContent(id, signal),
       onDocument: (detail) => {
-        if (selectedIdRef.current === detail.id) setSelected(detail);
-        setAllSummaries((items) => items.map((item) => item.id === detail.id ? { ...item, ...detail, asset_counts: item.asset_counts } : item));
-        setSummaries((items) => items.map((item) => item.id === detail.id ? { ...item, ...detail, asset_counts: item.asset_counts } : item));
+        const updateSummary = (item: ContentSummary) => item.id === detail.id ? { ...item, ...detail, asset_counts: item.asset_counts } : item;
+        const nextAllSummaries = allSummariesRef.current.map(updateSummary);
+        const filters = activeFiltersRef.current;
+        const nextSummaries = nextAllSummaries.map((item) => {
+          const draft = autosaveRef.current?.getDraft(item.id);
+          return draft ? { ...item, working_title: draft.working_title, status: draft.status } : item;
+        }).filter((item) => matchesLibraryFilters(item, filters));
+        allSummariesRef.current = nextAllSummaries;
+        summariesRef.current = nextSummaries;
+        setAllSummaries(nextAllSummaries);
+        setSummaries(nextSummaries);
+        if (selectedIdRef.current === detail.id) {
+          if (matchesLibraryStatus(detail, filters.status)) {
+            setSelected(detail);
+          } else {
+            const replacementId = nextSummaries[0]?.id ?? "";
+            selectedIdRef.current = replacementId;
+            setSelectedId(replacementId);
+            setSelected(undefined);
+            setConflict(undefined);
+          }
+        }
       },
       onState: (id, state) => {
         if (state === "unsaved") lifecycleSynchronizationRef.current += 1;
@@ -667,6 +688,21 @@ export default function Home() {
     setLibraryOpen(false);
   }
 
+  function openPlannedItem(id: string) {
+    const item = allSummariesRef.current.find((summary) => summary.id === id);
+    const filters: LibraryFilters = {
+      query: "",
+      type: "all",
+      status: item?.status === "published" ? "published" : defaultLibraryStatus,
+    };
+    activeFiltersRef.current = filters;
+    setQuery(filters.query);
+    setTypeFilter(filters.type);
+    setStatusFilter(filters.status);
+    setSelectedId(id);
+    navigate("workspace");
+  }
+
   async function submitPasswordSignIn(event: React.FormEvent) {
     event.preventDefault();
     if (signInPending) return;
@@ -793,9 +829,17 @@ export default function Home() {
   function updateSelected(change: (current: ContentDetail) => ContentDetail) {
     if (!selected || pendingLifecycle?.id === selected.id || scheduleLock.has(selected.id)) return;
     const next = change(selected);
+    const updatedAt = new Date().toISOString();
+    const updateSummary = (item: ContentSummary) => item.id === next.id
+      ? { ...item, working_title: next.working_title, status: next.status, updated_at: updatedAt }
+      : item;
+    const nextAllSummaries = allSummariesRef.current.map(updateSummary);
+    const nextSummaries = summariesRef.current.map(updateSummary);
     setSelected(next);
-    setAllSummaries((items) => items.map((item) => item.id === next.id ? { ...item, working_title: next.working_title, status: next.status, updated_at: new Date().toISOString() } : item));
-    setSummaries((items) => items.map((item) => item.id === next.id ? { ...item, working_title: next.working_title, status: next.status, updated_at: new Date().toISOString() } : item));
+    allSummariesRef.current = nextAllSummaries;
+    summariesRef.current = nextSummaries;
+    setAllSummaries(nextAllSummaries);
+    setSummaries(nextSummaries);
     autosaveManager?.enqueue(next);
   }
 
@@ -1340,9 +1384,9 @@ export default function Home() {
     </section>
     </>}
 
-    {view === "calendar" && <Calendar items={allSummaries} onOpen={(id) => { setSelectedId(id); navigate("workspace"); }} onSchedule={(id, day) => void rescheduleItem(id, day)} blockedIds={scheduleBlockedIds} pendingIds={schedulePendingIds} error={scheduleError} />}
+    {view === "calendar" && <Calendar items={allSummaries} onOpen={openPlannedItem} onSchedule={(id, day) => void rescheduleItem(id, day)} blockedIds={scheduleBlockedIds} pendingIds={schedulePendingIds} error={scheduleError} />}
 
-    {view === "weekly" && <WeeklyMatrix items={allSummaries} enabledTypes={enabledTypes} onOpen={(id) => { setSelectedId(id); navigate("workspace"); }} onSchedule={(id, day) => void rescheduleItem(id, day)} onCreate={(type, day, title, attemptId) => createItem(type, { day, title, attemptId })} createPending={createPending} createError={weeklyCreateError} completedAttemptId={completedWeeklyAttemptId} frozenPlan={frozenWeeklyPlan} blockedIds={scheduleBlockedIds} pendingIds={schedulePendingIds} error={scheduleError} />}
+    {view === "weekly" && <WeeklyMatrix items={allSummaries} enabledTypes={enabledTypes} onOpen={openPlannedItem} onSchedule={(id, day) => void rescheduleItem(id, day)} onCreate={(type, day, title, attemptId) => createItem(type, { day, title, attemptId })} createPending={createPending} createError={weeklyCreateError} completedAttemptId={completedWeeklyAttemptId} frozenPlan={frozenWeeklyPlan} blockedIds={scheduleBlockedIds} pendingIds={schedulePendingIds} error={scheduleError} />}
 
     {view === "settings" && <Settings theme={theme} onThemeChange={setThemeChoice} enabledTypes={enabledTypes} onToggleType={toggleType} counts={counts} workspaceId={workspaceId} />}
 

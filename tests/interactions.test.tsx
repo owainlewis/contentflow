@@ -728,6 +728,22 @@ describe("persistent ContentFlow workspace", () => {
     await waitFor(() => expect(screen.queryByText("The library could not be refreshed after saving.")).toBeNull(), { timeout: 2500 });
   });
 
+  it("keeps published content hidden when the post-save library refresh fails", async () => {
+    const api = new FakeAPI([detail("linkedin"), detail("x")]);
+    vi.stubGlobal("fetch", api.fetch);
+    const user = userEvent.setup();
+    render(<Home />);
+    await screen.findByRole("heading", { name: "LinkedIn one" });
+    await waitFor(() => expect(api.requests.filter((request) => request.method === "GET" && request.path === "/api/v1/content").length).toBeGreaterThanOrEqual(2));
+    api.failNextList = true;
+
+    await user.selectOptions(screen.getByRole("combobox", { name: "Content status" }), "published");
+
+    expect(await screen.findByRole("heading", { name: "X one" }, { timeout: 2500 })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /^LinkedIn one/ })).toBeNull();
+    expect(screen.getByRole("button", { name: "Unpublished" })).toHaveProperty("className", expect.stringContaining("active"));
+  });
+
   it("does not let an older background refresh overwrite newer filters", async () => {
     const api = new FakeAPI([detail("youtube"), detail("x")]);
     vi.stubGlobal("fetch", api.fetch);
@@ -1997,6 +2013,33 @@ describe("persistent ContentFlow workspace", () => {
     expect(screen.getByRole("heading", { name: "Weekly matrix" })).toBeTruthy();
   });
 
+  it("keeps a published item visible when it is opened from the weekly view", async () => {
+    const monday = new Date();
+    monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
+    monday.setHours(9, 0, 0, 0);
+    const linkedin = { ...detail("linkedin"), scheduled_at: monday.toISOString() };
+    const api = new FakeAPI([linkedin]);
+    let releaseSave: () => void = () => undefined;
+    api.replaceGate = new Promise<void>((resolve) => { releaseSave = resolve; });
+    vi.stubGlobal("fetch", api.fetch);
+    const user = userEvent.setup();
+    render(<Home />);
+
+    await screen.findByRole("heading", { name: "LinkedIn one" });
+    await user.selectOptions(screen.getByRole("combobox", { name: "Content status" }), "published");
+    await user.click(await screen.findByRole("button", { name: /^Weekly/ }));
+    await user.click(await screen.findByRole("button", { name: "Open LinkedIn one" }));
+
+    const post = await screen.findByLabelText("LinkedIn post");
+    expect(screen.getByRole("button", { name: "Published" })).toHaveProperty("className", expect.stringContaining("active"));
+    await waitFor(() => expect(api.replaceGateStarted).toBe(1), { timeout: 2500 });
+    releaseSave();
+    await waitFor(() => expect(api.items.get(linkedin.id)?.status).toBe("published"));
+    await user.type(post, "Still editing");
+    await waitFor(() => expect((api.items.get(linkedin.id)?.content as { body: string }).body).toBe("Still editing"), { timeout: 2500 });
+    expect(screen.getByRole("heading", { name: "LinkedIn one" })).toBeTruthy();
+  });
+
   it("keeps the selected editor revision and schedule current after a weekly move", async () => {
     const monday = new Date();
     monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
@@ -2261,6 +2304,8 @@ describe("persistent ContentFlow workspace", () => {
     const user = userEvent.setup();
     render(<Home />);
     await screen.findByRole("heading", { name: "LinkedIn one" });
+    await waitFor(() => expect(api.requests.filter((request) => request.method === "GET" && request.path === "/api/v1/content").length).toBeGreaterThanOrEqual(2));
+    api.failNextList = true;
     await user.click(screen.getByRole("button", { name: /^Weekly/ }));
 
     await user.selectOptions(screen.getByLabelText("Move LinkedIn one"), `${tuesday.getFullYear()}-${String(tuesday.getMonth() + 1).padStart(2, "0")}-${String(tuesday.getDate()).padStart(2, "0")}`);
@@ -2268,7 +2313,10 @@ describe("persistent ContentFlow workspace", () => {
     expect((await screen.findByRole("alert")).textContent).toContain("The item was moved, but its latest details could not be refreshed. Reload to confirm.");
     expect(new Date(api.items.get(linkedin.id)!.scheduled_at!).toDateString()).toBe(tuesday.toDateString());
     const tuesdayCell = screen.getByLabelText(`LinkedIn on ${tuesday.toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long", year: "numeric" })}`);
-    expect(within(tuesdayCell).getByRole("button", { name: "Open LinkedIn one" })).toBeTruthy();
+    await user.click(within(tuesdayCell).getByRole("button", { name: "Open LinkedIn one" }));
+    fireEvent.change(await screen.findByLabelText("LinkedIn post"), { target: { value: "Edit after uncertain move" } });
+    await user.click(screen.getByRole("button", { name: /^Weekly/ }));
+    expect(within(screen.getByLabelText(`LinkedIn on ${tuesday.toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long", year: "numeric" })}`)).getByRole("button", { name: "Open LinkedIn one" })).toBeTruthy();
     expect(screen.queryByText("That item could not be rescheduled. Try again.")).toBeNull();
   });
 
