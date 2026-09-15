@@ -40,3 +40,6 @@ yarn-error.log*
 
 /outputs/
 /work/
+
+# Local visual review captures
+/.impeccable/review/

@@ -1,6 +1,16 @@
 # ContentFlow
 
-ContentFlow is a focused workspace for writing, organising, and repurposing creator content. It supports YouTube scripts, LinkedIn posts, X posts, Instagram and TikTok scripts, emails, and Substack drafts.
+ContentFlow starts with a weekly publishing plan. A Monday-to-Sunday grid puts YouTube first, shows targets for each format, and links each planned piece to its editor. It supports YouTube scripts, LinkedIn posts and newsletters, carousels, X posts, Instagram and TikTok scripts, emails, and Substack drafts.
+
+## Weekly planning
+
+Open `/` or `/weekly` to plan the week. The writing library is at `/library`; calendar and settings links still work. Add a working title to a day, move a card with its day selector or drag it within its format row, or schedule an existing idea from **Ready to plan**. **Back to week** returns from an editor to the week you selected.
+
+**Edit rhythm** saves workspace-wide targets that repeat each week. Starter targets are one YouTube video, seven Instagram Reels, seven LinkedIn posts, one LinkedIn newsletter, one Kit email, and one carousel. Newsletter, email, and carousel quotas are editable starting points. Other formats start at zero and can be expanded or given a target. TikTok starts at zero so cross-posted reels are not automatically counted as another seven original pieces.
+
+Planned counts all scheduled items in the visible week, including published items. Ready and published are separate status counts. Remaining pieces are calculated per format, so an extra YouTube video cannot fill a missing Instagram slot. These are planning targets, not automatic publishing or enforced production stages. There is no shared-asset or cross-post relationship yet.
+
+Targets persist through `GET/PUT /api/v1/content/rhythm`, independently of content expiry, and reject conflicting edits by revision. A failed load shows an explicit fallback and a reload action. Content still follows the existing 56-day expiry policy; this is not yet a permanent content or media library.
 
 The approved MVP is a Go and TypeScript monorepo. A Vite-built React app is embedded in one Go binary, so the workspace and its `/api/v1` contract share one public origin. Google OAuth owner sessions and scoped API tokens protect the API. Durable content storage, uploads, and Google Cloud deployment follow in later work.
 

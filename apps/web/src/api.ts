@@ -1,4 +1,6 @@
-export const contentTypes = ["youtube", "linkedin", "x", "instagram", "tiktok", "email", "substack"] as const;
+import type { WeeklyTargets } from "./weekly-rhythm";
+
+export const contentTypes = ["youtube", "linkedin", "x", "instagram", "tiktok", "email", "substack", "linkedin_newsletter", "carousel"] as const;
 export const contentStatuses = ["idea", "draft", "ready", "published"] as const;
 
 export type ContentType = (typeof contentTypes)[number];
@@ -134,6 +136,16 @@ export async function loadSession(requestTimeout = 10_000): Promise<Session> {
   return withRequestTimeout((signal) => request<Session>("/api/v1/session", { signal }), requestTimeout);
 }
 
+export type WeeklyRhythm = { revision: number; targets: WeeklyTargets };
+
+export function loadWeeklyRhythm(): Promise<WeeklyRhythm> {
+  return withRequestTimeout((signal) => request<WeeklyRhythm>("/api/v1/content/rhythm", { signal }), 10_000);
+}
+
+export function saveWeeklyRhythm(rhythm: WeeklyRhythm, csrfToken: string): Promise<WeeklyRhythm> {
+  return withRequestTimeout((signal) => request<WeeklyRhythm>("/api/v1/content/rhythm", { ...mutationInit("PUT", JSON.stringify(rhythm), csrfToken), signal }), 10_000);
+}
+
 export async function listContent(filters: { q?: string; type?: ContentType; status?: ContentStatus } = {}, requestTimeout = 10_000): Promise<ContentSummary[]> {
   const query = new URLSearchParams();
   if (filters.q?.trim()) query.set("q", filters.q.trim());
@@ -233,6 +245,7 @@ export function emptyContent(type: ContentType): ContentPayload {
     case "email":
       return { subject: "", body: "" };
     case "substack":
+    case "linkedin_newsletter":
       return { headline: "", subheadline: "", body: "" };
     default:
       return { body: "" };

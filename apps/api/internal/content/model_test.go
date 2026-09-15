@@ -18,6 +18,8 @@ func TestDecodeCreateAcceptsEveryTypedPayloadAndRejectsMismatches(t *testing.T) 
 	}{
 		{TypeYouTube, `{"topic":"","icp":"","angle":"","cta":"","publishing_title":"","description":"","transcript":"","sections":[]}`},
 		{TypeLinkedIn, `{"body":"post"}`},
+		{TypeCarousel, `{"body":"slide copy"}`},
+		{TypeLinkedInNewsletter, `{"headline":"headline","subheadline":"summary","body":"newsletter"}`},
 		{TypeX, `{"body":"post"}`},
 		{TypeInstagram, `{"script":"script"}`},
 		{TypeTikTok, `{"script":"script"}`},
