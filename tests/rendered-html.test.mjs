@@ -17,14 +17,15 @@ test("builds the ContentFlow client application", async () => {
 });
 
 test("ships the final product surface without starter artifacts", async () => {
-  const [page, html, packageJson] = await Promise.all([
+  const [page, html, packageJson, metadata] = await Promise.all([
     readFile(new URL("../apps/web/src/App.tsx", import.meta.url), "utf8"),
     readFile(new URL("../apps/web/index.html", import.meta.url), "utf8"),
     readFile(new URL("../package.json", import.meta.url), "utf8"),
+    readFile(new URL("../apps/web/src/content-meta.tsx", import.meta.url), "utf8"),
   ]);
 
-  for (const label of ["YouTube", "LinkedIn", "Instagram", "TikTok", "Email", "Substack"]) {
-    assert.match(page, new RegExp(label));
+  for (const label of ["YouTube", "LinkedIn", "Instagram", "TikTok", "Email", "Substack", "LinkedIn newsletter", "Carousel"]) {
+    assert.match(metadata, new RegExp(label));
   }
   assert.match(page, /YouTube transcript: what was actually said/);
   assert.match(page, /AutosaveManager/);

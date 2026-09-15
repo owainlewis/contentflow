@@ -1,0 +1,392 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-09-15T13:59:11.376571+00:00",
+  "title": "Design System: ContentFlow",
+  "extensions": {
+    "colorMeta": {
+      "accent": {
+        "role": "primary",
+        "displayName": "Accent"
+      },
+      "accent-ink": {
+        "role": "primary",
+        "displayName": "Accent ink"
+      },
+      "background": {
+        "role": "neutral",
+        "displayName": "Background"
+      },
+      "sidebar": {
+        "role": "neutral",
+        "displayName": "Sidebar"
+      },
+      "panel": {
+        "role": "neutral",
+        "displayName": "Panel"
+      },
+      "editor": {
+        "role": "neutral",
+        "displayName": "Editor"
+      },
+      "surface": {
+        "role": "neutral",
+        "displayName": "Surface"
+      },
+      "surface-strong": {
+        "role": "neutral",
+        "displayName": "Surface strong"
+      },
+      "control": {
+        "role": "neutral",
+        "displayName": "Control"
+      },
+      "hover": {
+        "role": "neutral",
+        "displayName": "Hover"
+      },
+      "ink": {
+        "role": "neutral",
+        "displayName": "Ink"
+      },
+      "muted": {
+        "role": "neutral",
+        "displayName": "Muted"
+      },
+      "text-strong": {
+        "role": "neutral",
+        "displayName": "Text strong"
+      },
+      "text-soft": {
+        "role": "neutral",
+        "displayName": "Text soft"
+      },
+      "text-muted": {
+        "role": "neutral",
+        "displayName": "Text muted"
+      },
+      "placeholder": {
+        "role": "neutral",
+        "displayName": "Placeholder"
+      },
+      "platform-icon": {
+        "role": "neutral",
+        "displayName": "Platform icon"
+      },
+      "line": {
+        "role": "neutral",
+        "displayName": "Line"
+      },
+      "line-soft": {
+        "role": "neutral",
+        "displayName": "Line soft"
+      },
+      "line-strong": {
+        "role": "neutral",
+        "displayName": "Line strong"
+      },
+      "accent-light": {
+        "role": "primary",
+        "displayName": "Accent light"
+      },
+      "background-light": {
+        "role": "neutral",
+        "displayName": "Background light"
+      },
+      "sidebar-light": {
+        "role": "neutral",
+        "displayName": "Sidebar light"
+      },
+      "panel-light": {
+        "role": "neutral",
+        "displayName": "Panel light"
+      },
+      "editor-light": {
+        "role": "neutral",
+        "displayName": "Editor light"
+      },
+      "surface-light": {
+        "role": "neutral",
+        "displayName": "Surface light"
+      },
+      "surface-strong-light": {
+        "role": "neutral",
+        "displayName": "Surface strong light"
+      },
+      "control-light": {
+        "role": "neutral",
+        "displayName": "Control light"
+      },
+      "hover-light": {
+        "role": "neutral",
+        "displayName": "Hover light"
+      },
+      "ink-light": {
+        "role": "neutral",
+        "displayName": "Ink light"
+      },
+      "muted-light": {
+        "role": "neutral",
+        "displayName": "Muted light"
+      },
+      "text-strong-light": {
+        "role": "neutral",
+        "displayName": "Text strong light"
+      },
+      "text-soft-light": {
+        "role": "neutral",
+        "displayName": "Text soft light"
+      },
+      "text-muted-light": {
+        "role": "neutral",
+        "displayName": "Text muted light"
+      },
+      "placeholder-light": {
+        "role": "neutral",
+        "displayName": "Placeholder light"
+      },
+      "platform-icon-light": {
+        "role": "neutral",
+        "displayName": "Platform icon light"
+      },
+      "line-light": {
+        "role": "neutral",
+        "displayName": "Line light"
+      },
+      "line-soft-light": {
+        "role": "neutral",
+        "displayName": "Line soft light"
+      },
+      "line-strong-light": {
+        "role": "neutral",
+        "displayName": "Line strong light"
+      },
+      "status-idea": {
+        "role": "neutral",
+        "displayName": "Status idea"
+      },
+      "status-draft": {
+        "role": "neutral",
+        "displayName": "Status draft"
+      },
+      "status-published": {
+        "role": "neutral",
+        "displayName": "Status published"
+      }
+    },
+    "typographyMeta": {
+      "display": {
+        "displayName": "Display",
+        "purpose": "Editor document heading."
+      },
+      "headline": {
+        "displayName": "Headline",
+        "purpose": "Full-page headings."
+      },
+      "planner-title": {
+        "displayName": "Planner title",
+        "purpose": "Weekly heading, reduced to 27px at 600px."
+      },
+      "title": {
+        "displayName": "Title",
+        "purpose": "Rhythm editor and unscheduled tray headings."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "General copy."
+      },
+      "ui": {
+        "displayName": "Ui",
+        "purpose": "Navigation and ordinary interface text."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "Labels, counts, and supporting copy."
+      },
+      "button": {
+        "displayName": "Button",
+        "purpose": "Primary actions."
+      },
+      "card-title": {
+        "displayName": "Card title",
+        "purpose": "Weekly record titles, up to three lines."
+      },
+      "mono": {
+        "displayName": "Mono",
+        "purpose": "Script block numbers."
+      }
+    },
+    "shadows": [
+      {
+        "name": "library-selection",
+        "value": "inset 2px 0 var(--accent)",
+        "purpose": "Selected library record."
+      },
+      {
+        "name": "today",
+        "value": "inset 0 2px 0 var(--accent)",
+        "purpose": "Current day in the weekly header."
+      },
+      {
+        "name": "drop-target",
+        "value": "inset 0 0 0 2px var(--accent)",
+        "purpose": "Active weekly or calendar drop destination."
+      },
+      {
+        "name": "modal",
+        "value": "0 24px 70px rgba(0,0,0,.26)",
+        "purpose": "Existing modal layer."
+      },
+      {
+        "name": "mobile-library",
+        "value": "20px 0 55px rgba(0,0,0,.36)",
+        "purpose": "Existing mobile library drawer."
+      }
+    ],
+    "motion": [
+      {
+        "name": "weekly-cell",
+        "value": "background .15s ease, box-shadow .15s ease",
+        "purpose": "Day-cell feedback."
+      },
+      {
+        "name": "saved-state",
+        "value": "color .2s",
+        "purpose": "Saved-state text color."
+      },
+      {
+        "name": "mobile-library",
+        "value": "transform .22s ease",
+        "purpose": "Mobile library drawer transition."
+      },
+      {
+        "name": "modal-enter",
+        "value": "modal-in .22s ease-out",
+        "purpose": "Opacity and an 8px translation with scale from .985."
+      },
+      {
+        "name": "backdrop-enter",
+        "value": "fade-in .18s ease-out",
+        "purpose": "Modal backdrop opacity."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "compact-desktop",
+        "value": "1180px"
+      },
+      {
+        "name": "weekly-wrap",
+        "value": "1100px"
+      },
+      {
+        "name": "mobile-navigation",
+        "value": "900px"
+      },
+      {
+        "name": "small-screen",
+        "value": "600px"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Filled action used to save the weekly rhythm; focus uses the native browser outline.",
+      "html": "<button class=\"ds-primary\">Save rhythm</button>",
+      "css": ".ds-primary {font-family:\"Geist Variable\", Arial, Helvetica, sans-serif;display:flex;align-items:center;justify-content:center;gap:7px;height:38px;padding:0 15px;border:0;border-radius:6px;color:var(--accent-ink, #ffffff);background:var(--accent, #776ac5);font-size:12.5px;font-weight:650;cursor:pointer;} .ds-primary:hover{filter:brightness(1.06)} .ds-primary:disabled{cursor:not-allowed;opacity:.35;transform:none}"
+    },
+    {
+      "name": "Icon button",
+      "kind": "button",
+      "refersTo": "button-icon",
+      "description": "Compact transparent action used by navigation and toolbars; native keyboard focus is retained.",
+      "html": "<button class=\"ds-icon-button\" aria-label=\"New content\"><svg xmlns=\"http://www.w3.org/2000/svg\" width=\"14\" height=\"14\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M5 12h14\"/><path d=\"M12 5v14\"/></svg></button>",
+      "css": ".ds-icon-button{font-family:\"Geist Variable\", Arial, Helvetica, sans-serif;display:inline-grid;place-items:center;width:34px;height:34px;padding:0;border:1px solid transparent;border-radius:9px;color:var(--muted, #9a9aa2);background:transparent;cursor:pointer} .ds-icon-button:hover{color:var(--ink, #e8e8eb);background:var(--hover, #212228);border-color:var(--line, #2d2e34)}"
+    },
+    {
+      "name": "Weekly Add",
+      "kind": "button",
+      "refersTo": "button-add",
+      "description": "An empty-day target with matching hover and keyboard focus feedback.",
+      "html": "<button class=\"ds-weekly-add\"><svg xmlns=\"http://www.w3.org/2000/svg\" width=\"14\" height=\"14\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M5 12h14\"/><path d=\"M12 5v14\"/></svg><span>Add</span></button>",
+      "css": ".ds-weekly-add{font-family:\"Geist Variable\", Arial, Helvetica, sans-serif;display:flex;gap:4px;align-items:center;justify-content:center;width:100%;min-height:90px;padding:5px;border:1px solid transparent;border-radius:5px;color:var(--text-muted, #8d8d95);background:transparent;font-size:12px;cursor:pointer} .ds-weekly-add:hover,.ds-weekly-add:focus-visible{border-color:var(--line-strong, #45464e);color:var(--text-strong, #e8e8eb);background:var(--hover, #212228)}"
+    },
+    {
+      "name": "Search field",
+      "kind": "input",
+      "refersTo": "input-search",
+      "description": "Library search with an accent border on focus within.",
+      "html": "<label class=\"ds-search\"><input aria-label=\"Search content\" placeholder=\"Search content\"/></label>",
+      "css": ".ds-search{font-family:\"Geist Variable\", Arial, Helvetica, sans-serif;height:42px;display:flex;align-items:center;gap:9px;padding:0 12px;border:1px solid var(--line, #2d2e34);border-radius:6px;color:var(--text-muted, #8d8d95);background:var(--control, #18191d)} .ds-search:focus-within{border-color:var(--accent, #776ac5)} .ds-search input{font-family:\"Geist Variable\", Arial, Helvetica, sans-serif;min-width:0;flex:1;border:0;outline:0;color:var(--ink, #e8e8eb);background:transparent;font-size:14px} .ds-search input::placeholder{color:var(--placeholder, #898991)}"
+    },
+    {
+      "name": "Desktop navigation",
+      "kind": "nav",
+      "refersTo": "nav-item",
+      "description": "Neutral navigation rows with a filled active state and native keyboard focus.",
+      "html": "<nav aria-label=\"Workspace\"><button class=\"ds-nav ds-nav-active\" aria-current=\"page\">This week</button><button class=\"ds-nav\">Library</button><button class=\"ds-nav\">Calendar</button></nav>",
+      "css": ".ds-nav{font-family:\"Geist Variable\", Arial, Helvetica, sans-serif;width:100%;height:42px;display:flex;align-items:center;gap:11px;padding:0 12px;border:0;border-radius:8px;background:transparent;color:var(--muted, #9a9aa2);font-size:14px;text-align:left;cursor:pointer} .ds-nav:hover{color:var(--ink, #e8e8eb);background:var(--hover, #212228)} .ds-nav-active{color:var(--ink, #e8e8eb);background:var(--surface-strong, #26272d)}"
+    },
+    {
+      "name": "Calendar chip",
+      "kind": "chip",
+      "refersTo": "calendar-chip",
+      "description": "Compact calendar record with a title action and date control; native keyboard focus is retained.",
+      "html": "<article class=\"ds-chip\"><button class=\"ds-chip-open\"><span class=\"ds-chip-title\">Working title</span></button><input class=\"ds-chip-date\" type=\"date\" aria-label=\"Schedule working title\"/></article>",
+      "css": ".ds-chip{font-family:\"Geist Variable\", Arial, Helvetica, sans-serif;display:flex;align-items:center;gap:2px;width:100%;padding:2px;border:1px solid var(--line, #2d2e34);border-radius:5px;color:var(--text-soft, #b9b9c0);background:var(--surface, #202126);font-size:12px;text-align:left;cursor:grab} .ds-chip:hover{color:var(--text-strong, #e8e8eb);border-color:var(--line-strong, #45464e);background:var(--hover, #212228)} .ds-chip-open{font-family:\"Geist Variable\", Arial, Helvetica, sans-serif;min-width:0;flex:1;display:flex;align-items:center;gap:6px;padding:3px 5px;border:0;background:transparent;color:inherit;text-align:left;font-size:12px;cursor:pointer} .ds-chip-title{overflow:hidden;text-overflow:ellipsis;white-space:nowrap} .ds-chip-date{width:25px;min-width:25px;height:24px;padding:0;border:0;background:transparent;color:inherit;font-size:0;cursor:pointer} .ds-chip-date::-webkit-calendar-picker-indicator{margin:0;cursor:pointer} .ds-chip.dragging{opacity:.45} .ds-chip.schedule-blocked{cursor:wait;opacity:.62}"
+    },
+    {
+      "name": "Weekly card",
+      "kind": "card",
+      "refersTo": "weekly-card",
+      "description": "A working title, labelled status, and native schedule selector; native keyboard focus is retained.",
+      "html": "<article class=\"ds-card\"><button class=\"ds-card-open\"><strong>Working title</strong><span class=\"ds-status\"><i class=\"ds-dot\"></i>Draft</span></button><label><select class=\"ds-card-select\" aria-label=\"Move working title\"><option>Unscheduled</option><option>Mon 14</option><option>Tue 15</option></select></label></article>",
+      "css": ".ds-card{font-family:\"Geist Variable\", Arial, Helvetica, sans-serif;display:grid;gap:7px;margin-bottom:5px;padding:8px;border:1px solid var(--line-strong, #45464e);border-radius:5px;background:var(--surface, #202126);cursor:grab} .ds-card:hover{background:var(--hover, #212228)} .ds-card.dragging{opacity:.45} .ds-card.schedule-blocked{cursor:wait;opacity:.62} .ds-card-open{font-family:\"Geist Variable\", Arial, Helvetica, sans-serif;display:block;min-width:0;min-height:44px;width:100%;padding:0;border:0;background:transparent;color:var(--text-strong, #e8e8eb);text-align:left;cursor:pointer} .ds-card-open strong{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;font-size:12px;line-height:1.45;font-weight:550;overflow-wrap:anywhere} .ds-status{display:flex;align-items:center;gap:5px;margin-top:7px;color:var(--text-muted, #8d8d95);font-size:11px} .ds-dot{width:6px;height:6px;flex:0 0 auto;border-radius:50%;background:#918f86} .ds-card-select{font-family:\"Geist Variable\", Arial, Helvetica, sans-serif;width:100%;min-height:30px;padding:0 4px;border:1px solid var(--line, #2d2e34);border-radius:4px;color:var(--text-soft, #b9b9c0);background:var(--control, #18191d);font-size:11px} @media(max-width:600px){.ds-card-select{min-height:44px}}"
+    },
+    {
+      "name": "Weekly matrix",
+      "kind": "custom",
+      "refersTo": "weekly-matrix",
+      "description": "Seven-day ruled grid with sticky format labels and a keyboard focusable scroll region.",
+      "html": "<div class=\"ds-weekly-scroll\" tabindex=\"0\" role=\"region\" aria-label=\"Weekly matrix, scroll horizontally\"><table class=\"ds-matrix\"><thead><tr><th class=\"ds-corner\" scope=\"col\">Weekly rhythm</th><th scope=\"col\"><span>Mon</span><strong>14</strong></th><th scope=\"col\" class=\"ds-today\"><span>Tue</span><strong>15</strong></th><th scope=\"col\"><span>Wed</span><strong>16</strong></th><th scope=\"col\"><span>Thu</span><strong>17</strong></th><th scope=\"col\"><span>Fri</span><strong>18</strong></th><th scope=\"col\"><span>Sat</span><strong>19</strong></th><th scope=\"col\"><span>Sun</span><strong>20</strong></th></tr></thead><tbody><tr><th scope=\"row\"><strong>YouTube</strong><small>0 planned / 1 target</small><span class=\"ds-target\"><span></span></span></th><td><button class=\"ds-matrix-add\" aria-label=\"Add YouTube for Monday\"><svg xmlns=\"http://www.w3.org/2000/svg\" width=\"14\" height=\"14\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M5 12h14\"/><path d=\"M12 5v14\"/></svg><span>Add</span></button></td><td class=\"ds-today\"><button class=\"ds-matrix-add\" aria-label=\"Add YouTube for Tuesday\"><svg xmlns=\"http://www.w3.org/2000/svg\" width=\"14\" height=\"14\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M5 12h14\"/><path d=\"M12 5v14\"/></svg><span>Add</span></button></td><td><button class=\"ds-matrix-add\" aria-label=\"Add YouTube for Wednesday\"><svg xmlns=\"http://www.w3.org/2000/svg\" width=\"14\" height=\"14\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M5 12h14\"/><path d=\"M12 5v14\"/></svg><span>Add</span></button></td><td><button class=\"ds-matrix-add\" aria-label=\"Add YouTube for Thursday\"><svg xmlns=\"http://www.w3.org/2000/svg\" width=\"14\" height=\"14\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M5 12h14\"/><path d=\"M12 5v14\"/></svg><span>Add</span></button></td><td><button class=\"ds-matrix-add\" aria-label=\"Add YouTube for Friday\"><svg xmlns=\"http://www.w3.org/2000/svg\" width=\"14\" height=\"14\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M5 12h14\"/><path d=\"M12 5v14\"/></svg><span>Add</span></button></td><td><button class=\"ds-matrix-add\" aria-label=\"Add YouTube for Saturday\"><svg xmlns=\"http://www.w3.org/2000/svg\" width=\"14\" height=\"14\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M5 12h14\"/><path d=\"M12 5v14\"/></svg><span>Add</span></button></td><td><button class=\"ds-matrix-add\" aria-label=\"Add YouTube for Sunday\"><svg xmlns=\"http://www.w3.org/2000/svg\" width=\"14\" height=\"14\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M5 12h14\"/><path d=\"M12 5v14\"/></svg><span>Add</span></button></td></tr></tbody></table></div>",
+      "css": ".ds-weekly-scroll{font-family:\"Geist Variable\", Arial, Helvetica, sans-serif;min-width:0;overflow-x:auto;border:1px solid var(--line, #2d2e34);border-radius:8px;background:var(--line, #2d2e34)} .ds-weekly-scroll:focus-visible{outline:2px solid var(--accent, #776ac5);outline-offset:3px} .ds-matrix{width:100%;min-width:950px;table-layout:fixed;border-collapse:separate;border-spacing:0} .ds-matrix th,.ds-matrix td{border-right:1px solid var(--line, #2d2e34);border-bottom:1px solid var(--line, #2d2e34);background:var(--control, #18191d)} .ds-matrix tr>:last-child{border-right:0} .ds-matrix tbody tr:last-child>*{border-bottom:0} .ds-matrix thead th{height:61px;padding:8px;color:var(--text-muted, #8d8d95);background:var(--surface, #202126);text-align:center} .ds-matrix thead span,.ds-matrix thead strong{display:block} .ds-matrix thead span{font-size:12px;font-weight:500} .ds-matrix thead strong{color:var(--text-soft, #b9b9c0);font-size:17px;font-weight:600} .ds-matrix .ds-corner{position:sticky;left:0;z-index:2;width:166px;padding-left:14px;text-align:left;font-size:12px;font-weight:500} .ds-matrix tbody th{width:166px;padding:13px 14px;text-align:left;position:sticky;left:0;z-index:1;background:var(--surface, #202126)} .ds-matrix tbody th strong{display:block;color:var(--text-strong, #e8e8eb);font-size:13px;font-weight:600;line-height:1.3} .ds-matrix small{display:block;margin-top:5px;color:var(--text-muted, #8d8d95);font-size:11px;font-weight:400} .ds-target{display:block;height:3px;width:88px;margin-top:9px;overflow:hidden;border-radius:2px;background:var(--line, #2d2e34)} .ds-target>span{display:block;height:100%;width:0;background:var(--accent, #776ac5)} .ds-matrix td{height:107px;padding:7px;vertical-align:top;transition:background .15s ease,box-shadow .15s ease} .ds-matrix th.ds-today{box-shadow:inset 0 2px 0 var(--accent, #776ac5)} .ds-matrix td.ds-today{background:color-mix(in srgb,var(--accent, #776ac5) 5%,var(--control, #18191d))} .ds-matrix td.ds-drag-over{background:var(--hover, #212228);box-shadow:inset 0 0 0 2px var(--accent, #776ac5)} .ds-matrix-add{font-family:\"Geist Variable\", Arial, Helvetica, sans-serif;display:flex;gap:4px;align-items:center;justify-content:center;width:100%;min-height:90px;padding:5px;border:1px solid transparent;border-radius:5px;color:var(--text-muted, #8d8d95);background:transparent;font-size:12px;cursor:pointer} .ds-matrix-add:hover,.ds-matrix-add:focus-visible{border-color:var(--line-strong, #45464e);color:var(--text-strong, #e8e8eb);background:var(--hover, #212228)} @media(max-width:900px){.ds-matrix{min-width:980px}} @media(max-width:600px){.ds-matrix .ds-corner,.ds-matrix tbody th{width:145px}.ds-matrix td{padding:5px}}"
+    }
+  ],
+  "narrative": {
+    "northStar": "The planning workspace",
+    "overview": "ContentFlow uses compact Geist typography, closely spaced neutral surfaces, fine borders, and violet state accents. Planning views keep counts, titles, statuses, and controls visible together; the writing view gives the document more space.\n\nThis record describes the implemented UI in apps/web/src/styles.css, WeeklyMatrix.tsx, App.tsx, content-meta.tsx, and Calendar.tsx, checked against the desktop and mobile captures in .impeccable/review. The stylesheet remains the implementation source of truth.",
+    "keyCharacteristics": [
+      "Dark and light themes share semantic color roles.",
+      "Flat planning surfaces use borders and tonal changes for grouping.",
+      "Compact controls retain text labels beside status and format icons.",
+      "The weekly matrix scrolls horizontally while row labels remain visible."
+    ],
+    "rules": [
+      {
+        "name": "The Shared Accent Rule",
+        "body": "Use the theme accent for primary actions, ready state, current-day marks, target progress, and explicit selection or focus treatments.",
+        "section": "colors"
+      },
+      {
+        "name": "The Flat Planning Rule",
+        "body": "Planning cards and containers use borders and tonal surfaces at rest. Outer shadows belong to the existing modal and mobile drawer layers.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "Do use the existing semantic CSS variables so both themes keep the same roles.",
+      "Do pair status dots with text labels and keep platform icons neutral.",
+      "Do reuse the compact control and card shapes recorded here.",
+      "Do preserve keyboard scrolling and sticky row labels in the weekly matrix.",
+      "Do use the existing native day selector alongside drag interactions."
+    ],
+    "donts": [
+      "Don't introduce a second accent for content formats.",
+      "Don't use floating card shadows in the weekly plan.",
+      "Don't hide the remaining days by clipping the weekly matrix.",
+      "Don't encode status through color alone."
+    ]
+  }
+}

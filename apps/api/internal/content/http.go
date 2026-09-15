@@ -17,6 +17,8 @@ type HTTPHandler struct{ service *Service }
 func NewHTTPHandler(service *Service) *HTTPHandler { return &HTTPHandler{service: service} }
 
 func (h *HTTPHandler) Register(router chi.Router) {
+	router.Get("/api/v1/content/rhythm", h.rhythm)
+	router.Put("/api/v1/content/rhythm", h.rhythm)
 	router.Get("/api/v1/content", h.list)
 	router.Post("/api/v1/content", h.create)
 	router.Post("/api/v1/content/batches", h.batchCreate)

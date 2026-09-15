@@ -191,7 +191,7 @@ func validItemContent(contentType string, raw []byte) bool {
 			seenIDs[section.ID] = struct{}{}
 		}
 		return true
-	case "linkedin", "x":
+	case "linkedin", "x", "carousel":
 		var content struct {
 			Body string `json:"body"`
 		}
@@ -207,7 +207,7 @@ func validItemContent(contentType string, raw []byte) bool {
 			Body    string `json:"body"`
 		}
 		return decodesStrictContent(raw, &content) && validTextFields(content.Subject, content.Body)
-	case "substack":
+	case "substack", "linkedin_newsletter":
 		var content struct {
 			Headline    string `json:"headline"`
 			Subheadline string `json:"subheadline"`
@@ -501,7 +501,7 @@ func consumeUniqueJSONValue(decoder *json.Decoder) error {
 
 func validContentType(value string) bool {
 	switch value {
-	case "youtube", "linkedin", "x", "instagram", "tiktok", "email", "substack":
+	case "youtube", "linkedin", "x", "instagram", "tiktok", "email", "substack", "linkedin_newsletter", "carousel":
 		return true
 	default:
 		return false

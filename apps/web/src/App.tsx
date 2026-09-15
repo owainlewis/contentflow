@@ -55,11 +55,13 @@ import {
   type ContentType,
   type Section,
   type YouTubeContent,
+  type WeeklyRhythm,
 } from "./api";
 import AutoTextarea from "./AutoTextarea";
 import Calendar, { dayKey } from "./Calendar";
 import Settings from "./Settings";
-import WeeklyMatrix from "./WeeklyMatrix";
+import WeeklyMatrix, { mondayOf } from "./WeeklyMatrix";
+import { useWeeklyRhythm } from "./useWeeklyRhythm";
 import { TypeIcon, displayTitle, statusLabels, typeMeta } from "./content-meta";
 import { AutosaveManager, type ConflictView, type SaveState } from "./autosave";
 import { normalizeUnicode15Title } from "./unicode-normalization";
@@ -70,13 +72,13 @@ type View = "workspace" | "weekly" | "calendar" | "settings";
 // The server serves index.html for any extensionless path, so views are real
 // URLs: deep links and the browser back button both work.
 function viewFromPath(pathname: string): View {
-  if (pathname.startsWith("/weekly")) return "weekly";
+  if (pathname === "/" || pathname.startsWith("/weekly")) return "weekly";
   if (pathname.startsWith("/calendar")) return "calendar";
   if (pathname.startsWith("/settings")) return "settings";
   return "workspace";
 }
 
-const viewPaths: Record<View, string> = { workspace: "/", weekly: "/weekly", calendar: "/calendar", settings: "/settings" };
+const viewPaths: Record<View, string> = { workspace: "/library", weekly: "/", calendar: "/calendar", settings: "/settings" };
 type LifecycleAction = "delete";
 type CreatePlan = { day: string; title: string; attemptId: string };
 
@@ -236,6 +238,7 @@ export default function Home() {
   const [csrfToken, setCsrfToken] = useState<string>();
   const [authState, setAuthState] = useState<"loading" | "ready" | "signed-out" | "error">("loading");
   const [sessionExpired, setSessionExpired] = useState(false);
+  const handleSessionExpired = useCallback(() => setSessionExpired(true), []);
   const [reauthChecking, setReauthChecking] = useState(false);
   const [reauthError, setReauthError] = useState("");
   const [signInEmail, setSignInEmail] = useState("");
@@ -250,6 +253,9 @@ export default function Home() {
   const [detailLoading, setDetailLoading] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [view, setView] = useState<View>(() => viewFromPath(window.location.pathname));
+  const weeklyRhythm = useWeeklyRhythm(csrfToken ?? "", handleSessionExpired, authState === "ready");
+  const [weekStart, setWeekStart] = useState(() => mondayOf(new Date()));
+  const [weeklyTargetDraft, setWeeklyTargetDraft] = useState<WeeklyRhythm>();
   const [calendarError, setCalendarError] = useState("");
   const [weeklyCreateError, setWeeklyCreateError] = useState("");
   const [completedWeeklyAttemptId, setCompletedWeeklyAttemptId] = useState("");
@@ -635,7 +641,7 @@ export default function Home() {
   const counts = useMemo(() => allSummaries.reduce<Record<ContentType, number>>((result, item) => {
     result[item.type] += 1;
     return result;
-  }, { youtube: 0, linkedin: 0, x: 0, instagram: 0, tiktok: 0, email: 0, substack: 0 }), [allSummaries]);
+  }, { youtube: 0, linkedin: 0, x: 0, instagram: 0, tiktok: 0, email: 0, substack: 0, linkedin_newsletter: 0, carousel: 0 }), [allSummaries]);
 
   const scheduleBlockedIds = useMemo(() => {
     const blocked = new Set(schedulePendingIds);
@@ -752,6 +758,7 @@ export default function Home() {
       csrfTokenRef.current = session.csrf_token ?? "";
       setCsrfToken(csrfTokenRef.current);
       setSessionExpired(false);
+      weeklyRhythm.retry();
       autosaveRef.current?.resumeUnauthorized();
       setPendingSessionCreate(undefined);
       setPendingSessionLifecycle(undefined);
@@ -852,7 +859,7 @@ export default function Home() {
         setStatusFilter("all");
         setSelectedId(result.item_ids[0]);
         setCreateOpen(false);
-        setLibraryOpen(false);
+        navigate("workspace");
       }
       const refresh = refreshLibraryRef.current(clearedFilters);
       const refreshSequence = requestSequence.current;
@@ -1235,13 +1242,13 @@ export default function Home() {
 
   function renderPlainEditor() {
     if (!selected || selected.type === "youtube") return null;
-    const label = selected.type === "email" ? "Email body" : selected.type === "substack" ? "Article body" : selected.type === "instagram" || selected.type === "tiktok" ? `${typeMeta[selected.type].label} script` : `${typeMeta[selected.type].label} post`;
+    const label = selected.type === "linkedin_newsletter" ? "Newsletter body" : selected.type === "carousel" ? "Carousel slide copy" : selected.type === "email" ? "Email body" : selected.type === "substack" ? "Article body" : selected.type === "instagram" || selected.type === "tiktok" ? `${typeMeta[selected.type].label} script` : `${typeMeta[selected.type].label} post`;
     const content = selected.content;
     const body = "body" in content ? content.body : "script" in content ? content.script : "";
     const setBody = (value: string) => updateContent("body" in content ? { ...content, body: value } : { ...content, script: value });
     return <div className="plain-editor-wrap">
       {selected.type === "email" && "subject" in content && <label className="brief-field standalone-field"><span>Email subject</span><input aria-label="Email subject" value={content.subject} onChange={(event) => updateContent({ ...content, subject: event.target.value })} /></label>}
-      {selected.type === "substack" && "headline" in content && <div className="publication-fields"><label className="brief-field"><span>Headline</span><input aria-label="Substack headline" value={content.headline} onChange={(event) => updateContent({ ...content, headline: event.target.value })} /></label><label className="brief-field"><span>Sub-headline</span><input aria-label="Substack sub-headline" value={content.subheadline} onChange={(event) => updateContent({ ...content, subheadline: event.target.value })} /></label></div>}
+      {(selected.type === "substack" || selected.type === "linkedin_newsletter") && "headline" in content && <div className="publication-fields"><label className="brief-field"><span>Headline</span><input aria-label={`${typeMeta[selected.type].label} headline`} value={content.headline} onChange={(event) => updateContent({ ...content, headline: event.target.value })} /></label><label className="brief-field"><span>Sub-headline</span><input aria-label={`${typeMeta[selected.type].label} sub-headline`} value={content.subheadline} onChange={(event) => updateContent({ ...content, subheadline: event.target.value })} /></label></div>}
       <div className="plain-editor-label"><SquarePen size={16} /> {label}</div>
       <textarea className="plain-editor" aria-label={label} value={body} placeholder={selected.type === "email" ? "Write the email…" : selected.type === "substack" ? "Start the article…" : "Write here…"} onChange={(event) => setBody(event.target.value)} />
       {renderAssetPanel()}
@@ -1263,7 +1270,7 @@ export default function Home() {
     <a className="secondary-button" href="/api/v1/auth/login">Sign in with Google</a>
   </main>;
   if (authState === "error") return <main className="centered-state"><AlertTriangle /><h1>ContentFlow is unavailable</h1><p>{loadError}</p><button className="primary-button" onClick={() => window.location.reload()}>Try again</button></main>;
-  if (sessionExpired) return <main className="centered-state"><AlertTriangle /><h1>Your session expired</h1><p>{pendingSessionLifecycle ? `Your ${pendingSessionLifecycle.action} action for “${displayTitle(pendingSessionLifecycle.document)}” is waiting. Sign in in a new tab, then return here to retry it.` : "Your unsaved changes are still queued. Sign in in a new tab, then return here to continue saving."}</p><a className="primary-button" href="/api/v1/auth/login" target="_blank" rel="noreferrer">Open sign in</a><button className="secondary-button" disabled={reauthChecking} onClick={() => void resumeExpiredSession()}>{reauthChecking ? "Checking…" : "I’ve signed in"}</button>{reauthError && <p className="inline-error" role="alert">{reauthError}</p>}</main>;
+  if (sessionExpired) return <main className="centered-state"><AlertTriangle /><h1>Your session expired</h1><p>{pendingSessionLifecycle ? `Your ${pendingSessionLifecycle.action} action for “${displayTitle(pendingSessionLifecycle.document)}” is waiting. Sign in in a new tab, then return here to retry it.` : weeklyTargetDraft ? "Your weekly target edits are preserved. Sign in in a new tab, then return here to save your rhythm." : "Your unsaved changes are still queued. Sign in in a new tab, then return here to continue saving."}</p><a className="primary-button" href="/api/v1/auth/login" target="_blank" rel="noreferrer">Open sign in</a><button className="secondary-button" disabled={reauthChecking} onClick={() => void resumeExpiredSession()}>{reauthChecking ? "Checking…" : "I’ve signed in"}</button>{reauthError && <p className="inline-error" role="alert">{reauthError}</p>}</main>;
 
   const createLabel = typeFilter === "all" ? "New content" : `New ${typeMeta[typeFilter].label}`;
   const currentSaveState = selected ? saveStates[selected.id] ?? "saved" : "saved";
@@ -1280,14 +1287,18 @@ export default function Home() {
     <aside className="sidebar" aria-label="Main navigation">
       <div className="brand-row"><div className="brand-mark"><Zap size={17} fill="currentColor" /></div><span className="brand-name">ContentFlow</span><button className="icon-button sidebar-collapse" onClick={toggleSidebar} aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"} aria-expanded={!sidebarCollapsed}>{sidebarCollapsed ? <PanelLeftOpen size={17} /> : <PanelLeftClose size={17} />}</button></div>
       <button className="new-content-button" onClick={() => setCreateOpen(true)} title={sidebarCollapsed ? "New content" : undefined}><Plus size={18} /><span>New content</span><span className="key-hint">N</span></button>
-      <nav className="primary-nav"><button className={`nav-item ${view === "workspace" && typeFilter === "all" ? "active" : ""}`} onClick={() => { setTypeFilter("all"); navigate("workspace"); }} title={sidebarCollapsed ? "All content" : undefined}><Inbox size={18} /><span>All content</span><span className="nav-count">{allSummaries.length}</span></button><button className={`nav-item ${view === "weekly" ? "active" : ""}`} onClick={() => navigate("weekly")} title={sidebarCollapsed ? "Weekly" : undefined}><LayoutGrid size={18} /><span>Weekly</span></button><button className={`nav-item ${view === "calendar" ? "active" : ""}`} onClick={() => navigate("calendar")} title={sidebarCollapsed ? "Calendar" : undefined}><CalendarDays size={18} /><span>Calendar</span></button></nav>
-      <div className="nav-section"><p className="nav-label">Content types</p>{enabledTypes.map((type) => <button key={type} className={`nav-item ${typeFilter === type ? "active" : ""}`} onClick={() => { setTypeFilter(type); navigate("workspace"); }} title={sidebarCollapsed ? typeMeta[type].label : undefined}><span className="nav-type-icon" style={{ color: typeMeta[type].color }}><TypeIcon type={type} /></span><span>{typeMeta[type].label}</span><span className="nav-count">{counts[type]}</span></button>)}</div>
+      <nav className="primary-nav">
+        <button className={`nav-item ${view === "weekly" ? "active" : ""}`} onClick={() => navigate("weekly")} title={sidebarCollapsed ? "This week" : undefined}><LayoutGrid size={18} /><span>This week</span></button>
+        <button className={`nav-item ${view === "workspace" && typeFilter === "all" ? "active" : ""}`} onClick={() => { setTypeFilter("all"); navigate("workspace"); }} title={sidebarCollapsed ? "Library" : undefined}><Inbox size={18} /><span>Library</span><span className="nav-count">{allSummaries.length}</span></button>
+        <button className={`nav-item ${view === "calendar" ? "active" : ""}`} onClick={() => navigate("calendar")} title={sidebarCollapsed ? "Calendar" : undefined}><CalendarDays size={18} /><span>Calendar</span></button>
+      </nav>
+      <div className="nav-section"><p className="nav-label">Content types</p>{enabledTypes.map((type) => <button key={type} className={`nav-item ${view === "workspace" && typeFilter === type ? "active" : ""}`} onClick={() => { setTypeFilter(type); navigate("workspace"); }} title={sidebarCollapsed ? typeMeta[type].label : undefined}><span className="nav-type-icon" style={{ color: typeMeta[type].color }}><TypeIcon type={type} /></span><span>{typeMeta[type].label}</span><span className="nav-count">{counts[type]}</span></button>)}</div>
       <div className="sidebar-bottom"><button className={`nav-item ${view === "settings" ? "active" : ""}`} onClick={() => navigate("settings")} title={sidebarCollapsed ? "Settings" : undefined}><SettingsIcon size={18} /><span>Settings</span></button><div className="profile-row"><div className="avatar">OL</div><div><strong>Owain Lewis</strong><span>Personal workspace</span></div><MoreHorizontal size={17} /></div></div>
     </aside>
 
     <nav className="mobile-view-nav" aria-label="Mobile navigation">
-      <button className={view === "workspace" ? "active" : ""} aria-current={view === "workspace" ? "page" : undefined} aria-label="Open all content" onClick={() => { setTypeFilter("all"); navigate("workspace"); }}><Inbox size={18} /><span>Content</span></button>
-      <button className={view === "weekly" ? "active" : ""} aria-current={view === "weekly" ? "page" : undefined} aria-label="Open weekly view" onClick={() => navigate("weekly")}><LayoutGrid size={18} /><span>Weekly</span></button>
+      <button className={view === "workspace" ? "active" : ""} aria-current={view === "workspace" ? "page" : undefined} aria-label="Open all content" onClick={() => { setTypeFilter("all"); navigate("workspace"); }}><Inbox size={18} /><span>Library</span></button>
+      <button className={view === "weekly" ? "active" : ""} aria-current={view === "weekly" ? "page" : undefined} aria-label="Open weekly view" onClick={() => navigate("weekly")}><LayoutGrid size={18} /><span>This week</span></button>
       <button className={view === "calendar" ? "active" : ""} aria-current={view === "calendar" ? "page" : undefined} aria-label="Open calendar view" onClick={() => navigate("calendar")}><CalendarDays size={18} /><span>Calendar</span></button>
       <button className={view === "settings" ? "active" : ""} aria-current={view === "settings" ? "page" : undefined} aria-label="Open settings view" onClick={() => navigate("settings")}><SettingsIcon size={18} /><span>Settings</span></button>
     </nav>
@@ -1308,7 +1319,7 @@ export default function Home() {
     <section className="editor-panel" aria-label="Content editor" aria-hidden={isCompact && libraryOpen ? true : undefined} inert={isCompact && libraryOpen ? true : undefined}>
       <header className="mobile-app-header"><button ref={mobileLibraryButtonRef} className="icon-button" onClick={() => setLibraryOpen(true)} aria-label="Open content library"><Menu size={20} /></button><div className="brand-mark"><Zap size={15} fill="currentColor" /></div><strong>ContentFlow</strong><button className="icon-button mobile-theme-toggle" onClick={toggleTheme} aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}>{theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}</button><button className="icon-button" onClick={startCreate} aria-label={createLabel}><Plus size={20} /></button></header>
       {selected ? <>
-        <div className="editor-toolbar"><div className="editor-context">{libraryCollapsed && !isCompact && <button ref={libraryExpandButtonRef} className="icon-button editor-library-toggle" onClick={toggleLibrary} aria-label="Expand content library" aria-controls="content-library" aria-expanded="false"><PanelLeftOpen size={18} /></button>}<span className="type-pill" style={{ color: typeMeta[selected.type].color }}><TypeIcon type={selected.type} />{typeMeta[selected.type].label}</span><span className="toolbar-divider" /><label className="status-select"><span className={`status-dot ${selected.status}`} /><select aria-label="Content status" value={selected.status} disabled={editorLocked} onChange={(event) => updateSelected((current) => ({ ...current, status: event.target.value as ContentStatus }))}>{contentStatuses.map((status) => <option value={status} key={status}>{statusLabels[status]}</option>)}</select><ChevronDown size={14} /></label></div><div className="editor-actions">{selectedSchedulePending ? <span className="saved-state saving" role="status"><LoaderCircle className="spin" size={14} />Updating schedule…</span> : <span className={`saved-state ${currentSaveState}`} aria-live="polite">{currentSaveState === "saving" || currentSaveState === "retrying" ? <LoaderCircle className="spin" size={14} /> : currentSaveState === "conflict" || currentSaveState === "error" ? <AlertTriangle size={14} /> : <Check size={14} />}{saveLabel(currentSaveState)}</span>}</div></div>
+        <div className="editor-toolbar"><div className="editor-context"><button aria-label="Back to week" className="back-to-week" onClick={() => navigate("weekly")}><ArrowLeft size={15} /><span>Back to week</span></button>{libraryCollapsed && !isCompact && <button ref={libraryExpandButtonRef} className="icon-button editor-library-toggle" onClick={toggleLibrary} aria-label="Expand content library" aria-controls="content-library" aria-expanded="false"><PanelLeftOpen size={18} /></button>}<span className="type-pill" style={{ color: typeMeta[selected.type].color }}><TypeIcon type={selected.type} />{typeMeta[selected.type].label}</span><span className="toolbar-divider" /><label className="status-select"><span className={`status-dot ${selected.status}`} /><select aria-label="Content status" value={selected.status} disabled={editorLocked} onChange={(event) => updateSelected((current) => ({ ...current, status: event.target.value as ContentStatus }))}>{contentStatuses.map((status) => <option value={status} key={status}>{statusLabels[status]}</option>)}</select><ChevronDown size={14} /></label></div><div className="editor-actions">{selectedSchedulePending ? <span className="saved-state saving" role="status"><LoaderCircle className="spin" size={14} />Updating schedule…</span> : <span className={`saved-state ${currentSaveState}`} aria-live="polite">{currentSaveState === "saving" || currentSaveState === "retrying" ? <LoaderCircle className="spin" size={14} /> : currentSaveState === "conflict" || currentSaveState === "error" ? <AlertTriangle size={14} /> : <Check size={14} />}{saveLabel(currentSaveState)}</span>}</div></div>
         {foreignPendingLifecycle && <div className="inline-error" role="alert">Review the {foreignPendingLifecycle.action} conflict for “{foreignPendingLifecycleTitle ?? "another item"}” before continuing. <button onClick={() => { setActionError(""); setSelectedId(foreignPendingLifecycle.id); setLibraryOpen(false); }}>Review item</button></div>}
         {actionError && <div className="inline-error" role="alert">{actionError}</div>}
         <div className="editor-scroll"><article className="editor-document">
@@ -1323,7 +1334,7 @@ export default function Home() {
 
     {view === "calendar" && <Calendar items={allSummaries} onOpen={(id) => { setSelectedId(id); navigate("workspace"); }} onSchedule={(id, day) => void rescheduleItem(id, day)} blockedIds={scheduleBlockedIds} pendingIds={schedulePendingIds} error={scheduleError} />}
 
-    {view === "weekly" && <WeeklyMatrix items={allSummaries} enabledTypes={enabledTypes} onOpen={(id) => { setSelectedId(id); navigate("workspace"); }} onSchedule={(id, day) => void rescheduleItem(id, day)} onCreate={(type, day, title, attemptId) => createItem(type, { day, title, attemptId })} createPending={createPending} createError={weeklyCreateError} completedAttemptId={completedWeeklyAttemptId} frozenPlan={frozenWeeklyPlan} blockedIds={scheduleBlockedIds} pendingIds={schedulePendingIds} error={scheduleError} />}
+    {view === "weekly" && <WeeklyMatrix rhythm={weeklyRhythm} targetDraft={weeklyTargetDraft} onTargetDraftChange={setWeeklyTargetDraft} weekStart={weekStart} onWeekChange={setWeekStart} items={allSummaries} enabledTypes={enabledTypes} onOpen={(id) => { setSelectedId(id); navigate("workspace"); }} onSchedule={(id, day) => void rescheduleItem(id, day)} onCreate={(type, day, title, attemptId) => createItem(type, { day, title, attemptId })} createPending={createPending} createError={weeklyCreateError} completedAttemptId={completedWeeklyAttemptId} frozenPlan={frozenWeeklyPlan} blockedIds={scheduleBlockedIds} pendingIds={schedulePendingIds} error={scheduleError} />}
 
     {view === "settings" && <Settings theme={theme} onThemeChange={setThemeChoice} enabledTypes={enabledTypes} onToggleType={toggleType} counts={counts} workspaceId={workspaceId} />}
 

@@ -42,6 +42,33 @@ paths:
         '400': { $ref: '#/components/responses/BadRequest' }
         '409': { $ref: '#/components/responses/Conflict' }
         '413': { $ref: '#/components/responses/TooLarge' }
+  /content/rhythm:
+    get:
+      operationId: getWeeklyRhythm
+      description: Returns workspace weekly targets, or starter targets at revision zero. Requires content:read.
+      responses:
+        '200':
+          description: Weekly rhythm
+          content: { application/json: { schema: { $ref: '#/components/schemas/WeeklyRhythm' } } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+    put:
+      operationId: replaceWeeklyRhythm
+      description: Replaces all weekly targets using the current revision. Requires content:write and CSRF for browser sessions. Identical targets return the current revision, allowing safe retry after a lost response. Different targets with a stale revision return 409. Targets persist independently of content expiry.
+      requestBody:
+        required: true
+        content: { application/json: { schema: { $ref: '#/components/schemas/WeeklyRhythm' } } }
+      responses:
+        '200':
+          description: Saved weekly rhythm
+          content: { application/json: { schema: { $ref: '#/components/schemas/WeeklyRhythm' } } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '413': { $ref: '#/components/responses/TooLarge' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
   /content/batches:
     post:
       operationId: batchCreateContent
@@ -157,9 +184,29 @@ components:
     ULID:
       type: string
       pattern: '^[0-9A-HJKMNP-TV-Z]{26}$'
+    WeeklyRhythm:
+      type: object
+      additionalProperties: false
+      required: [revision, targets]
+      properties:
+        revision: { type: integer, format: int64, minimum: 0 }
+        targets:
+          type: object
+          additionalProperties: false
+          required: [youtube, instagram, linkedin, linkedin_newsletter, email, carousel, tiktok, substack, x]
+          properties:
+            youtube: { type: integer, minimum: 0, maximum: 35 }
+            instagram: { type: integer, minimum: 0, maximum: 35 }
+            linkedin: { type: integer, minimum: 0, maximum: 35 }
+            linkedin_newsletter: { type: integer, minimum: 0, maximum: 35 }
+            email: { type: integer, minimum: 0, maximum: 35 }
+            carousel: { type: integer, minimum: 0, maximum: 35 }
+            tiktok: { type: integer, minimum: 0, maximum: 35 }
+            substack: { type: integer, minimum: 0, maximum: 35 }
+            x: { type: integer, minimum: 0, maximum: 35 }
     ContentType:
       type: string
-      enum: [youtube, linkedin, x, instagram, tiktok, email, substack]
+      enum: [youtube, linkedin, x, instagram, tiktok, email, substack, linkedin_newsletter, carousel]
     ContentStatus:
       type: string
       enum: [idea, draft, ready, published]
@@ -246,6 +293,12 @@ components:
         - type: object
           properties: { type: { const: linkedin }, content: { $ref: '#/components/schemas/LinkedInContent' } }
       unevaluatedProperties: false
+    CarouselCreate:
+      allOf:
+        - { $ref: '#/components/schemas/CreateCommon' }
+        - type: object
+          properties: { type: { const: carousel }, content: { $ref: '#/components/schemas/LinkedInContent' } }
+      unevaluatedProperties: false
     XCreate:
       allOf:
         - { $ref: '#/components/schemas/CreateCommon' }
@@ -276,15 +329,23 @@ components:
         - type: object
           properties: { type: { const: substack }, content: { $ref: '#/components/schemas/SubstackContent' } }
       unevaluatedProperties: false
+    LinkedInNewsletterCreate:
+      allOf:
+        - { $ref: '#/components/schemas/CreateCommon' }
+        - type: object
+          properties: { type: { const: linkedin_newsletter }, content: { $ref: '#/components/schemas/SubstackContent' } }
+      unevaluatedProperties: false
     CreateContentRequest:
       oneOf:
         - { $ref: '#/components/schemas/YouTubeCreate' }
         - { $ref: '#/components/schemas/LinkedInCreate' }
+        - { $ref: '#/components/schemas/CarouselCreate' }
         - { $ref: '#/components/schemas/XCreate' }
         - { $ref: '#/components/schemas/InstagramCreate' }
         - { $ref: '#/components/schemas/TikTokCreate' }
         - { $ref: '#/components/schemas/EmailCreate' }
         - { $ref: '#/components/schemas/SubstackCreate' }
+        - { $ref: '#/components/schemas/LinkedInNewsletterCreate' }
       discriminator:
         propertyName: type
         mapping:
@@ -295,6 +356,8 @@ components:
           tiktok: '#/components/schemas/TikTokCreate'
           email: '#/components/schemas/EmailCreate'
           substack: '#/components/schemas/SubstackCreate'
+          linkedin_newsletter: '#/components/schemas/LinkedInNewsletterCreate'
+          carousel: '#/components/schemas/CarouselCreate'
     BatchYouTubeContent:
       type: object
       additionalProperties: false
@@ -328,6 +391,12 @@ components:
         - type: object
           properties: { type: { const: linkedin }, content: { $ref: '#/components/schemas/LinkedInContent' } }
       unevaluatedProperties: false
+    BatchCarouselCreate:
+      allOf:
+        - { $ref: '#/components/schemas/BatchItemCommon' }
+        - type: object
+          properties: { type: { const: carousel }, content: { $ref: '#/components/schemas/LinkedInContent' } }
+      unevaluatedProperties: false
     BatchXCreate:
       allOf:
         - { $ref: '#/components/schemas/BatchItemCommon' }
@@ -358,15 +427,23 @@ components:
         - type: object
           properties: { type: { const: substack }, content: { $ref: '#/components/schemas/SubstackContent' } }
       unevaluatedProperties: false
+    BatchLinkedInNewsletterCreate:
+      allOf:
+        - { $ref: '#/components/schemas/BatchItemCommon' }
+        - type: object
+          properties: { type: { const: linkedin_newsletter }, content: { $ref: '#/components/schemas/SubstackContent' } }
+      unevaluatedProperties: false
     BatchCreateItem:
       oneOf:
         - { $ref: '#/components/schemas/BatchYouTubeCreate' }
         - { $ref: '#/components/schemas/BatchLinkedInCreate' }
+        - { $ref: '#/components/schemas/BatchCarouselCreate' }
         - { $ref: '#/components/schemas/BatchXCreate' }
         - { $ref: '#/components/schemas/BatchInstagramCreate' }
         - { $ref: '#/components/schemas/BatchTikTokCreate' }
         - { $ref: '#/components/schemas/BatchEmailCreate' }
         - { $ref: '#/components/schemas/BatchSubstackCreate' }
+        - { $ref: '#/components/schemas/BatchLinkedInNewsletterCreate' }
       discriminator: { propertyName: type }
     BatchCreateRequest:
       type: object
@@ -390,6 +467,12 @@ components:
         - { $ref: '#/components/schemas/ReplaceCommon' }
         - type: object
           properties: { type: { const: linkedin }, content: { $ref: '#/components/schemas/LinkedInContent' } }
+      unevaluatedProperties: false
+    CarouselReplace:
+      allOf:
+        - { $ref: '#/components/schemas/ReplaceCommon' }
+        - type: object
+          properties: { type: { const: carousel }, content: { $ref: '#/components/schemas/LinkedInContent' } }
       unevaluatedProperties: false
     XReplace:
       allOf:
@@ -421,15 +504,23 @@ components:
         - type: object
           properties: { type: { const: substack }, content: { $ref: '#/components/schemas/SubstackContent' } }
       unevaluatedProperties: false
+    LinkedInNewsletterReplace:
+      allOf:
+        - { $ref: '#/components/schemas/ReplaceCommon' }
+        - type: object
+          properties: { type: { const: linkedin_newsletter }, content: { $ref: '#/components/schemas/SubstackContent' } }
+      unevaluatedProperties: false
     ReplaceContentRequest:
       oneOf:
         - { $ref: '#/components/schemas/YouTubeReplace' }
         - { $ref: '#/components/schemas/LinkedInReplace' }
+        - { $ref: '#/components/schemas/CarouselReplace' }
         - { $ref: '#/components/schemas/XReplace' }
         - { $ref: '#/components/schemas/InstagramReplace' }
         - { $ref: '#/components/schemas/TikTokReplace' }
         - { $ref: '#/components/schemas/EmailReplace' }
         - { $ref: '#/components/schemas/SubstackReplace' }
+        - { $ref: '#/components/schemas/LinkedInNewsletterReplace' }
       discriminator: { propertyName: type }
     RevisionMutationRequest:
       type: object
@@ -469,6 +560,13 @@ components:
         - type: object
           properties: { type: { const: linkedin }, content: { $ref: '#/components/schemas/LinkedInContent' } }
       unevaluatedProperties: false
+    CarouselItem:
+      allOf:
+        - { $ref: '#/components/schemas/ServerFields' }
+        - { $ref: '#/components/schemas/ItemCommon' }
+        - type: object
+          properties: { type: { const: carousel }, content: { $ref: '#/components/schemas/LinkedInContent' } }
+      unevaluatedProperties: false
     XItem:
       allOf:
         - { $ref: '#/components/schemas/ServerFields' }
@@ -504,15 +602,24 @@ components:
         - type: object
           properties: { type: { const: substack }, content: { $ref: '#/components/schemas/SubstackContent' } }
       unevaluatedProperties: false
+    LinkedInNewsletterItem:
+      allOf:
+        - { $ref: '#/components/schemas/ServerFields' }
+        - { $ref: '#/components/schemas/ItemCommon' }
+        - type: object
+          properties: { type: { const: linkedin_newsletter }, content: { $ref: '#/components/schemas/SubstackContent' } }
+      unevaluatedProperties: false
     ContentItem:
       oneOf:
         - { $ref: '#/components/schemas/YouTubeItem' }
         - { $ref: '#/components/schemas/LinkedInItem' }
+        - { $ref: '#/components/schemas/CarouselItem' }
         - { $ref: '#/components/schemas/XItem' }
         - { $ref: '#/components/schemas/InstagramItem' }
         - { $ref: '#/components/schemas/TikTokItem' }
         - { $ref: '#/components/schemas/EmailItem' }
         - { $ref: '#/components/schemas/SubstackItem' }
+        - { $ref: '#/components/schemas/LinkedInNewsletterItem' }
       discriminator: { propertyName: type }
     ContentSummary:
       type: object

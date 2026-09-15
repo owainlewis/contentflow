@@ -12,10 +12,11 @@ type MemoryStore struct {
 	mu       sync.Mutex
 	items    map[string]Item
 	receipts map[string]Receipt
+	rhythms  map[string]WeeklyRhythm
 }
 
 func NewMemoryStore() *MemoryStore {
-	return &MemoryStore{items: make(map[string]Item), receipts: make(map[string]Receipt)}
+	return &MemoryStore{items: make(map[string]Item), receipts: make(map[string]Receipt), rhythms: make(map[string]WeeklyRhythm)}
 }
 
 func memoryKey(workspaceID, id string) string { return workspaceID + "\x00" + id }

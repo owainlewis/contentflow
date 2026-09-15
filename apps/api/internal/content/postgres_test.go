@@ -44,6 +44,8 @@ func TestPostgresStorePersistsEveryTypeAndEnforcesExpiry(t *testing.T) {
 	}{
 		{TypeYouTube, YouTubeContent{Transcript: "spoken", Sections: []Section{{Position: 0, Title: "Intro", Body: "opening"}}}},
 		{TypeLinkedIn, LinkedInContent{Body: "body"}},
+		{TypeCarousel, LinkedInContent{Body: "slide one"}},
+		{TypeLinkedInNewsletter, SubstackContent{Headline: "headline", Subheadline: "summary", Body: "newsletter"}},
 		{TypeX, XContent{Body: "body"}},
 		{TypeInstagram, InstagramContent{Script: "script"}},
 		{TypeTikTok, TikTokContent{Script: "script"}},

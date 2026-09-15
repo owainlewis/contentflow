@@ -32,13 +32,15 @@ const (
 type Type string
 
 const (
-	TypeYouTube   Type = "youtube"
-	TypeLinkedIn  Type = "linkedin"
-	TypeX         Type = "x"
-	TypeInstagram Type = "instagram"
-	TypeTikTok    Type = "tiktok"
-	TypeEmail     Type = "email"
-	TypeSubstack  Type = "substack"
+	TypeYouTube            Type = "youtube"
+	TypeLinkedIn           Type = "linkedin"
+	TypeX                  Type = "x"
+	TypeInstagram          Type = "instagram"
+	TypeTikTok             Type = "tiktok"
+	TypeEmail              Type = "email"
+	TypeSubstack           Type = "substack"
+	TypeLinkedInNewsletter Type = "linkedin_newsletter"
+	TypeCarousel           Type = "carousel"
 )
 
 type Status string
@@ -339,7 +341,7 @@ func decodeTypedContent(contentType Type, raw json.RawMessage) (any, error) {
 			return nil, problem(400, "invalid_content")
 		}
 		return value, nil
-	case TypeLinkedIn:
+	case TypeLinkedIn, TypeCarousel:
 		var value LinkedInContent
 		if err := decodeExact(raw, &value); err != nil {
 			return nil, problem(400, "invalid_content")
@@ -369,7 +371,7 @@ func decodeTypedContent(contentType Type, raw json.RawMessage) (any, error) {
 			return nil, problem(400, "invalid_content")
 		}
 		return value, nil
-	case TypeSubstack:
+	case TypeSubstack, TypeLinkedInNewsletter:
 		var value SubstackContent
 		if err := decodeExact(raw, &value); err != nil {
 			return nil, problem(400, "invalid_content")
@@ -434,7 +436,7 @@ func validateRequest(request CreateRequest) error {
 			texts = append(texts, section.Title, section.Body)
 		}
 	case LinkedInContent:
-		if request.Type != TypeLinkedIn {
+		if request.Type != TypeLinkedIn && request.Type != TypeCarousel {
 			return problem(400, "invalid_discriminator")
 		}
 		texts = append(texts, value.Body)
@@ -459,7 +461,7 @@ func validateRequest(request CreateRequest) error {
 		}
 		texts = append(texts, value.Subject, value.Body)
 	case SubstackContent:
-		if request.Type != TypeSubstack {
+		if request.Type != TypeSubstack && request.Type != TypeLinkedInNewsletter {
 			return problem(400, "invalid_discriminator")
 		}
 		texts = append(texts, value.Headline, value.Subheadline, value.Body)
@@ -522,7 +524,7 @@ func validateRevisionRequest(request RevisionRequest) error {
 
 func validType(value Type) bool {
 	switch value {
-	case TypeYouTube, TypeLinkedIn, TypeX, TypeInstagram, TypeTikTok, TypeEmail, TypeSubstack:
+	case TypeYouTube, TypeLinkedIn, TypeX, TypeInstagram, TypeTikTok, TypeEmail, TypeSubstack, TypeLinkedInNewsletter, TypeCarousel:
 		return true
 	default:
 		return false

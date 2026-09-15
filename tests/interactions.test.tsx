@@ -2,9 +2,11 @@
 
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 import Home from "../apps/web/src/App";
 import { emptyContent, listContent, loadSession, type ContentDetail, type ContentStatus, type ContentType, type YouTubeContent } from "../apps/web/src/api";
+
+import { defaultWeeklyTargets } from "../apps/web/src/weekly-rhythm";
 
 const now = new Date("2026-08-15T10:00:00Z");
 const expires = new Date(now.getTime() + 56 * 86_400_000).toISOString();
@@ -32,6 +34,11 @@ function detail(type: ContentType, id = `01K${type.toUpperCase().padEnd(23, "0")
 }
 
 class FakeAPI {
+  rhythm = { revision: 0, targets: { ...defaultWeeklyTargets } };
+  failRhythmLoad = false;
+  failRhythmSave = false;
+  rhythmSaveGate?: Promise<void>;
+  rhythmAuthFailure?: { status: number; code: string };
   items = new Map<string, ContentDetail>();
   requests: Array<{ method: string; path: string; body: string; csrfToken: string | null }> = [];
   replaceBodies: string[] = [];
@@ -80,6 +87,21 @@ class FakeAPI {
     const method = init.method ?? "GET";
     const body = String(init.body ?? "");
     this.requests.push({ method, path: `${url.pathname}${url.search}`, body, csrfToken: new Headers(init.headers).get("X-CSRF-Token") });
+    if (url.pathname === "/api/v1/content/rhythm") {
+      if (method === "GET") return this.failRhythmLoad ? json({ error: "unavailable" }, 503) : json(this.rhythm);
+      if (this.rhythmAuthFailure) {
+        const failure = this.rhythmAuthFailure;
+        this.rhythmAuthFailure = undefined;
+        return json({ error: failure.code }, failure.status);
+      }
+      if (this.failRhythmSave) return json({ error: "unavailable" }, 503);
+      if (this.rhythmSaveGate) { const gate = this.rhythmSaveGate; this.rhythmSaveGate = undefined; await gate; }
+      const next = JSON.parse(body) as typeof this.rhythm;
+      if (JSON.stringify(next.targets) === JSON.stringify(this.rhythm.targets)) return json(this.rhythm);
+      if (next.revision !== this.rhythm.revision) return json({ error: "rhythm_revision_conflict" }, 409);
+      this.rhythm = { revision: this.rhythm.revision + 1, targets: next.targets };
+      return json(this.rhythm);
+    }
     if (url.pathname === "/api/v1/session") {
       this.sessionCounter += 1;
       return json({ csrf_token: `csrf-${this.sessionCounter}` });
@@ -285,6 +307,8 @@ function expireRequestTimersImmediately() {
     return nativeSetTimeout(handler, timeout === 10_000 ? 0 : timeout, ...rest);
   }) as typeof window.setTimeout);
 }
+
+beforeEach(() => { window.history.pushState({}, "", "/library"); });
 
 afterEach(() => {
   cleanup();
@@ -676,7 +700,7 @@ describe("persistent ContentFlow workspace", () => {
     api.listGate = new Promise<void>((resolve) => { releaseCreateRefresh = resolve; });
 
     await user.click(screen.getAllByRole("button", { name: /New content/ })[0]);
-    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: /^LinkedIn/ }));
+    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: /^LinkedIn(?! newsletter)/ }));
     await waitFor(() => expect(api.listGateStarted).toBe(1));
     await user.type(screen.getByLabelText("Search content titles"), "No match");
     await waitFor(() => expect(api.requests.some((request) => request.path === "/api/v1/content?q=No+match")).toBe(true));
@@ -702,7 +726,7 @@ describe("persistent ContentFlow workspace", () => {
     render(<Home />);
     await screen.findByText("Your workspace is empty");
     await user.click(screen.getAllByRole("button", { name: /New content/ })[0]);
-    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: new RegExp(`^${label}`) }));
+    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: new RegExp(`^${label}(?! newsletter)`) }));
     expect(await screen.findByLabelText(editorLabel)).toBeTruthy();
   });
 
@@ -715,7 +739,7 @@ describe("persistent ContentFlow workspace", () => {
     render(<Home />);
     await screen.findByText("Your workspace is empty");
     await user.click(screen.getAllByRole("button", { name: /New content/ })[0]);
-    const choice = within(screen.getByRole("dialog")).getByRole("button", { name: /^LinkedIn/ });
+    const choice = within(screen.getByRole("dialog")).getByRole("button", { name: /^LinkedIn(?! newsletter)/ });
 
     await user.dblClick(choice);
     expect((choice as HTMLButtonElement).disabled).toBe(true);
@@ -735,7 +759,7 @@ describe("persistent ContentFlow workspace", () => {
     render(<Home />);
     await screen.findByText("Your workspace is empty");
     await user.click(screen.getAllByRole("button", { name: /New content/ })[0]);
-    const choice = within(screen.getByRole("dialog")).getByRole("button", { name: /^LinkedIn/ });
+    const choice = within(screen.getByRole("dialog")).getByRole("button", { name: /^LinkedIn(?! newsletter)/ });
 
     await user.click(choice);
     expect(await within(screen.getByRole("dialog")).findByRole("alert")).toHaveProperty("textContent", "The new item could not be created.");
@@ -759,7 +783,7 @@ describe("persistent ContentFlow workspace", () => {
     render(<Home />);
     await screen.findByText("Your workspace is empty");
     await user.click(screen.getAllByRole("button", { name: /New content/ })[0]);
-    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: /^LinkedIn/ }));
+    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: /^LinkedIn(?! newsletter)/ }));
     expect(await screen.findByRole("heading", { name: "Your session expired" })).toBeTruthy();
 
     await user.click(screen.getByRole("button", { name: "I’ve signed in" }));
@@ -781,7 +805,7 @@ describe("persistent ContentFlow workspace", () => {
     api.expireNextList = true;
 
     await user.click(screen.getAllByRole("button", { name: /New content/ })[0]);
-    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: /^LinkedIn/ }));
+    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: /^LinkedIn(?! newsletter)/ }));
     expect(await screen.findByRole("heading", { name: "Your session expired" })).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "I’ve signed in" }));
 
@@ -825,7 +849,7 @@ describe("persistent ContentFlow workspace", () => {
     render(<Home />);
     await screen.findByText("Your workspace is empty");
     await user.click(screen.getAllByRole("button", { name: /New content/ })[0]);
-    const choice = within(screen.getByRole("dialog")).getByRole("button", { name: /^LinkedIn/ });
+    const choice = within(screen.getByRole("dialog")).getByRole("button", { name: /^LinkedIn(?! newsletter)/ });
 
     await user.click(choice);
     expect(await within(screen.getByRole("dialog")).findByRole("alert")).toHaveProperty("textContent", "The new item could not be created.");
@@ -1653,9 +1677,9 @@ describe("persistent ContentFlow workspace", () => {
     render(<Home />);
     await screen.findByRole("heading", { name: "LinkedIn one" });
 
-    await user.click(screen.getByRole("button", { name: /^Weekly/ }));
-    expect(await screen.findByRole("heading", { name: "Weekly matrix" })).toBeTruthy();
-    expect(window.location.pathname).toBe("/weekly");
+    await user.click(screen.getByRole("button", { name: /^This week/ }));
+    expect(await screen.findByRole("heading", { name: "This week" })).toBeTruthy();
+    expect(window.location.pathname).toBe("/");
 
     await user.click(screen.getByRole("button", { name: /^Calendar/ }));
     expect(await screen.findByRole("heading", { name: "Calendar" })).toBeTruthy();
@@ -1666,9 +1690,9 @@ describe("persistent ContentFlow workspace", () => {
     expect(window.location.pathname).toBe("/settings");
     expect(screen.queryByRole("heading", { name: "Calendar" })).toBeNull();
 
-    await user.click(screen.getByRole("button", { name: /^All content/ }));
+    await user.click(screen.getByRole("button", { name: /^Library/ }));
     expect(await screen.findByRole("heading", { name: "LinkedIn one" })).toBeTruthy();
-    expect(window.location.pathname).toBe("/");
+    expect(window.location.pathname).toBe("/library");
   });
 
   it("keeps every top-level view reachable from compact navigation", async () => {
@@ -1679,7 +1703,7 @@ describe("persistent ContentFlow workspace", () => {
     await screen.findByRole("heading", { name: "LinkedIn one" });
 
     await user.click(screen.getByRole("button", { name: "Open weekly view" }));
-    expect(await screen.findByRole("heading", { name: "Weekly matrix" })).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "This week" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Open weekly view" }).getAttribute("aria-current")).toBe("page");
 
     await user.click(screen.getByRole("button", { name: "Open calendar view" }));
@@ -1690,7 +1714,7 @@ describe("persistent ContentFlow workspace", () => {
 
     await user.click(screen.getByRole("button", { name: "Open all content" }));
     expect(await screen.findByRole("heading", { name: "LinkedIn one" })).toBeTruthy();
-    expect(window.location.pathname).toBe("/");
+    expect(window.location.pathname).toBe("/library");
   });
 
   it("opens the calendar directly from its URL", async () => {
@@ -1708,7 +1732,7 @@ describe("persistent ContentFlow workspace", () => {
     window.history.pushState({}, "", "/weekly");
     render(<Home />);
 
-    expect(await screen.findByRole("heading", { name: "Weekly matrix" })).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "This week" })).toBeTruthy();
   });
 
   it("places scheduled content in the correct platform and weekday cells", async () => {
@@ -1725,12 +1749,12 @@ describe("persistent ContentFlow workspace", () => {
     render(<Home />);
     await screen.findByDisplayValue("YouTube one");
 
-    await user.click(screen.getByRole("button", { name: /^Weekly/ }));
+    await user.click(screen.getByRole("button", { name: /^This week/ }));
     const youtubeCell = screen.getByLabelText(`YouTube on ${monday.toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long", year: "numeric" })}`);
     const instagramCell = screen.getByLabelText(`Instagram on ${tuesday.toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long", year: "numeric" })}`);
     expect(within(youtubeCell).getByRole("button", { name: "Open YouTube one" })).toBeTruthy();
     expect(within(instagramCell).getByRole("button", { name: "Open Instagram one" })).toBeTruthy();
-    expect(screen.getByText("2 pieces scheduled this week")).toBeTruthy();
+    expect(screen.getByLabelText("Week progress").textContent).toContain("Planned2");
   });
 
   it("counts only content types shown in the weekly matrix", async () => {
@@ -1748,9 +1772,9 @@ describe("persistent ContentFlow workspace", () => {
     await user.click(screen.getByRole("button", { name: /^Settings/ }));
     await user.click(await screen.findByRole("button", { name: "Content types" }));
     await user.click(screen.getByLabelText("Show TikTok"));
-    await user.click(screen.getByRole("button", { name: /^Weekly/ }));
+    await user.click(screen.getByRole("button", { name: /^This week/ }));
 
-    expect(await screen.findByText("1 piece scheduled this week")).toBeTruthy();
+    expect(screen.getByLabelText("Week progress").textContent).toContain("Planned1");
     expect(screen.queryByRole("row", { name: /^TikTok/ })).toBeNull();
   });
 
@@ -1766,7 +1790,7 @@ describe("persistent ContentFlow workspace", () => {
     const user = userEvent.setup();
     render(<Home />);
     await screen.findByRole("heading", { name: "LinkedIn one" });
-    await user.click(screen.getByRole("button", { name: /^Weekly/ }));
+    await user.click(screen.getByRole("button", { name: /^This week/ }));
 
     await user.click(await screen.findByRole("button", { name: `Add LinkedIn for ${fullDate.format(wednesday)}` }));
     const addButton = screen.getByRole("button", { name: "Add" }) as HTMLButtonElement;
@@ -1784,12 +1808,12 @@ describe("persistent ContentFlow workspace", () => {
     expect(created.status).toBe("idea");
     expect(new Date(created.scheduled_at!).toDateString()).toBe(wednesday.toDateString());
     expect(await screen.findByRole("button", { name: "Open Launch teaser" })).toBeTruthy();
-    expect(window.location.pathname).toBe("/weekly");
-    expect(screen.getByRole("heading", { name: "Weekly matrix" })).toBeTruthy();
+    expect(window.location.pathname).toBe("/");
+    expect(screen.getByRole("heading", { name: "This week" })).toBeTruthy();
     expect(screen.queryByLabelText(`New LinkedIn title for ${fullDate.format(wednesday)}`)).toBeNull();
 
     await user.click(screen.getByRole("button", { name: "Calendar" }));
-    await user.click(screen.getByRole("button", { name: "Weekly" }));
+    await user.click(screen.getByRole("button", { name: "This week" }));
     await user.click(await screen.findByRole("button", { name: `Add LinkedIn for ${fullDate.format(wednesday)}` }));
     expect(screen.getByLabelText(`New LinkedIn title for ${fullDate.format(wednesday)}`)).toBeTruthy();
   });
@@ -1806,7 +1830,7 @@ describe("persistent ContentFlow workspace", () => {
     const user = userEvent.setup();
     render(<Home />);
     await screen.findByRole("heading", { name: "LinkedIn one" });
-    await user.click(screen.getByRole("button", { name: /^Weekly/ }));
+    await user.click(screen.getByRole("button", { name: /^This week/ }));
 
     await user.click(await screen.findByRole("button", { name: `Add LinkedIn for ${fullDate.format(monday)}` }));
     await user.type(screen.getByLabelText(`New LinkedIn title for ${fullDate.format(monday)}`), "Retry me");
@@ -1830,7 +1854,7 @@ describe("persistent ContentFlow workspace", () => {
     const user = userEvent.setup();
     render(<Home />);
     await screen.findByRole("heading", { name: "LinkedIn one" });
-    await user.click(screen.getByRole("button", { name: /^Weekly/ }));
+    await user.click(screen.getByRole("button", { name: /^This week/ }));
 
     await user.click(await screen.findByRole("button", { name: `Add LinkedIn for ${fullDate.format(monday)}` }));
     const titleInput = screen.getByLabelText(`New LinkedIn title for ${fullDate.format(monday)}`);
@@ -1861,7 +1885,7 @@ describe("persistent ContentFlow workspace", () => {
     const user = userEvent.setup();
     render(<Home />);
     await screen.findByRole("heading", { name: "LinkedIn one" });
-    await user.click(screen.getByRole("button", { name: /^Weekly/ }));
+    await user.click(screen.getByRole("button", { name: /^This week/ }));
     await user.click(screen.getByRole("button", { name: "Next week" }));
 
     await user.click(await screen.findByRole("button", { name: `Add LinkedIn for ${fullDate.format(nextMonday)}` }));
@@ -1878,7 +1902,7 @@ describe("persistent ContentFlow workspace", () => {
     await user.click(await screen.findByRole("button", { name: "Content types" }));
     await user.click(screen.getByLabelText("Show LinkedIn"));
     await user.click(screen.getByRole("button", { name: "Calendar" }));
-    await user.click(screen.getByRole("button", { name: "Weekly" }));
+    await user.click(screen.getByRole("button", { name: "This week" }));
     const restoredTitle = screen.getByLabelText(`New LinkedIn title for ${fullDate.format(nextMonday)}`) as HTMLInputElement;
     expect(restoredTitle.value).toBe("Original plan");
     expect(restoredTitle.disabled).toBe(true);
@@ -1902,15 +1926,15 @@ describe("persistent ContentFlow workspace", () => {
     const user = userEvent.setup();
     render(<Home />);
     await screen.findByRole("heading", { name: "LinkedIn one" });
-    await user.click(screen.getByRole("button", { name: /^Weekly/ }));
+    await user.click(screen.getByRole("button", { name: /^This week/ }));
 
     await user.selectOptions(screen.getByLabelText("Move LinkedIn one"), `${tuesday.getFullYear()}-${String(tuesday.getMonth() + 1).padStart(2, "0")}-${String(tuesday.getDate()).padStart(2, "0")}`);
 
     await waitFor(() => expect(api.replaceBodies.length).toBe(1));
     const scheduled = (JSON.parse(api.replaceBodies[0]) as { scheduled_at?: string }).scheduled_at;
     expect(new Date(scheduled!).toDateString()).toBe(tuesday.toDateString());
-    expect(window.location.pathname).toBe("/weekly");
-    expect(screen.getByRole("heading", { name: "Weekly matrix" })).toBeTruthy();
+    expect(window.location.pathname).toBe("/");
+    expect(screen.getByRole("heading", { name: "This week" })).toBeTruthy();
   });
 
   it("keeps the selected editor revision and schedule current after a weekly move", async () => {
@@ -1926,7 +1950,7 @@ describe("persistent ContentFlow workspace", () => {
     const user = userEvent.setup();
     render(<Home />);
     await screen.findByRole("heading", { name: "LinkedIn one" });
-    await user.click(screen.getByRole("button", { name: /^Weekly/ }));
+    await user.click(screen.getByRole("button", { name: /^This week/ }));
 
     await user.selectOptions(screen.getByLabelText("Move LinkedIn one"), `${tuesday.getFullYear()}-${String(tuesday.getMonth() + 1).padStart(2, "0")}-${String(tuesday.getDate()).padStart(2, "0")}`);
     await waitFor(() => expect(api.items.get(linkedin.id)?.revision).toBe(2));
@@ -1951,19 +1975,19 @@ describe("persistent ContentFlow workspace", () => {
     const linkedin = { ...detail("linkedin"), scheduled_at: monday.toISOString() };
     const api = new FakeAPI([detail("youtube"), linkedin]);
     api.enforceRevisions = true;
-    let releaseMove = () => undefined;
+    let releaseMove: () => void = () => undefined;
     api.replaceGate = new Promise<void>((resolve) => { releaseMove = resolve; });
     vi.stubGlobal("fetch", api.fetch);
     const user = userEvent.setup();
     render(<Home />);
     await screen.findByDisplayValue("YouTube one");
-    await user.click(screen.getByRole("button", { name: /^Weekly/ }));
+    await user.click(screen.getByRole("button", { name: /^This week/ }));
 
     await user.selectOptions(screen.getByLabelText("Move LinkedIn one"), `${tuesday.getFullYear()}-${String(tuesday.getMonth() + 1).padStart(2, "0")}-${String(tuesday.getDate()).padStart(2, "0")}`);
     await waitFor(() => expect(api.replaceGateStarted).toBe(1));
-    let releaseDetail = () => undefined;
+    let releaseDetail: () => void = () => undefined;
     api.detailGate = new Promise<void>((resolve) => { releaseDetail = resolve; });
-    await user.click(screen.getByRole("button", { name: /^All content/ }));
+    await user.click(screen.getByRole("button", { name: /^Library/ }));
     await user.click(screen.getByRole("button", { name: /^LinkedIn one/ }));
     await waitFor(() => expect(api.detailGate).toBeUndefined());
 
@@ -1991,13 +2015,13 @@ describe("persistent ContentFlow workspace", () => {
     wednesday.setDate(monday.getDate() + 2);
     const linkedin = { ...detail("linkedin"), scheduled_at: monday.toISOString() };
     const api = new FakeAPI([linkedin]);
-    let releaseMove = () => undefined;
+    let releaseMove: () => void = () => undefined;
     api.replaceGate = new Promise<void>((resolve) => { releaseMove = resolve; });
     vi.stubGlobal("fetch", api.fetch);
     const user = userEvent.setup();
     render(<Home />);
     await screen.findByRole("heading", { name: "LinkedIn one" });
-    await user.click(screen.getByRole("button", { name: /^Weekly/ }));
+    await user.click(screen.getByRole("button", { name: /^This week/ }));
 
     const move = screen.getByLabelText("Move LinkedIn one");
     await user.selectOptions(move, `${tuesday.getFullYear()}-${String(tuesday.getMonth() + 1).padStart(2, "0")}-${String(tuesday.getDate()).padStart(2, "0")}`);
@@ -2006,7 +2030,7 @@ describe("persistent ContentFlow workspace", () => {
     const open = screen.getByRole("button", { name: "Open LinkedIn one" }) as HTMLButtonElement;
     expect(open.disabled).toBe(true);
     await user.click(open);
-    expect(window.location.pathname).toBe("/weekly");
+    expect(window.location.pathname).toBe("/");
     releaseMove();
     await waitFor(() => expect((screen.getByLabelText("Move LinkedIn one") as HTMLSelectElement).disabled).toBe(false));
     expect((screen.getByRole("button", { name: "Open LinkedIn one" }) as HTMLButtonElement).disabled).toBe(false);
@@ -2031,7 +2055,7 @@ describe("persistent ContentFlow workspace", () => {
     const user = userEvent.setup();
     render(<Home />);
     await screen.findByRole("heading", { name: "LinkedIn one" });
-    await user.click(screen.getByRole("button", { name: /^Weekly/ }));
+    await user.click(screen.getByRole("button", { name: /^This week/ }));
 
     const move = screen.getByLabelText("Move LinkedIn one") as HTMLSelectElement;
     await user.selectOptions(move, `${tuesday.getFullYear()}-${String(tuesday.getMonth() + 1).padStart(2, "0")}-${String(tuesday.getDate()).padStart(2, "0")}`);
@@ -2057,7 +2081,7 @@ describe("persistent ContentFlow workspace", () => {
     const user = userEvent.setup();
     render(<Home />);
     await screen.findByRole("heading", { name: "LinkedIn one" });
-    await user.click(screen.getByRole("button", { name: /^Weekly/ }));
+    await user.click(screen.getByRole("button", { name: /^This week/ }));
 
     await user.selectOptions(screen.getByLabelText("Move LinkedIn one"), `${tuesday.getFullYear()}-${String(tuesday.getMonth() + 1).padStart(2, "0")}-${String(tuesday.getDate()).padStart(2, "0")}`);
 
@@ -2084,7 +2108,7 @@ describe("persistent ContentFlow workspace", () => {
     const user = userEvent.setup();
     render(<Home />);
     await screen.findByRole("heading", { name: "LinkedIn one" });
-    await user.click(screen.getByRole("button", { name: /^Weekly/ }));
+    await user.click(screen.getByRole("button", { name: /^This week/ }));
     const move = screen.getByLabelText("Move LinkedIn one") as HTMLSelectElement;
     await user.selectOptions(move, `${tuesday.getFullYear()}-${String(tuesday.getMonth() + 1).padStart(2, "0")}-${String(tuesday.getDate()).padStart(2, "0")}`);
 
@@ -2112,7 +2136,7 @@ describe("persistent ContentFlow workspace", () => {
     const user = userEvent.setup();
     render(<Home />);
     await screen.findByRole("heading", { name: "LinkedIn one" });
-    await user.click(screen.getByRole("button", { name: /^Weekly/ }));
+    await user.click(screen.getByRole("button", { name: /^This week/ }));
 
     const linkedinMove = screen.getByLabelText("Move LinkedIn one") as HTMLSelectElement;
     await user.selectOptions(linkedinMove, `${tuesday.getFullYear()}-${String(tuesday.getMonth() + 1).padStart(2, "0")}-${String(tuesday.getDate()).padStart(2, "0")}`);
@@ -2136,17 +2160,17 @@ describe("persistent ContentFlow workspace", () => {
     const linkedin = { ...detail("linkedin"), scheduled_at: monday.toISOString() };
     const api = new FakeAPI([linkedin]);
     api.enforceRevisions = true;
-    let releaseMove = () => undefined;
+    let releaseMove: () => void = () => undefined;
     api.replaceGate = new Promise<void>((resolve) => { releaseMove = resolve; });
     vi.stubGlobal("fetch", api.fetch);
     const user = userEvent.setup();
     render(<Home />);
     await screen.findByRole("heading", { name: "LinkedIn one" });
-    await user.click(screen.getByRole("button", { name: /^Weekly/ }));
+    await user.click(screen.getByRole("button", { name: /^This week/ }));
 
     await user.selectOptions(screen.getByLabelText("Move LinkedIn one"), `${tuesday.getFullYear()}-${String(tuesday.getMonth() + 1).padStart(2, "0")}-${String(tuesday.getDate()).padStart(2, "0")}`);
     await waitFor(() => expect(api.replaceGateStarted).toBe(1));
-    await user.click(screen.getByRole("button", { name: /^All content/ }));
+    await user.click(screen.getByRole("button", { name: /^Library/ }));
 
     const post = await screen.findByLabelText("LinkedIn post");
     expect(screen.getByRole("status").textContent).toContain("Updating schedule");
@@ -2177,7 +2201,7 @@ describe("persistent ContentFlow workspace", () => {
     const user = userEvent.setup();
     render(<Home />);
     await screen.findByRole("heading", { name: "LinkedIn one" });
-    await user.click(screen.getByRole("button", { name: /^Weekly/ }));
+    await user.click(screen.getByRole("button", { name: /^This week/ }));
 
     await user.selectOptions(screen.getByLabelText("Move LinkedIn one"), `${tuesday.getFullYear()}-${String(tuesday.getMonth() + 1).padStart(2, "0")}-${String(tuesday.getDate()).padStart(2, "0")}`);
 
@@ -2199,7 +2223,7 @@ describe("persistent ContentFlow workspace", () => {
     const user = userEvent.setup();
     render(<Home />);
     await screen.findByDisplayValue("YouTube one");
-    await user.click(screen.getByRole("button", { name: /^Weekly/ }));
+    await user.click(screen.getByRole("button", { name: /^This week/ }));
 
     const cardButton = screen.getByRole("button", { name: "Open YouTube one" });
     const card = cardButton.closest("article")!;
@@ -2217,7 +2241,7 @@ describe("persistent ContentFlow workspace", () => {
 
     await waitFor(() => expect(api.replaceBodies.length).toBe(1));
     expect(new Date((JSON.parse(api.replaceBodies[0]) as { scheduled_at: string }).scheduled_at).toDateString()).toBe(wednesday.toDateString());
-    expect(window.location.pathname).toBe("/weekly");
+    expect(window.location.pathname).toBe("/");
   });
 
   it("moves between weeks and returns to the current week", async () => {
@@ -2226,12 +2250,12 @@ describe("persistent ContentFlow workspace", () => {
     const user = userEvent.setup();
     render(<Home />);
     await screen.findByRole("heading", { name: "LinkedIn one" });
-    await user.click(screen.getByRole("button", { name: /^Weekly/ }));
+    await user.click(screen.getByRole("button", { name: /^This week/ }));
     const currentLabel = screen.getByRole("button", { name: "Previous week" }).nextElementSibling?.textContent;
 
     await user.click(screen.getByRole("button", { name: "Next week" }));
     expect(screen.getByRole("button", { name: "Previous week" }).nextElementSibling?.textContent).not.toBe(currentLabel);
-    await user.click(screen.getByRole("button", { name: "This week" }));
+    await user.click(screen.getByRole("button", { name: "Jump to this week" }));
     expect(screen.getByRole("button", { name: "Previous week" }).nextElementSibling?.textContent).toBe(currentLabel);
   });
 
@@ -2669,7 +2693,7 @@ describe("persistent ContentFlow workspace", () => {
 
     const search = await screen.findByRole("textbox", { name: "Search content titles" });
     await waitFor(() => expect(document.activeElement).toBe(search));
-    expect(window.location.pathname).toBe("/");
+    expect(window.location.pathname).toBe("/library");
     expect(window.localStorage.getItem("contentflow-library-collapsed")).toBe("false");
   });
 
@@ -2686,4 +2710,231 @@ describe("persistent ContentFlow workspace", () => {
     expect(screen.getByRole("region", { name: "Content library" }).hasAttribute("inert")).toBe(false);
     expect(document.querySelector(".app-shell")?.classList).not.toContain("library-is-collapsed");
   });
+});
+
+describe("weekly planning rhythm", () => {
+  it("opens the week at the root URL and schedules an existing idea without duplicating it", async () => {
+    window.history.pushState({}, "", "/");
+    const api = new FakeAPI([detail("youtube")]);
+    vi.stubGlobal("fetch", api.fetch);
+    const user = userEvent.setup();
+    render(<Home />);
+    await screen.findByRole("heading", { name: "This week" });
+    const tray = screen.getByRole("region", { name: /Ready to plan/ });
+    expect(within(tray).getByRole("button", { name: "Open YouTube one" })).toBeTruthy();
+    const move = within(tray).getByLabelText("Move YouTube one") as HTMLSelectElement;
+    const day = move.options[1].value;
+    await user.selectOptions(move, day);
+    await waitFor(() => expect(api.items.get(detail("youtube").id)?.scheduled_at).toContain(day));
+    expect(api.items.size).toBe(1);
+    expect(api.requests.filter((request) => request.method === "POST")).toHaveLength(0);
+    expect(screen.getByLabelText("Week progress").textContent).toContain("Planned1");
+    expect(within(tray).queryByRole("button", { name: "Open YouTube one" })).toBeNull();
+  });
+
+  it("keeps the selected future week when returning from a script", async () => {
+    window.history.pushState({}, "", "/");
+    const api = new FakeAPI([detail("youtube")]);
+    vi.stubGlobal("fetch", api.fetch);
+    const user = userEvent.setup();
+    render(<Home />);
+    await screen.findByRole("heading", { name: "This week" });
+    await user.click(screen.getByRole("button", { name: "Next week" }));
+    const tableName = screen.getByRole("table").getAttribute("aria-label");
+    const move = screen.getByLabelText("Move YouTube one") as HTMLSelectElement;
+    await user.selectOptions(move, move.options[1].value);
+    await waitFor(() => expect(api.replaceBodies).toHaveLength(1));
+    await user.click(screen.getByRole("button", { name: "Open YouTube one" }));
+    await screen.findByDisplayValue("YouTube one");
+    await user.click(screen.getByRole("button", { name: "Back to week" }));
+    expect(screen.getByRole("heading", { name: "Weekly plan" })).toBeTruthy();
+    expect(screen.getByRole("table").getAttribute("aria-label")).toBe(tableName);
+    expect(screen.getByRole("button", { name: "Open YouTube one" })).toBeTruthy();
+  });
+
+  it("persists edited targets across a full remount", async () => {
+    window.history.pushState({}, "", "/");
+    const api = new FakeAPI([]);
+    vi.stubGlobal("fetch", api.fetch);
+    const user = userEvent.setup();
+    const first = render(<Home />);
+    await waitFor(() => expect((screen.getByRole("button", { name: "Edit rhythm" }) as HTMLButtonElement).disabled).toBe(false));
+    await user.click(screen.getByRole("button", { name: "Edit rhythm" }));
+    const input = screen.getByLabelText("YouTube weekly target");
+    await user.clear(input);
+    await user.type(input, "2");
+    await user.click(screen.getByRole("button", { name: "Save rhythm" }));
+    await waitFor(() => expect(api.rhythm.targets.youtube).toBe(2));
+    expect(api.requests.find((request) => request.path === "/api/v1/content/rhythm" && request.method === "PUT")?.csrfToken).toBe("csrf-1");
+    first.unmount();
+    render(<Home />);
+    await screen.findByText("0 planned / 2 target");
+  });
+
+  it("does not let excess YouTube pieces hide missing Instagram pieces", async () => {
+    const date = new Date();
+    const api = new FakeAPI([
+      { ...detail("youtube", "youtube-a"), scheduled_at: date.toISOString(), status: "ready" },
+      { ...detail("youtube", "youtube-b"), scheduled_at: date.toISOString(), status: "published" },
+    ]);
+    window.localStorage.setItem("contentflow-enabled-types", JSON.stringify(["youtube", "instagram"]));
+    window.history.pushState({}, "", "/");
+    vi.stubGlobal("fetch", api.fetch);
+    render(<Home />);
+    const progress = await screen.findByLabelText("Week progress");
+    expect(progress.textContent).toBe("Planned2Ready1Published1");
+    expect(screen.getByText(/pieces still to plan/).textContent).toBe("7 pieces still to plan");
+  });
+
+  it("shows an explicit fallback and reloads targets when their first load fails", async () => {
+    window.history.pushState({}, "", "/");
+    const api = new FakeAPI([]);
+    api.failRhythmLoad = true;
+    vi.stubGlobal("fetch", api.fetch);
+    const user = userEvent.setup();
+    render(<Home />);
+    await screen.findByText(/Your weekly targets could not be loaded/);
+    expect((screen.getByRole("button", { name: "Edit rhythm" }) as HTMLButtonElement).disabled).toBe(true);
+    api.failRhythmLoad = false;
+    await user.click(screen.getByRole("button", { name: "Reload targets" }));
+    await waitFor(() => expect((screen.getByRole("button", { name: "Edit rhythm" }) as HTMLButtonElement).disabled).toBe(false));
+  });
+
+  it("keeps failed target edits for retry and prevents overwriting a newer rhythm", async () => {
+    window.history.pushState({}, "", "/");
+    const api = new FakeAPI([]);
+    vi.stubGlobal("fetch", api.fetch);
+    const user = userEvent.setup();
+    render(<Home />);
+    await waitFor(() => expect((screen.getByRole("button", { name: "Edit rhythm" }) as HTMLButtonElement).disabled).toBe(false));
+    await user.click(screen.getByRole("button", { name: "Edit rhythm" }));
+    await user.clear(screen.getByLabelText("YouTube weekly target"));
+    await user.type(screen.getByLabelText("YouTube weekly target"), "2");
+    api.failRhythmSave = true;
+    await user.click(screen.getByRole("button", { name: "Save rhythm" }));
+    await screen.findByText(/Your targets could not be saved/);
+    expect((screen.getByLabelText("YouTube weekly target") as HTMLInputElement).value).toBe("2");
+    api.failRhythmSave = false;
+    api.rhythm = { revision: 1, targets: { ...defaultWeeklyTargets, youtube: 3 } };
+    await user.click(screen.getByRole("button", { name: "Save rhythm" }));
+    await screen.findByText(/Your rhythm changed elsewhere/);
+    expect(api.rhythm.targets.youtube).toBe(3);
+    expect((screen.getByRole("button", { name: "Save rhythm" }) as HTMLButtonElement).disabled).toBe(true);
+    await user.click(screen.getByRole("button", { name: "Reload targets" }));
+    await screen.findByText("0 planned / 3 target");
+    expect(screen.queryByLabelText("YouTube weekly target")).toBeNull();
+  });
+});
+
+describe("weekly planning recovery", () => {
+  it.each([
+    { status: 401, code: "session_expired" },
+    { status: 403, code: "csrf_check_failed" },
+  ])("preserves target edits after $code and saves with the refreshed session", async (failure) => {
+    window.history.pushState({}, "", "/");
+    const api = new FakeAPI([]);
+    vi.stubGlobal("fetch", api.fetch);
+    const user = userEvent.setup();
+    render(<Home />);
+    await waitFor(() => expect((screen.getByRole("button", { name: "Edit rhythm" }) as HTMLButtonElement).disabled).toBe(false));
+    await user.click(screen.getByRole("button", { name: "Edit rhythm" }));
+    await user.clear(screen.getByLabelText("YouTube weekly target"));
+    await user.type(screen.getByLabelText("YouTube weekly target"), "2");
+    api.rhythmAuthFailure = failure;
+    await user.click(screen.getByRole("button", { name: "Save rhythm" }));
+    await screen.findByRole("heading", { name: "Your session expired" });
+    await user.click(screen.getByRole("button", { name: "I’ve signed in" }));
+    const restored = await screen.findByLabelText("YouTube weekly target") as HTMLInputElement;
+    expect(restored.value).toBe("2");
+    await waitFor(() => expect(restored.disabled).toBe(false));
+    await user.click(screen.getByRole("button", { name: "Save rhythm" }));
+    await waitFor(() => expect(api.rhythm.targets.youtube).toBe(2));
+    const requests = api.requests.filter((request) => request.path === "/api/v1/content/rhythm" && request.method === "PUT");
+    expect(requests).toHaveLength(2);
+    expect(requests[1].body).toBe(requests[0].body);
+    expect(requests[1].csrfToken).toBe("csrf-2");
+  });
+
+  it("retains target edits when the reload after sign-in fails and preserves their original revision", async () => {
+    window.history.pushState({}, "", "/");
+    const api = new FakeAPI([]);
+    vi.stubGlobal("fetch", api.fetch);
+    const user = userEvent.setup();
+    render(<Home />);
+    await waitFor(() => expect((screen.getByRole("button", { name: "Edit rhythm" }) as HTMLButtonElement).disabled).toBe(false));
+    await user.click(screen.getByRole("button", { name: "Edit rhythm" }));
+    await user.clear(screen.getByLabelText("YouTube weekly target"));
+    await user.type(screen.getByLabelText("YouTube weekly target"), "2");
+    api.rhythmAuthFailure = { status: 401, code: "session_expired" };
+    await user.click(screen.getByRole("button", { name: "Save rhythm" }));
+    await screen.findByRole("heading", { name: "Your session expired" });
+    api.failRhythmLoad = true;
+    api.rhythm = { revision: 1, targets: { ...defaultWeeklyTargets, youtube: 3 } };
+    await user.click(screen.getByRole("button", { name: "I’ve signed in" }));
+    await screen.findByText(/Your weekly targets could not be loaded/);
+    api.failRhythmLoad = false;
+    await user.click(screen.getByRole("button", { name: "Reload targets" }));
+    const restored = screen.getByLabelText("YouTube weekly target") as HTMLInputElement;
+    expect(restored.value).toBe("2");
+    await waitFor(() => expect(restored.disabled).toBe(false));
+    await user.click(screen.getByRole("button", { name: "Save rhythm" }));
+    await screen.findByText(/Your rhythm changed elsewhere/);
+    expect(api.rhythm.targets.youtube).toBe(3);
+    const requests = api.requests.filter((request) => request.path === "/api/v1/content/rhythm" && request.method === "PUT");
+    expect(JSON.parse(requests[1].body).revision).toBe(0);
+  });
+
+  it("returns to the selected week while an older create is unconfirmed, then explicitly resumes that create", async () => {
+    window.history.pushState({}, "", "/");
+    const api = new FakeAPI([detail("youtube")]);
+    api.createResponseLostOnce = true;
+    vi.stubGlobal("fetch", api.fetch);
+    const user = userEvent.setup();
+    render(<Home />);
+    await screen.findByRole("heading", { name: "This week" });
+    await user.click(screen.getByRole("button", { name: "Next week" }));
+    const originalWeek = screen.getByRole("table").getAttribute("aria-label");
+    await user.click(screen.getAllByRole("button", { name: /^Add YouTube/ })[0]);
+    await user.type(screen.getByRole("textbox", { name: /^New YouTube title/ }), "Unconfirmed future video");
+    await user.click(screen.getByRole("button", { name: "Add" }));
+    await screen.findByText(/The new item could not be confirmed/);
+    await user.click(screen.getByRole("button", { name: "Next week" }));
+    const laterWeek = screen.getByRole("table").getAttribute("aria-label");
+    expect(laterWeek).not.toBe(originalWeek);
+    await user.click(screen.getByRole("button", { name: "Open YouTube one" }));
+    await screen.findByDisplayValue("YouTube one");
+    await user.click(screen.getByRole("button", { name: "Back to week" }));
+    expect(screen.getByRole("table").getAttribute("aria-label")).toBe(laterWeek);
+    await user.click(screen.getByRole("button", { name: "Return to unconfirmed item" }));
+    expect(screen.getByRole("table").getAttribute("aria-label")).toBe(originalWeek);
+    await user.click(screen.getByRole("button", { name: "Retry" }));
+    await screen.findByRole("button", { name: "Open Unconfirmed future video" });
+    expect(api.items.size).toBe(2);
+    const requests = api.requests.filter((request) => request.path === "/api/v1/content" && request.method === "POST");
+    expect(requests).toHaveLength(2);
+    expect(requests[1].body).toBe(requests[0].body);
+  });
+});
+
+it("keeps a target save pending when the planner is closed and reopened", async () => {
+  window.history.pushState({}, "", "/");
+  const api = new FakeAPI([]);
+  let finishSave: () => void = () => undefined;
+  api.rhythmSaveGate = new Promise<void>((resolve) => { finishSave = resolve; });
+  vi.stubGlobal("fetch", api.fetch);
+  const user = userEvent.setup();
+  render(<Home />);
+  await waitFor(() => expect((screen.getByRole("button", { name: "Edit rhythm" }) as HTMLButtonElement).disabled).toBe(false));
+  await user.click(screen.getByRole("button", { name: "Edit rhythm" }));
+  await user.clear(screen.getByLabelText("YouTube weekly target"));
+  await user.type(screen.getByLabelText("YouTube weekly target"), "2");
+  await user.click(screen.getByRole("button", { name: "Save rhythm" }));
+  await user.click(screen.getByRole("button", { name: /^Library/ }));
+  await user.click(screen.getByRole("button", { name: "This week" }));
+  expect((screen.getByRole("button", { name: "Saving…" }) as HTMLButtonElement).disabled).toBe(true);
+  expect((screen.getByLabelText("YouTube weekly target") as HTMLInputElement).disabled).toBe(true);
+  finishSave();
+  await screen.findByText("0 planned / 2 target");
+  expect(screen.queryByLabelText("YouTube weekly target")).toBeNull();
+  expect(api.requests.filter((request) => request.method === "PUT" && request.path === "/api/v1/content/rhythm")).toHaveLength(1);
 });

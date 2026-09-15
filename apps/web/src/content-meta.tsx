@@ -9,6 +9,8 @@ export const typeMeta: Record<ContentType, { label: string; description: string;
   tiktok: { label: "TikTok", description: "Script and finished video", icon: Music2, color: "var(--platform-icon)" },
   email: { label: "Email", description: "Subject line and email body", icon: Mail, color: "var(--platform-icon)" },
   substack: { label: "Substack", description: "Headline, sub-headline, and article", icon: FileText, color: "var(--platform-icon)" },
+  linkedin_newsletter: { label: "LinkedIn newsletter", description: "Headline, summary, and newsletter body", icon: FileText, color: "var(--platform-icon)" },
+  carousel: { label: "Carousel", description: "Slide copy and publishing notes", icon: FileText, color: "var(--platform-icon)" },
 };
 
 export const statusLabels: Record<ContentStatus, string> = { idea: "Idea", draft: "Draft", ready: "Ready", published: "Published" };

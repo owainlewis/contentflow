@@ -1,12 +1,19 @@
-import { CalendarDays, ChevronLeft, ChevronRight, Plus } from "lucide-react";
+import { CalendarDays, ChevronLeft, ChevronRight, Plus, SlidersHorizontal, Search } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type DragEvent as ReactDragEvent } from "react";
-import { newOperationId, type ContentSummary, type ContentType } from "./api";
+import { newOperationId, type ContentSummary, type ContentType, type WeeklyRhythm } from "./api";
 import { dayKey } from "./Calendar";
 import { TypeIcon, displayTitle, statusLabels, typeMeta } from "./content-meta";
+import type { useWeeklyRhythm } from "./useWeeklyRhythm";
+import { weeklyLabels, weeklyTypeOrder } from "./weekly-rhythm";
 
 type Props = {
   items: ContentSummary[];
   enabledTypes: ContentType[];
+  targetDraft?: WeeklyRhythm;
+  onTargetDraftChange: (draft: WeeklyRhythm | undefined) => void;
+  rhythm: ReturnType<typeof useWeeklyRhythm>;
+  weekStart: Date;
+  onWeekChange: (date: Date) => void;
   onOpen: (id: string) => void;
   onSchedule: (id: string, day: string | undefined) => void;
   onCreate: (type: ContentType, day: string, title: string, attemptId: string) => Promise<boolean>;
@@ -37,12 +44,13 @@ function weekLabel(start: Date, end: Date) {
   return `${starts} – ${ends}`;
 }
 
-export default function WeeklyMatrix({ items, enabledTypes, onOpen, onSchedule, onCreate, createPending = false, createError, completedAttemptId, frozenPlan, blockedIds = new Set(), pendingIds = new Set(), error }: Props) {
-  const [weekStart, setWeekStart] = useState(() => mondayOf(frozenPlan ? new Date(`${frozenPlan.day}T12:00:00`) : new Date()));
+export default function WeeklyMatrix({ items, enabledTypes, targetDraft, onTargetDraftChange: setTargetDraft, rhythm, weekStart, onWeekChange, onOpen, onSchedule, onCreate, createPending = false, createError, completedAttemptId, frozenPlan, blockedIds = new Set(), pendingIds = new Set(), error }: Props) {
+  const [trayQuery, setTrayQuery] = useState("");
+  const [showOtherFormats, setShowOtherFormats] = useState(false);
   const [dragging, setDragging] = useState<string>();
   const [dragOver, setDragOver] = useState<string>();
   const [composer, setComposer] = useState<{ cell: string; title: string; attemptId: string }>();
-  const draggingType = useRef<ContentType>();
+  const draggingType = useRef<ContentType | undefined>(undefined);
   const suppressOpen = useRef(false);
   const composerInput = useRef<HTMLInputElement>(null);
   const days = useMemo(() => datesForWeek(weekStart), [weekStart]);
@@ -52,7 +60,7 @@ export default function WeeklyMatrix({ items, enabledTypes, onOpen, onSchedule, 
   const activeComposer = composer?.attemptId === completedAttemptId ? undefined : composer ?? restoredComposer;
   const composerCellKey = activeComposer?.cell;
   const composerFrozen = activeComposer?.attemptId === frozenPlan?.attemptId;
-  const displayedTypes = useMemo(() => frozenPlan && !enabledTypes.includes(frozenPlan.type) ? [...enabledTypes, frozenPlan.type] : enabledTypes, [enabledTypes, frozenPlan]);
+  const displayedTypes = weeklyTypeOrder.filter((type) => enabledTypes.includes(type) || frozenPlan?.type === type);
 
   useEffect(() => {
     if (composerCellKey) composerInput.current?.focus();
@@ -70,14 +78,17 @@ export default function WeeklyMatrix({ items, enabledTypes, onOpen, onSchedule, 
     return result;
   }, [items]);
 
-  const scheduledThisWeek = useMemo(() => {
-    const keys = new Set(days.map(dayKey));
-    const visibleTypes = new Set(displayedTypes);
-    return items.filter((item) => visibleTypes.has(item.type) && item.scheduled_at && keys.has(dayKey(new Date(item.scheduled_at)))).length;
-  }, [days, displayedTypes, items]);
+  const keys = new Set(days.map(dayKey));
+  const scheduled = items.filter((item) => displayedTypes.includes(item.type) && item.scheduled_at && keys.has(dayKey(new Date(item.scheduled_at))));
+  const gapCount = displayedTypes.reduce((total, type) => total + Math.max(0, rhythm.targets[type] - scheduled.filter((item) => item.type === type).length), 0);
+  const unscheduled = items.filter((item) => !item.scheduled_at && item.status !== "published" && displayedTypes.includes(item.type));
+  const trayItems = unscheduled.filter((item) => `${displayTitle(item)} ${typeMeta[item.type].label}`.toLowerCase().includes(trayQuery.toLowerCase()));
+  const currentWeek = dayKey(weekStart) === dayKey(mondayOf(new Date()));
+  const rowTypes = displayedTypes.filter((type) => showOtherFormats || rhythm.targets[type] > 0 || scheduled.some((item) => item.type === type) || frozenPlan?.type === type || activeComposer?.cell.startsWith(`${type}:`));
 
   function moveWeek(offset: number) {
-    setWeekStart((current) => new Date(current.getFullYear(), current.getMonth(), current.getDate() + (offset * 7)));
+    onWeekChange(new Date(weekStart.getFullYear(), weekStart.getMonth(), weekStart.getDate() + (offset * 7)));
+    if (!composerFrozen) setComposer(undefined);
   }
 
   function drop(event: ReactDragEvent, type: ContentType, date: Date) {
@@ -157,7 +168,7 @@ export default function WeeklyMatrix({ items, enabledTypes, onOpen, onSchedule, 
       >
         <button className="weekly-card-open" disabled={schedulePending} onClick={() => { if (!suppressOpen.current) onOpen(item.id); }} aria-label={`Open ${displayTitle(item)}`}>
           <strong>{displayTitle(item)}</strong>
-          <span>{statusLabels[item.status]}</span>
+          <span className={`weekly-status ${item.status}`}><i className={`status-dot ${item.status}`} />{statusLabels[item.status]}</span>
         </button>
         <label className="weekly-card-move">
           <span className="visually-hidden">Move {displayTitle(item)}</span>
@@ -168,7 +179,7 @@ export default function WeeklyMatrix({ items, enabledTypes, onOpen, onSchedule, 
             onChange={(event) => onSchedule(item.id, event.target.value || undefined)}
           >
             <option value="">Unscheduled</option>
-            {days.map((date) => <option value={dayKey(date)} key={dayKey(date)}>{fullDate.format(date)}</option>)}
+            {days.map((date) => <option value={dayKey(date)} key={dayKey(date)}>{dayName.format(date)} {date.getDate()}</option>)}
           </select>
         </label>
       </article>
@@ -179,26 +190,42 @@ export default function WeeklyMatrix({ items, enabledTypes, onOpen, onSchedule, 
     <section className="page weekly-page" aria-label="Weekly content matrix">
       <header className="page-header weekly-header">
         <div>
-          <p className="eyebrow">Content cadence</p>
-          <h1>Weekly matrix</h1>
-          <p className="weekly-summary">{scheduledThisWeek} {scheduledThisWeek === 1 ? "piece" : "pieces"} scheduled this week</p>
+          <h1>{currentWeek ? "This week" : "Weekly plan"}</h1>
+          <p className="weekly-summary">Plan, write, and track your weekly content.</p>
         </div>
         <div className="calendar-controls">
           <button className="icon-button" aria-label="Previous week" onClick={() => moveWeek(-1)}><ChevronLeft size={18} /></button>
           <strong aria-live="polite">{label}</strong>
           <button className="icon-button" aria-label="Next week" onClick={() => moveWeek(1)}><ChevronRight size={18} /></button>
-          <button className="secondary-button" onClick={() => setWeekStart(mondayOf(new Date()))}>This week</button>
+          {!currentWeek && <button className="secondary-button" onClick={() => { onWeekChange(mondayOf(new Date())); if (!composerFrozen) setComposer(undefined); }}>Jump to this week</button>}
         </div>
       </header>
 
-      {error && <div className="inline-error" role="alert">{error}</div>}
-      {createError && <div className="inline-error" role="alert">{createError}</div>}
+      <div className="weekly-overview">
+        <dl className="weekly-totals" aria-label="Week progress">
+          <div><dt>Planned</dt><dd>{scheduled.length}</dd></div>
+          <div><dt>Ready</dt><dd>{scheduled.filter((item) => item.status === "ready").length}</dd></div>
+          <div><dt>Published</dt><dd>{scheduled.filter((item) => item.status === "published").length}</dd></div>
+        </dl>
+        <p className="weekly-gap" aria-live="polite">{gapCount ? <><strong>{gapCount}</strong> {gapCount === 1 ? "piece" : "pieces"} still to plan</> : "Your weekly targets are planned"}</p>
+        <button className="secondary-button" disabled={!rhythm.loaded || rhythm.pending} aria-expanded={Boolean(targetDraft)} onClick={() => setTargetDraft(targetDraft ? undefined : { revision: rhythm.revision, targets: { ...rhythm.targets } })}><SlidersHorizontal size={15} /> Edit rhythm</button>
+      </div>
+      {rhythm.error && <div className="inline-error" role="alert">{rhythm.error} {!rhythm.loaded && <button onClick={() => { if (rhythm.conflicted) setTargetDraft(undefined); rhythm.retry(); }}>Reload targets</button>}</div>}
+      {targetDraft && <form className="rhythm-editor" onSubmit={(event) => { event.preventDefault(); void rhythm.save(targetDraft).then((saved) => { if (saved) setTargetDraft(undefined); }); }}>
+        <div className="rhythm-editor-heading"><h2>Your weekly rhythm</h2><p>Set a target for each format. These repeat every week. Zero means no weekly target.</p></div>
+        <div className="rhythm-fields">{displayedTypes.map((type) => <label key={type}><span>{weeklyLabels[type] ?? typeMeta[type].label}</span><input aria-label={`${typeMeta[type].label} weekly target`} type="number" min="0" max="35" step="1" required disabled={rhythm.pending || !rhythm.loaded} value={Number.isNaN(targetDraft.targets[type]) ? "" : targetDraft.targets[type]} onChange={(event) => setTargetDraft({ ...targetDraft, targets: { ...targetDraft.targets, [type]: event.target.valueAsNumber } })} /></label>)}</div>
+        <div className="rhythm-editor-actions"><button type="submit" className="primary-button" disabled={rhythm.pending || !rhythm.loaded}>{rhythm.pending ? "Saving…" : "Save rhythm"}</button><button type="button" className="secondary-button" disabled={rhythm.pending} onClick={() => setTargetDraft(undefined)}>Cancel</button></div>
+      </form>}
 
-      <div className="weekly-scroll" role="region" aria-label={`${label} matrix. Scroll horizontally to see every day.`}>
+      {error && <div className="inline-error" role="alert">{error}</div>}
+      {createError && <div className="inline-error" role="alert">{createError}{frozenPlan && !keys.has(frozenPlan.day) && <button onClick={() => { setComposer(undefined); onWeekChange(mondayOf(new Date(`${frozenPlan.day}T12:00:00`))); }}>Return to unconfirmed item</button>}</div>}
+
+      {/* eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- Keyboard users need to scroll all seven days. */}
+      <div className="weekly-scroll" role="region" tabIndex={0} aria-label={`${label} matrix. Scroll horizontally to see every day.`}>
         <table className="weekly-matrix" aria-label={`Content scheduled for ${label}`}>
           <thead>
             <tr>
-              <th scope="col" className="weekly-corner"><CalendarDays size={15} /> Platform</th>
+              <th scope="col" className="weekly-corner"><CalendarDays size={15} /> Weekly rhythm</th>
               {days.map((date) => {
                 const key = dayKey(date);
                 return <th scope="col" key={key} className={key === today ? "today" : ""}><span>{dayName.format(date)}</span><strong>{date.getDate()}</strong></th>;
@@ -206,13 +233,13 @@ export default function WeeklyMatrix({ items, enabledTypes, onOpen, onSchedule, 
             </tr>
           </thead>
           <tbody>
-            {displayedTypes.map((type) => {
+            {rowTypes.map((type) => {
               const rowCount = days.reduce((count, date) => count + (byCell.get(`${type}:${dayKey(date)}`)?.length ?? 0), 0);
               return (
                 <tr key={type}>
                   <th scope="row">
                     <span className="weekly-platform-icon" style={{ color: typeMeta[type].color }}><TypeIcon type={type} size={16} /></span>
-                    <span><strong>{typeMeta[type].label}</strong><small>{rowCount} {rowCount === 1 ? "post" : "posts"}</small></span>
+                    <span><strong>{weeklyLabels[type] ?? typeMeta[type].label}</strong><small>{rowCount} planned{rhythm.targets[type] ? ` / ${rhythm.targets[type]} target` : " · no target"}</small><span className="weekly-target-track" aria-hidden="true"><span style={{ width: `${rhythm.targets[type] ? Math.min(100, rowCount / rhythm.targets[type] * 100) : 0}%` }} /></span></span>
                   </th>
                   {days.map((date) => {
                     const dateKey = dayKey(date);
@@ -243,7 +270,12 @@ export default function WeeklyMatrix({ items, enabledTypes, onOpen, onSchedule, 
           </tbody>
         </table>
       </div>
-      <p className="weekly-help">Click Add in a cell to plan a new piece there. Drag a card along its platform row, or use its move control with the keyboard.</p>
+      {displayedTypes.some((type) => rhythm.targets[type] === 0) && <button className="weekly-formats-toggle" onClick={() => setShowOtherFormats(!showOtherFormats)}>{showOtherFormats ? "Hide formats without a target" : "Show formats without a target"}</button>}
+      <p className="weekly-help">Add a working title to plan a piece. Move cards within their row by dragging or choosing a day. Targets count scheduled pieces, including published work.</p>
+      <section className="weekly-backlog" aria-labelledby="weekly-backlog-title">
+        <div className="weekly-backlog-heading"><div><h2 id="weekly-backlog-title">Ready to plan <span>{unscheduled.length}</span></h2><p>Bring an idea into the week when you have room for it.</p></div><label className="weekly-search"><Search size={16} /><input aria-label="Find an unscheduled idea" placeholder="Find an idea…" value={trayQuery} onChange={(event) => setTrayQuery(event.target.value)} /></label></div>
+        {trayItems.length ? <div className="weekly-backlog-items">{trayItems.map((item) => <div className="weekly-backlog-item" key={item.id}><span className="weekly-backlog-type"><TypeIcon type={item.type} size={15} />{weeklyLabels[item.type] ?? typeMeta[item.type].label}</span>{card(item)}</div>)}</div> : <p className="weekly-backlog-empty">{unscheduled.length ? "No ideas match your search." : "Your unscheduled ideas will appear here. You can also start with Add in the week above."}</p>}
+      </section>
     </section>
   );
 }

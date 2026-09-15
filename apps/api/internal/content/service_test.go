@@ -22,6 +22,8 @@ func TestServicePersistsEveryTypeAndReturnsSummaryOnlySearch(t *testing.T) {
 	}{
 		{TypeYouTube, YouTubeContent{Transcript: "spoken", Sections: []Section{}}},
 		{TypeLinkedIn, LinkedInContent{Body: "body"}},
+		{TypeCarousel, LinkedInContent{Body: "slide one"}},
+		{TypeLinkedInNewsletter, SubstackContent{Headline: "headline", Subheadline: "summary", Body: "newsletter"}},
 		{TypeX, XContent{Body: "body"}},
 		{TypeInstagram, InstagramContent{Script: "script"}},
 		{TypeTikTok, TikTokContent{Script: "script"}},
