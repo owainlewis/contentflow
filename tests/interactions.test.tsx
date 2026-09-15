@@ -359,6 +359,40 @@ describe("persistent ContentFlow workspace", () => {
     expect(JSON.stringify(list)).not.toContain("sections");
   });
 
+  it.each(["instagram", "linkedin", "tiktok"] as const)("saves a %s working title across the library, weekly plan, and reload", async (type) => {
+    const item = detail(type);
+    item.working_title = "";
+    item.scheduled_at = new Date().toISOString();
+    item.content = type === "linkedin" ? { body: "The original post text" } : { script: "The original script" };
+    const api = new FakeAPI([item]);
+    vi.stubGlobal("fetch", api.fetch);
+    const user = userEvent.setup();
+    const workspace = render(<Home />);
+    const title = "Three ways to use coding agents";
+
+    await user.type(await screen.findByRole("textbox", { name: "Working title" }), title);
+    await waitFor(() => expect(api.items.get(item.id)?.working_title).toBe(title), { timeout: 2500 });
+    expect(screen.getByRole("button", { name: new RegExp(`^${title}`) })).toBeTruthy();
+    expect(api.items.get(item.id)).toMatchObject({
+      id: item.id, content: item.content, status: item.status,
+      scheduled_at: item.scheduled_at, expires_at: item.expires_at,
+    });
+
+    await user.click(screen.getByRole("button", { name: "This week" }));
+    await user.click(await screen.findByRole("button", { name: `Open ${title}` }));
+    expect((await screen.findByRole("textbox", { name: "Working title" }) as HTMLInputElement).value).toBe(title);
+
+    workspace.unmount();
+    render(<Home />);
+    const restoredTitle = await screen.findByRole("textbox", { name: "Working title" });
+    expect((restoredTitle as HTMLInputElement).value).toBe(title);
+    expect(screen.getByDisplayValue(type === "linkedin" ? "The original post text" : "The original script")).toBeTruthy();
+
+    await user.clear(restoredTitle);
+    await user.type(restoredTitle, "A better coding workflow");
+    await waitFor(() => expect(api.items.get(item.id)?.working_title).toBe("A better coding workflow"), { timeout: 2500 });
+  });
+
   it("ignores a stale detail response that started before autosave completed", async () => {
     const api = new FakeAPI([detail("youtube"), detail("x")]);
     vi.stubGlobal("fetch", api.fetch);
