@@ -37,6 +37,8 @@ class FakeAPI {
   rhythm = { revision: 0, targets: { ...defaultWeeklyTargets } };
   failRhythmLoad = false;
   failRhythmSave = false;
+  rhythmSaveGate?: Promise<void>;
+  rhythmAuthFailure?: { status: number; code: string };
   items = new Map<string, ContentDetail>();
   requests: Array<{ method: string; path: string; body: string; csrfToken: string | null }> = [];
   replaceBodies: string[] = [];
@@ -87,7 +89,13 @@ class FakeAPI {
     this.requests.push({ method, path: `${url.pathname}${url.search}`, body, csrfToken: new Headers(init.headers).get("X-CSRF-Token") });
     if (url.pathname === "/api/v1/content/rhythm") {
       if (method === "GET") return this.failRhythmLoad ? json({ error: "unavailable" }, 503) : json(this.rhythm);
+      if (this.rhythmAuthFailure) {
+        const failure = this.rhythmAuthFailure;
+        this.rhythmAuthFailure = undefined;
+        return json({ error: failure.code }, failure.status);
+      }
       if (this.failRhythmSave) return json({ error: "unavailable" }, 503);
+      if (this.rhythmSaveGate) { const gate = this.rhythmSaveGate; this.rhythmSaveGate = undefined; await gate; }
       const next = JSON.parse(body) as typeof this.rhythm;
       if (JSON.stringify(next.targets) === JSON.stringify(this.rhythm.targets)) return json(this.rhythm);
       if (next.revision !== this.rhythm.revision) return json({ error: "rhythm_revision_conflict" }, 409);
@@ -2816,4 +2824,117 @@ describe("weekly planning rhythm", () => {
     await screen.findByText("0 planned / 3 target");
     expect(screen.queryByLabelText("YouTube weekly target")).toBeNull();
   });
+});
+
+describe("weekly planning recovery", () => {
+  it.each([
+    { status: 401, code: "session_expired" },
+    { status: 403, code: "csrf_check_failed" },
+  ])("preserves target edits after $code and saves with the refreshed session", async (failure) => {
+    window.history.pushState({}, "", "/");
+    const api = new FakeAPI([]);
+    vi.stubGlobal("fetch", api.fetch);
+    const user = userEvent.setup();
+    render(<Home />);
+    await waitFor(() => expect((screen.getByRole("button", { name: "Edit rhythm" }) as HTMLButtonElement).disabled).toBe(false));
+    await user.click(screen.getByRole("button", { name: "Edit rhythm" }));
+    await user.clear(screen.getByLabelText("YouTube weekly target"));
+    await user.type(screen.getByLabelText("YouTube weekly target"), "2");
+    api.rhythmAuthFailure = failure;
+    await user.click(screen.getByRole("button", { name: "Save rhythm" }));
+    await screen.findByRole("heading", { name: "Your session expired" });
+    await user.click(screen.getByRole("button", { name: "I’ve signed in" }));
+    const restored = await screen.findByLabelText("YouTube weekly target") as HTMLInputElement;
+    expect(restored.value).toBe("2");
+    await waitFor(() => expect(restored.disabled).toBe(false));
+    await user.click(screen.getByRole("button", { name: "Save rhythm" }));
+    await waitFor(() => expect(api.rhythm.targets.youtube).toBe(2));
+    const requests = api.requests.filter((request) => request.path === "/api/v1/content/rhythm" && request.method === "PUT");
+    expect(requests).toHaveLength(2);
+    expect(requests[1].body).toBe(requests[0].body);
+    expect(requests[1].csrfToken).toBe("csrf-2");
+  });
+
+  it("retains target edits when the reload after sign-in fails and preserves their original revision", async () => {
+    window.history.pushState({}, "", "/");
+    const api = new FakeAPI([]);
+    vi.stubGlobal("fetch", api.fetch);
+    const user = userEvent.setup();
+    render(<Home />);
+    await waitFor(() => expect((screen.getByRole("button", { name: "Edit rhythm" }) as HTMLButtonElement).disabled).toBe(false));
+    await user.click(screen.getByRole("button", { name: "Edit rhythm" }));
+    await user.clear(screen.getByLabelText("YouTube weekly target"));
+    await user.type(screen.getByLabelText("YouTube weekly target"), "2");
+    api.rhythmAuthFailure = { status: 401, code: "session_expired" };
+    await user.click(screen.getByRole("button", { name: "Save rhythm" }));
+    await screen.findByRole("heading", { name: "Your session expired" });
+    api.failRhythmLoad = true;
+    api.rhythm = { revision: 1, targets: { ...defaultWeeklyTargets, youtube: 3 } };
+    await user.click(screen.getByRole("button", { name: "I’ve signed in" }));
+    await screen.findByText(/Your weekly targets could not be loaded/);
+    api.failRhythmLoad = false;
+    await user.click(screen.getByRole("button", { name: "Reload targets" }));
+    const restored = screen.getByLabelText("YouTube weekly target") as HTMLInputElement;
+    expect(restored.value).toBe("2");
+    await waitFor(() => expect(restored.disabled).toBe(false));
+    await user.click(screen.getByRole("button", { name: "Save rhythm" }));
+    await screen.findByText(/Your rhythm changed elsewhere/);
+    expect(api.rhythm.targets.youtube).toBe(3);
+    const requests = api.requests.filter((request) => request.path === "/api/v1/content/rhythm" && request.method === "PUT");
+    expect(JSON.parse(requests[1].body).revision).toBe(0);
+  });
+
+  it("returns to the selected week while an older create is unconfirmed, then explicitly resumes that create", async () => {
+    window.history.pushState({}, "", "/");
+    const api = new FakeAPI([detail("youtube")]);
+    api.createResponseLostOnce = true;
+    vi.stubGlobal("fetch", api.fetch);
+    const user = userEvent.setup();
+    render(<Home />);
+    await screen.findByRole("heading", { name: "This week" });
+    await user.click(screen.getByRole("button", { name: "Next week" }));
+    const originalWeek = screen.getByRole("table").getAttribute("aria-label");
+    await user.click(screen.getAllByRole("button", { name: /^Add YouTube/ })[0]);
+    await user.type(screen.getByRole("textbox", { name: /^New YouTube title/ }), "Unconfirmed future video");
+    await user.click(screen.getByRole("button", { name: "Add" }));
+    await screen.findByText(/The new item could not be confirmed/);
+    await user.click(screen.getByRole("button", { name: "Next week" }));
+    const laterWeek = screen.getByRole("table").getAttribute("aria-label");
+    expect(laterWeek).not.toBe(originalWeek);
+    await user.click(screen.getByRole("button", { name: "Open YouTube one" }));
+    await screen.findByDisplayValue("YouTube one");
+    await user.click(screen.getByRole("button", { name: "Back to week" }));
+    expect(screen.getByRole("table").getAttribute("aria-label")).toBe(laterWeek);
+    await user.click(screen.getByRole("button", { name: "Return to unconfirmed item" }));
+    expect(screen.getByRole("table").getAttribute("aria-label")).toBe(originalWeek);
+    await user.click(screen.getByRole("button", { name: "Retry" }));
+    await screen.findByRole("button", { name: "Open Unconfirmed future video" });
+    expect(api.items.size).toBe(2);
+    const requests = api.requests.filter((request) => request.path === "/api/v1/content" && request.method === "POST");
+    expect(requests).toHaveLength(2);
+    expect(requests[1].body).toBe(requests[0].body);
+  });
+});
+
+it("keeps a target save pending when the planner is closed and reopened", async () => {
+  window.history.pushState({}, "", "/");
+  const api = new FakeAPI([]);
+  let finishSave: () => void = () => undefined;
+  api.rhythmSaveGate = new Promise<void>((resolve) => { finishSave = resolve; });
+  vi.stubGlobal("fetch", api.fetch);
+  const user = userEvent.setup();
+  render(<Home />);
+  await waitFor(() => expect((screen.getByRole("button", { name: "Edit rhythm" }) as HTMLButtonElement).disabled).toBe(false));
+  await user.click(screen.getByRole("button", { name: "Edit rhythm" }));
+  await user.clear(screen.getByLabelText("YouTube weekly target"));
+  await user.type(screen.getByLabelText("YouTube weekly target"), "2");
+  await user.click(screen.getByRole("button", { name: "Save rhythm" }));
+  await user.click(screen.getByRole("button", { name: /^Library/ }));
+  await user.click(screen.getByRole("button", { name: "This week" }));
+  expect((screen.getByRole("button", { name: "Saving…" }) as HTMLButtonElement).disabled).toBe(true);
+  expect((screen.getByLabelText("YouTube weekly target") as HTMLInputElement).disabled).toBe(true);
+  finishSave();
+  await screen.findByText("0 planned / 2 target");
+  expect(screen.queryByLabelText("YouTube weekly target")).toBeNull();
+  expect(api.requests.filter((request) => request.method === "PUT" && request.path === "/api/v1/content/rhythm")).toHaveLength(1);
 });

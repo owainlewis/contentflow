@@ -55,11 +55,13 @@ import {
   type ContentType,
   type Section,
   type YouTubeContent,
+  type WeeklyRhythm,
 } from "./api";
 import AutoTextarea from "./AutoTextarea";
 import Calendar, { dayKey } from "./Calendar";
 import Settings from "./Settings";
 import WeeklyMatrix, { mondayOf } from "./WeeklyMatrix";
+import { useWeeklyRhythm } from "./useWeeklyRhythm";
 import { TypeIcon, displayTitle, statusLabels, typeMeta } from "./content-meta";
 import { AutosaveManager, type ConflictView, type SaveState } from "./autosave";
 import { normalizeUnicode15Title } from "./unicode-normalization";
@@ -251,7 +253,9 @@ export default function Home() {
   const [detailLoading, setDetailLoading] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [view, setView] = useState<View>(() => viewFromPath(window.location.pathname));
+  const weeklyRhythm = useWeeklyRhythm(csrfToken ?? "", handleSessionExpired, authState === "ready");
   const [weekStart, setWeekStart] = useState(() => mondayOf(new Date()));
+  const [weeklyTargetDraft, setWeeklyTargetDraft] = useState<WeeklyRhythm>();
   const [calendarError, setCalendarError] = useState("");
   const [weeklyCreateError, setWeeklyCreateError] = useState("");
   const [completedWeeklyAttemptId, setCompletedWeeklyAttemptId] = useState("");
@@ -649,7 +653,6 @@ export default function Home() {
     : calendarError;
 
   function navigate(next: View) {
-    if (next === "weekly" && frozenWeeklyPlan) setWeekStart(mondayOf(new Date(`${frozenWeeklyPlan.day}T12:00:00`)));
     if (window.location.pathname !== viewPaths[next]) window.history.pushState({}, "", viewPaths[next]);
     setView(next);
     setLibraryOpen(false);
@@ -755,6 +758,7 @@ export default function Home() {
       csrfTokenRef.current = session.csrf_token ?? "";
       setCsrfToken(csrfTokenRef.current);
       setSessionExpired(false);
+      weeklyRhythm.retry();
       autosaveRef.current?.resumeUnauthorized();
       setPendingSessionCreate(undefined);
       setPendingSessionLifecycle(undefined);
@@ -1266,7 +1270,7 @@ export default function Home() {
     <a className="secondary-button" href="/api/v1/auth/login">Sign in with Google</a>
   </main>;
   if (authState === "error") return <main className="centered-state"><AlertTriangle /><h1>ContentFlow is unavailable</h1><p>{loadError}</p><button className="primary-button" onClick={() => window.location.reload()}>Try again</button></main>;
-  if (sessionExpired) return <main className="centered-state"><AlertTriangle /><h1>Your session expired</h1><p>{pendingSessionLifecycle ? `Your ${pendingSessionLifecycle.action} action for “${displayTitle(pendingSessionLifecycle.document)}” is waiting. Sign in in a new tab, then return here to retry it.` : "Your unsaved changes are still queued. Sign in in a new tab, then return here to continue saving."}</p><a className="primary-button" href="/api/v1/auth/login" target="_blank" rel="noreferrer">Open sign in</a><button className="secondary-button" disabled={reauthChecking} onClick={() => void resumeExpiredSession()}>{reauthChecking ? "Checking…" : "I’ve signed in"}</button>{reauthError && <p className="inline-error" role="alert">{reauthError}</p>}</main>;
+  if (sessionExpired) return <main className="centered-state"><AlertTriangle /><h1>Your session expired</h1><p>{pendingSessionLifecycle ? `Your ${pendingSessionLifecycle.action} action for “${displayTitle(pendingSessionLifecycle.document)}” is waiting. Sign in in a new tab, then return here to retry it.` : weeklyTargetDraft ? "Your weekly target edits are preserved. Sign in in a new tab, then return here to save your rhythm." : "Your unsaved changes are still queued. Sign in in a new tab, then return here to continue saving."}</p><a className="primary-button" href="/api/v1/auth/login" target="_blank" rel="noreferrer">Open sign in</a><button className="secondary-button" disabled={reauthChecking} onClick={() => void resumeExpiredSession()}>{reauthChecking ? "Checking…" : "I’ve signed in"}</button>{reauthError && <p className="inline-error" role="alert">{reauthError}</p>}</main>;
 
   const createLabel = typeFilter === "all" ? "New content" : `New ${typeMeta[typeFilter].label}`;
   const currentSaveState = selected ? saveStates[selected.id] ?? "saved" : "saved";
@@ -1330,7 +1334,7 @@ export default function Home() {
 
     {view === "calendar" && <Calendar items={allSummaries} onOpen={(id) => { setSelectedId(id); navigate("workspace"); }} onSchedule={(id, day) => void rescheduleItem(id, day)} blockedIds={scheduleBlockedIds} pendingIds={schedulePendingIds} error={scheduleError} />}
 
-    {view === "weekly" && <WeeklyMatrix csrfToken={csrfToken ?? ""} onSessionExpired={handleSessionExpired} weekStart={weekStart} onWeekChange={setWeekStart} items={allSummaries} enabledTypes={enabledTypes} onOpen={(id) => { setSelectedId(id); navigate("workspace"); }} onSchedule={(id, day) => void rescheduleItem(id, day)} onCreate={(type, day, title, attemptId) => createItem(type, { day, title, attemptId })} createPending={createPending} createError={weeklyCreateError} completedAttemptId={completedWeeklyAttemptId} frozenPlan={frozenWeeklyPlan} blockedIds={scheduleBlockedIds} pendingIds={schedulePendingIds} error={scheduleError} />}
+    {view === "weekly" && <WeeklyMatrix rhythm={weeklyRhythm} targetDraft={weeklyTargetDraft} onTargetDraftChange={setWeeklyTargetDraft} weekStart={weekStart} onWeekChange={setWeekStart} items={allSummaries} enabledTypes={enabledTypes} onOpen={(id) => { setSelectedId(id); navigate("workspace"); }} onSchedule={(id, day) => void rescheduleItem(id, day)} onCreate={(type, day, title, attemptId) => createItem(type, { day, title, attemptId })} createPending={createPending} createError={weeklyCreateError} completedAttemptId={completedWeeklyAttemptId} frozenPlan={frozenWeeklyPlan} blockedIds={scheduleBlockedIds} pendingIds={schedulePendingIds} error={scheduleError} />}
 
     {view === "settings" && <Settings theme={theme} onThemeChange={setThemeChoice} enabledTypes={enabledTypes} onToggleType={toggleType} counts={counts} workspaceId={workspaceId} />}
 

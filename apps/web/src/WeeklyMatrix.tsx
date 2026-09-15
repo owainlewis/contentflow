@@ -1,16 +1,17 @@
 import { CalendarDays, ChevronLeft, ChevronRight, Plus, SlidersHorizontal, Search } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type DragEvent as ReactDragEvent } from "react";
-import { newOperationId, type ContentSummary, type ContentType } from "./api";
+import { newOperationId, type ContentSummary, type ContentType, type WeeklyRhythm } from "./api";
 import { dayKey } from "./Calendar";
 import { TypeIcon, displayTitle, statusLabels, typeMeta } from "./content-meta";
-import { useWeeklyRhythm } from "./useWeeklyRhythm";
-import { weeklyLabels, weeklyTypeOrder, type WeeklyTargets } from "./weekly-rhythm";
+import type { useWeeklyRhythm } from "./useWeeklyRhythm";
+import { weeklyLabels, weeklyTypeOrder } from "./weekly-rhythm";
 
 type Props = {
   items: ContentSummary[];
   enabledTypes: ContentType[];
-  csrfToken: string;
-  onSessionExpired: () => void;
+  targetDraft?: WeeklyRhythm;
+  onTargetDraftChange: (draft: WeeklyRhythm | undefined) => void;
+  rhythm: ReturnType<typeof useWeeklyRhythm>;
   weekStart: Date;
   onWeekChange: (date: Date) => void;
   onOpen: (id: string) => void;
@@ -43,9 +44,7 @@ function weekLabel(start: Date, end: Date) {
   return `${starts} – ${ends}`;
 }
 
-export default function WeeklyMatrix({ items, enabledTypes, csrfToken, onSessionExpired, weekStart, onWeekChange, onOpen, onSchedule, onCreate, createPending = false, createError, completedAttemptId, frozenPlan, blockedIds = new Set(), pendingIds = new Set(), error }: Props) {
-  const rhythm = useWeeklyRhythm(csrfToken, onSessionExpired);
-  const [targetDraft, setTargetDraft] = useState<WeeklyTargets>();
+export default function WeeklyMatrix({ items, enabledTypes, targetDraft, onTargetDraftChange: setTargetDraft, rhythm, weekStart, onWeekChange, onOpen, onSchedule, onCreate, createPending = false, createError, completedAttemptId, frozenPlan, blockedIds = new Set(), pendingIds = new Set(), error }: Props) {
   const [trayQuery, setTrayQuery] = useState("");
   const [showOtherFormats, setShowOtherFormats] = useState(false);
   const [dragging, setDragging] = useState<string>();
@@ -209,17 +208,17 @@ export default function WeeklyMatrix({ items, enabledTypes, csrfToken, onSession
           <div><dt>Published</dt><dd>{scheduled.filter((item) => item.status === "published").length}</dd></div>
         </dl>
         <p className="weekly-gap" aria-live="polite">{gapCount ? <><strong>{gapCount}</strong> {gapCount === 1 ? "piece" : "pieces"} still to plan</> : "Your weekly targets are planned"}</p>
-        <button className="secondary-button" disabled={!rhythm.loaded || rhythm.pending} aria-expanded={Boolean(targetDraft)} onClick={() => setTargetDraft(targetDraft ? undefined : { ...rhythm.targets })}><SlidersHorizontal size={15} /> Edit rhythm</button>
+        <button className="secondary-button" disabled={!rhythm.loaded || rhythm.pending} aria-expanded={Boolean(targetDraft)} onClick={() => setTargetDraft(targetDraft ? undefined : { revision: rhythm.revision, targets: { ...rhythm.targets } })}><SlidersHorizontal size={15} /> Edit rhythm</button>
       </div>
-      {rhythm.error && <div className="inline-error" role="alert">{rhythm.error} {!rhythm.loaded && <button onClick={() => { setTargetDraft(undefined); rhythm.retry(); }}>Reload targets</button>}</div>}
+      {rhythm.error && <div className="inline-error" role="alert">{rhythm.error} {!rhythm.loaded && <button onClick={() => { if (rhythm.conflicted) setTargetDraft(undefined); rhythm.retry(); }}>Reload targets</button>}</div>}
       {targetDraft && <form className="rhythm-editor" onSubmit={(event) => { event.preventDefault(); void rhythm.save(targetDraft).then((saved) => { if (saved) setTargetDraft(undefined); }); }}>
         <div className="rhythm-editor-heading"><h2>Your weekly rhythm</h2><p>Set a target for each format. These repeat every week. Zero means no weekly target.</p></div>
-        <div className="rhythm-fields">{displayedTypes.map((type) => <label key={type}><span>{weeklyLabels[type] ?? typeMeta[type].label}</span><input aria-label={`${typeMeta[type].label} weekly target`} type="number" min="0" max="35" step="1" required disabled={rhythm.pending || !rhythm.loaded} value={Number.isNaN(targetDraft[type]) ? "" : targetDraft[type]} onChange={(event) => setTargetDraft({ ...targetDraft, [type]: event.target.valueAsNumber })} /></label>)}</div>
+        <div className="rhythm-fields">{displayedTypes.map((type) => <label key={type}><span>{weeklyLabels[type] ?? typeMeta[type].label}</span><input aria-label={`${typeMeta[type].label} weekly target`} type="number" min="0" max="35" step="1" required disabled={rhythm.pending || !rhythm.loaded} value={Number.isNaN(targetDraft.targets[type]) ? "" : targetDraft.targets[type]} onChange={(event) => setTargetDraft({ ...targetDraft, targets: { ...targetDraft.targets, [type]: event.target.valueAsNumber } })} /></label>)}</div>
         <div className="rhythm-editor-actions"><button type="submit" className="primary-button" disabled={rhythm.pending || !rhythm.loaded}>{rhythm.pending ? "Saving…" : "Save rhythm"}</button><button type="button" className="secondary-button" disabled={rhythm.pending} onClick={() => setTargetDraft(undefined)}>Cancel</button></div>
       </form>}
 
       {error && <div className="inline-error" role="alert">{error}</div>}
-      {createError && <div className="inline-error" role="alert">{createError}</div>}
+      {createError && <div className="inline-error" role="alert">{createError}{frozenPlan && !keys.has(frozenPlan.day) && <button onClick={() => { setComposer(undefined); onWeekChange(mondayOf(new Date(`${frozenPlan.day}T12:00:00`))); }}>Return to unconfirmed item</button>}</div>}
 
       {/* eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- Keyboard users need to scroll all seven days. */}
       <div className="weekly-scroll" role="region" tabIndex={0} aria-label={`${label} matrix. Scroll horizontally to see every day.`}>
