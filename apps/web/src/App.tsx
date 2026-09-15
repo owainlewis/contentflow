@@ -1123,7 +1123,7 @@ export default function Home() {
     return (
       <label className="document-field document-field-large">
         <span>{label}</span>
-        <input aria-label="Working title" value={selected.working_title} placeholder="Untitled video" onChange={(event) => updateSelected((current) => ({ ...current, working_title: event.target.value }))} />
+        <input aria-label="Working title" value={selected.working_title} placeholder={selected.type === "youtube" ? "Untitled video" : "Untitled post"} onChange={(event) => updateSelected((current) => ({ ...current, working_title: event.target.value }))} />
       </label>
     );
   }
@@ -1323,7 +1323,13 @@ export default function Home() {
         {foreignPendingLifecycle && <div className="inline-error" role="alert">Review the {foreignPendingLifecycle.action} conflict for “{foreignPendingLifecycleTitle ?? "another item"}” before continuing. <button onClick={() => { setActionError(""); setSelectedId(foreignPendingLifecycle.id); setLibraryOpen(false); }}>Review item</button></div>}
         {actionError && <div className="inline-error" role="alert">{actionError}</div>}
         <div className="editor-scroll"><article className="editor-document">
-          <div className="document-heading" inert={editorLocked}>{selected.type === "youtube" ? renderWorkingTitle() : <h1 className={`document-identity ${selected.working_title.trim() ? "" : "document-identity-untitled"}`}>{displayTitle(selected)}</h1>}<div className="document-meta"><span><Clock3 size={14} /> Edited {formatRelativeTime(selected.updated_at)}</span><span>{documentWordCount(selected).toLocaleString()} words</span><span className={selectedExpiry?.warning ? "expiry-warning" : ""}><CalendarDays size={14} /> Expires {selectedExpiry?.label}{selectedExpiry?.warning ? ` · ${selectedExpiry.detail}` : ""}</span></div></div>
+          <div className="document-heading" inert={editorLocked}>
+            {selected.type === "youtube" ? renderWorkingTitle() :
+              selected.type === "instagram" || selected.type === "linkedin" || selected.type === "tiktok" ?
+                <h1 className="document-identity" aria-label={displayTitle(selected)}>{renderWorkingTitle()}</h1> :
+                <h1 className={`document-identity ${selected.working_title.trim() ? "" : "document-identity-untitled"}`}>{displayTitle(selected)}</h1>}
+            <div className="document-meta"><span><Clock3 size={14} /> Edited {formatRelativeTime(selected.updated_at)}</span><span>{documentWordCount(selected).toLocaleString()} words</span><span className={selectedExpiry?.warning ? "expiry-warning" : ""}><CalendarDays size={14} /> Expires {selectedExpiry?.label}{selectedExpiry?.warning ? ` · ${selectedExpiry.detail}` : ""}</span></div>
+          </div>
           {conflict && <section className="conflict-panel" aria-labelledby="conflict-title"><div className="conflict-title"><AlertTriangle size={18} /><div><h2 id="conflict-title">This item changed elsewhere</h2><p>{selectedPendingLifecycle ? `Review the current server version before you retry or cancel ${selectedPendingLifecycle.action}.` : "Compare the saved server version with your unsaved local work. Nothing was overwritten."}</p></div></div><div className="conflict-columns"><div><h3>Server version</h3><pre>{JSON.stringify(editableSnapshot(conflict.server), null, 2)}</pre></div><div><h3>{selectedPendingLifecycle ? "Previous version" : "Your unsaved version"}</h3><pre>{JSON.stringify(editableSnapshot(conflict.local), null, 2)}</pre></div></div><div className="conflict-actions">{selectedPendingLifecycle ? <><button onClick={() => resolveLifecycleConflict(false)}>Cancel action</button><button className="primary-button" onClick={() => resolveLifecycleConflict(true)}>Retry {selectedPendingLifecycle.action}</button></> : <><button onClick={() => resolveSelectedConflict("server")}>Use server version</button><button className="primary-button" onClick={() => resolveSelectedConflict("local")}>Save my version</button></>}</div></section>}
           <div className="editor-content" inert={editorLocked}>{selected.type === "youtube" ? renderYouTubeEditor() : renderPlainEditor()}</div>
         </article></div>
