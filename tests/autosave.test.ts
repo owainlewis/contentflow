@@ -19,6 +19,56 @@ const original = (): ContentDetail => ({
 afterEach(() => vi.useRealTimers());
 
 describe("AutosaveManager", () => {
+  it("preserves a newer publish date when an earlier save is acknowledged", async () => {
+    vi.useFakeTimers();
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const bodies: string[] = [];
+    let server = original();
+    const manager = new AutosaveManager({
+      delay: 750,
+      serialize: serializeReplacement,
+      send: async (_id, body) => {
+        bodies.push(body);
+        if (bodies.length === 1) await gate;
+        const request = JSON.parse(body);
+        server = { ...server, ...request, revision: server.revision + 1 };
+        return { operation_id: request.operation_id, item_ids: [server.id], revisions: [server.revision], expires_at: [server.expires_at], status: "updated" };
+      },
+      resolve: async () => server,
+      onDocument: () => undefined,
+      onState: () => undefined,
+      onConflict: () => undefined,
+    });
+    manager.enqueue({ ...original(), working_title: "Edited", scheduled_at: "2026-09-21T09:00:00Z" });
+    await vi.advanceTimersByTimeAsync(750);
+    manager.enqueue({ ...original(), working_title: "Edited", scheduled_at: "2026-09-23T09:00:00Z" });
+    release();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(manager.getDraft(server.id)?.scheduled_at).toBe("2026-09-23T09:00:00Z");
+    await vi.advanceTimersByTimeAsync(750);
+    expect(JSON.parse(bodies[1]).scheduled_at).toBe("2026-09-23T09:00:00Z");
+    expect(server.scheduled_at).toBe("2026-09-23T09:00:00Z");
+    manager.dispose();
+  });
+
+  it("preserves the local publish date when choosing Save my version", () => {
+    const manager = new AutosaveManager({
+      serialize: serializeReplacement,
+      send: async () => { throw new Error("not used"); },
+      resolve: async () => original(),
+      onDocument: () => undefined,
+      onState: () => undefined,
+      onConflict: () => undefined,
+    });
+    const local = { ...original(), scheduled_at: "2026-09-23T09:00:00Z" };
+    const server = { ...original(), revision: 2, scheduled_at: "2026-09-21T09:00:00Z" };
+    manager.beginConflict(local, server);
+    manager.resolveConflict(local.id, "local");
+    expect(manager.getDraft(local.id)).toEqual(expect.objectContaining({ revision: 2, scheduled_at: local.scheduled_at }));
+    manager.dispose();
+  });
+
   it("invalidates detail reads when an idle document is reconciled externally", () => {
     const manager = new AutosaveManager({
       serialize: serializeReplacement,

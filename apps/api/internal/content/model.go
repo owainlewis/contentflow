@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -20,18 +21,17 @@ import (
 const (
 	MaxRequestBytes = 1 << 20
 	MaxTextBytes    = 500 << 10
-	// Firestore rejects a 1,500-byte query operand. Searchable values reserve
-	// one additional byte because a lexicographic successor can grow in UTF-8.
+	// Bound the indexed title prefix while retaining the complete working title.
 	MaxIndexedStringBytes = 1498
 	MaxSections           = 200
 	MaxBatchItems         = 50
-	ContentLifetime       = 56 * 24 * time.Hour
 	ReceiptLifetime       = 24 * time.Hour
 )
 
 type Type string
 
 const (
+	TypeTopic     Type = "topic"
 	TypeYouTube   Type = "youtube"
 	TypeLinkedIn  Type = "linkedin"
 	TypeX         Type = "x"
@@ -51,67 +51,83 @@ const (
 )
 
 type Section struct {
-	ID       string `json:"id" firestore:"-"`
-	Position int    `json:"position" firestore:"position"`
-	Title    string `json:"title" firestore:"title"`
-	Body     string `json:"body" firestore:"body"`
+	ID       string `json:"id"`
+	Position int    `json:"position"`
+	Title    string `json:"title"`
+	Body     string `json:"body"`
 }
 
 type YouTubeContent struct {
-	Topic           string    `json:"topic" firestore:"topic"`
-	ICP             string    `json:"icp" firestore:"icp"`
-	Angle           string    `json:"angle" firestore:"angle"`
-	CTA             string    `json:"cta" firestore:"cta"`
-	PublishingTitle string    `json:"publishing_title" firestore:"publishing_title"`
-	Description     string    `json:"description" firestore:"description"`
-	Transcript      string    `json:"transcript" firestore:"transcript"`
-	Sections        []Section `json:"sections" firestore:"-"`
+	Topic           string    `json:"topic"`
+	ICP             string    `json:"icp"`
+	Angle           string    `json:"angle"`
+	CTA             string    `json:"cta"`
+	PublishingTitle string    `json:"publishing_title"`
+	Description     string    `json:"description"`
+	Transcript      string    `json:"transcript"`
+	Sections        []Section `json:"sections"`
 }
 
 type LinkedInContent struct {
-	Body string `json:"body" firestore:"body"`
+	Body string `json:"body"`
 }
 
 type XContent struct {
-	Body string `json:"body" firestore:"body"`
+	Body string `json:"body"`
+}
+
+type TopicContent struct {
+	Source    string `json:"source"`
+	SourceURL string `json:"source_url"`
 }
 
 type InstagramContent struct {
-	Script string `json:"script" firestore:"script"`
+	Caption string `json:"caption"`
+	Script  string `json:"script"`
 }
 
 type TikTokContent struct {
-	Script string `json:"script" firestore:"script"`
+	Script string `json:"script"`
 }
 
 type EmailContent struct {
-	Subject string `json:"subject" firestore:"subject"`
-	Body    string `json:"body" firestore:"body"`
+	Subject string `json:"subject"`
+	Body    string `json:"body"`
 }
 
 type SubstackContent struct {
-	Headline    string `json:"headline" firestore:"headline"`
-	Subheadline string `json:"subheadline" firestore:"subheadline"`
-	Body        string `json:"body" firestore:"body"`
+	Headline    string `json:"headline"`
+	Subheadline string `json:"subheadline"`
+	Body        string `json:"body"`
 }
 
 type Item struct {
-	ID                     string     `json:"id" firestore:"-"`
-	WorkspaceID            string     `json:"-" firestore:"workspace_id"`
-	Type                   Type       `json:"type" firestore:"type"`
-	Status                 Status     `json:"status" firestore:"status"`
-	WorkingTitle           string     `json:"working_title" firestore:"working_title"`
-	NormalizedWorkingTitle string     `json:"-" firestore:"normalized_working_title"`
-	SearchableWorkingTitle string     `json:"-" firestore:"-"`
-	Revision               int64      `json:"revision" firestore:"revision"`
-	CreatedAt              time.Time  `json:"created_at" firestore:"created_at"`
-	UpdatedAt              time.Time  `json:"updated_at" firestore:"updated_at"`
-	ExpiresAt              time.Time  `json:"expires_at" firestore:"expires_at"`
-	ScheduledAt            *time.Time `json:"scheduled_at,omitempty" firestore:"scheduled_at,omitempty"`
-	Content                any        `json:"content" firestore:"-"`
+	TopicID     string `json:"topic_id,omitempty"`
+	Format      string `json:"format,omitempty"`
+	DocumentURL string `json:"document_url,omitempty"`
+	VideoURL    string `json:"video_url,omitempty"`
+
+	ID                     string     `json:"id"`
+	WorkspaceID            string     `json:"-"`
+	Type                   Type       `json:"type"`
+	Status                 Status     `json:"status"`
+	WorkingTitle           string     `json:"working_title"`
+	NormalizedWorkingTitle string     `json:"-"`
+	SearchableWorkingTitle string     `json:"-"`
+	Revision               int64      `json:"revision"`
+	CreatedAt              time.Time  `json:"created_at"`
+	UpdatedAt              time.Time  `json:"updated_at"`
+	ExpiresAt              time.Time  `json:"expires_at"`
+	ScheduledAt            *time.Time `json:"scheduled_at,omitempty"`
+	Content                any        `json:"content"`
 }
 
 type Summary struct {
+	TopicID     string `json:"topic_id,omitempty"`
+	Format      string `json:"format,omitempty"`
+	DocumentURL string `json:"document_url,omitempty"`
+	VideoURL    string `json:"video_url,omitempty"`
+
 	ID           string         `json:"id"`
 	Type         Type           `json:"type"`
 	Status       Status         `json:"status"`
@@ -126,7 +142,7 @@ type Summary struct {
 
 func (i Item) Summary() Summary {
 	return Summary{
-		ID: i.ID, Type: i.Type, Status: i.Status, WorkingTitle: i.WorkingTitle,
+		TopicID: i.TopicID, Format: i.Format, DocumentURL: i.DocumentURL, VideoURL: i.VideoURL, ID: i.ID, Type: i.Type, Status: i.Status, WorkingTitle: i.WorkingTitle,
 		Revision: i.Revision, CreatedAt: i.CreatedAt, UpdatedAt: i.UpdatedAt,
 		ExpiresAt: i.ExpiresAt, ScheduledAt: i.ScheduledAt, AssetCounts: map[string]int{},
 	}
@@ -139,24 +155,29 @@ type Transcript struct {
 }
 
 type MutationResult struct {
-	OperationID string      `json:"operation_id" firestore:"operation_id"`
-	ItemIDs     []string    `json:"item_ids" firestore:"item_ids"`
-	Revisions   []int64     `json:"revisions" firestore:"revisions"`
-	ExpiresAt   []time.Time `json:"expires_at" firestore:"result_expires_at"`
-	Status      string      `json:"status" firestore:"status"`
+	OperationID string      `json:"operation_id"`
+	ItemIDs     []string    `json:"item_ids"`
+	Revisions   []int64     `json:"revisions"`
+	ExpiresAt   []time.Time `json:"expires_at"`
+	Status      string      `json:"status"`
 }
 
 type Receipt struct {
-	WorkspaceID string `firestore:"workspace_id"`
-	RequestHash string `firestore:"request_hash"`
-	Operation   string `firestore:"operation"`
-	HTTPStatus  int    `firestore:"http_status"`
+	WorkspaceID string
+	RequestHash string
+	Operation   string
+	HTTPStatus  int
 	MutationResult
-	ErrorCode string    `firestore:"error_code,omitempty"`
-	Expires   time.Time `firestore:"expires_at"`
+	ErrorCode string
+	Expires   time.Time
 }
 
 type CreateRequest struct {
+	TopicID     string `json:"topic_id,omitempty"`
+	Format      string `json:"format,omitempty"`
+	DocumentURL string `json:"document_url,omitempty"`
+	VideoURL    string `json:"video_url,omitempty"`
+
 	Type         Type
 	WorkingTitle string
 	Status       Status
@@ -166,6 +187,11 @@ type CreateRequest struct {
 }
 
 type BatchItemRequest struct {
+	TopicID     string `json:"topic_id,omitempty"`
+	Format      string `json:"format,omitempty"`
+	DocumentURL string `json:"document_url,omitempty"`
+	VideoURL    string `json:"video_url,omitempty"`
+
 	Type         Type
 	WorkingTitle string
 	Status       Status
@@ -214,6 +240,11 @@ func problem(status int, code string) error { return &Error{Status: status, Code
 
 func DecodeCreate(raw []byte) (CreateRequest, error) {
 	var wire struct {
+		TopicID     string `json:"topic_id,omitempty"`
+		Format      string `json:"format,omitempty"`
+		DocumentURL string `json:"document_url,omitempty"`
+		VideoURL    string `json:"video_url,omitempty"`
+
 		Type         Type            `json:"type"`
 		WorkingTitle string          `json:"working_title"`
 		Status       Status          `json:"status"`
@@ -228,7 +259,7 @@ func DecodeCreate(raw []byte) (CreateRequest, error) {
 	if err != nil {
 		return CreateRequest{}, err
 	}
-	request := CreateRequest{Type: wire.Type, WorkingTitle: wire.WorkingTitle, Status: wire.Status, OperationID: wire.OperationID, ScheduledAt: wire.ScheduledAt, Content: contentValue}
+	request := CreateRequest{Type: wire.Type, WorkingTitle: wire.WorkingTitle, Status: wire.Status, OperationID: wire.OperationID, ScheduledAt: wire.ScheduledAt, TopicID: wire.TopicID, Format: wire.Format, DocumentURL: wire.DocumentURL, VideoURL: wire.VideoURL, Content: contentValue}
 	if err := validateRequest(request); err != nil {
 		return CreateRequest{}, err
 	}
@@ -259,6 +290,11 @@ func DecodeBatch(raw []byte) (BatchRequest, error) {
 
 func decodeBatchItem(raw []byte, operationID string) (BatchItemRequest, error) {
 	var wire struct {
+		TopicID     string `json:"topic_id,omitempty"`
+		Format      string `json:"format,omitempty"`
+		DocumentURL string `json:"document_url,omitempty"`
+		VideoURL    string `json:"video_url,omitempty"`
+
 		Type         Type            `json:"type"`
 		WorkingTitle string          `json:"working_title"`
 		Status       Status          `json:"status"`
@@ -272,7 +308,7 @@ func decodeBatchItem(raw []byte, operationID string) (BatchItemRequest, error) {
 	if err != nil {
 		return BatchItemRequest{}, err
 	}
-	item := BatchItemRequest{Type: wire.Type, WorkingTitle: wire.WorkingTitle, Status: wire.Status, ScheduledAt: wire.ScheduledAt, Content: contentValue}
+	item := BatchItemRequest{Type: wire.Type, WorkingTitle: wire.WorkingTitle, Status: wire.Status, ScheduledAt: wire.ScheduledAt, TopicID: wire.TopicID, Format: wire.Format, DocumentURL: wire.DocumentURL, VideoURL: wire.VideoURL, Content: contentValue}
 	if err := validateBatchItem(item, operationID); err != nil {
 		return BatchItemRequest{}, err
 	}
@@ -281,6 +317,11 @@ func decodeBatchItem(raw []byte, operationID string) (BatchItemRequest, error) {
 
 func DecodeReplace(raw []byte) (ReplaceRequest, error) {
 	var wire struct {
+		TopicID     string `json:"topic_id,omitempty"`
+		Format      string `json:"format,omitempty"`
+		DocumentURL string `json:"document_url,omitempty"`
+		VideoURL    string `json:"video_url,omitempty"`
+
 		Type         Type            `json:"type"`
 		WorkingTitle string          `json:"working_title"`
 		Status       Status          `json:"status"`
@@ -296,7 +337,7 @@ func DecodeReplace(raw []byte) (ReplaceRequest, error) {
 	if err != nil {
 		return ReplaceRequest{}, err
 	}
-	request := ReplaceRequest{CreateRequest: CreateRequest{Type: wire.Type, WorkingTitle: wire.WorkingTitle, Status: wire.Status, OperationID: wire.OperationID, ScheduledAt: wire.ScheduledAt, Content: contentValue}, Revision: *wire.Revision}
+	request := ReplaceRequest{CreateRequest: CreateRequest{Type: wire.Type, WorkingTitle: wire.WorkingTitle, Status: wire.Status, OperationID: wire.OperationID, ScheduledAt: wire.ScheduledAt, TopicID: wire.TopicID, Format: wire.Format, DocumentURL: wire.DocumentURL, VideoURL: wire.VideoURL, Content: contentValue}, Revision: *wire.Revision}
 	if request.Revision < 1 {
 		return ReplaceRequest{}, problem(400, "invalid_revision")
 	}
@@ -326,6 +367,12 @@ func decodeTypedContent(contentType Type, raw json.RawMessage) (any, error) {
 		return nil, problem(400, "invalid_content")
 	}
 	switch contentType {
+	case TypeTopic:
+		var value TopicContent
+		if err := decodeExact(raw, &value); err != nil {
+			return nil, problem(400, "invalid_content")
+		}
+		return value, nil
 	case TypeYouTube:
 		var presence map[string]json.RawMessage
 		if err := json.Unmarshal(raw, &presence); err != nil {
@@ -407,8 +454,32 @@ func validateRequest(request CreateRequest) error {
 	}
 	// A working title is optional. Only YouTube has a title the writer actually
 	// authors; every other type is identified by its ID until it is named.
+	if request.TopicID != "" {
+		if _, err := ulid.ParseStrict(request.TopicID); err != nil {
+			return problem(400, "invalid_topic_id")
+		}
+	}
+	if request.Type == TypeTopic && (request.TopicID != "" || request.ScheduledAt != nil) {
+		return problem(400, "invalid_topic")
+	}
+	for _, link := range []string{request.DocumentURL, request.VideoURL} {
+		if !validExternalURL(link) {
+			return problem(400, "invalid_external_url")
+		}
+	}
+	if len(request.Format) > 100 {
+		return problem(400, "invalid_format")
+	}
 	texts := []string{request.WorkingTitle}
 	switch value := request.Content.(type) {
+	case TopicContent:
+		if request.Type != TypeTopic {
+			return problem(400, "invalid_discriminator")
+		}
+		if !validExternalURL(value.SourceURL) {
+			return problem(400, "invalid_external_url")
+		}
+		texts = append(texts, value.Source)
 	case YouTubeContent:
 		if request.Type != TypeYouTube {
 			return problem(400, "invalid_discriminator")
@@ -447,7 +518,7 @@ func validateRequest(request CreateRequest) error {
 		if request.Type != TypeInstagram {
 			return problem(400, "invalid_discriminator")
 		}
-		texts = append(texts, value.Script)
+		texts = append(texts, value.Script, value.Caption)
 	case TikTokContent:
 		if request.Type != TypeTikTok {
 			return problem(400, "invalid_discriminator")
@@ -499,7 +570,7 @@ func validateBatchOperation(operationID string, itemCount int) error {
 func validateBatchItem(item BatchItemRequest, operationID string) error {
 	request := CreateRequest{
 		Type: item.Type, WorkingTitle: item.WorkingTitle, Status: item.Status,
-		OperationID: operationID, ScheduledAt: item.ScheduledAt, Content: item.Content,
+		TopicID: item.TopicID, Format: item.Format, DocumentURL: item.DocumentURL, VideoURL: item.VideoURL, OperationID: operationID, ScheduledAt: item.ScheduledAt, Content: item.Content,
 	}
 	if err := validateRequest(request); err != nil {
 		return err
@@ -522,7 +593,7 @@ func validateRevisionRequest(request RevisionRequest) error {
 
 func validType(value Type) bool {
 	switch value {
-	case TypeYouTube, TypeLinkedIn, TypeX, TypeInstagram, TypeTikTok, TypeEmail, TypeSubstack:
+	case TypeTopic, TypeYouTube, TypeLinkedIn, TypeX, TypeInstagram, TypeTikTok, TypeEmail, TypeSubstack:
 		return true
 	default:
 		return false
@@ -601,3 +672,17 @@ func (g *idGenerator) New(now time.Time) (string, error) {
 	g.lastTime = timestamp
 	return id.String(), nil
 }
+
+func validExternalURL(value string) bool {
+	if value == "" {
+		return true
+	}
+	if len(value) > 8192 {
+		return false
+	}
+	parsed, err := url.Parse(value)
+	return err == nil && (parsed.Scheme == "https" || parsed.Scheme == "http") && parsed.Hostname() != "" && parsed.User == nil
+}
+
+// ExpiresAt remains on the wire for older clients; stored content has no expiry.
+var permanentContentExpiry = time.Date(9999, 12, 31, 0, 0, 0, 0, time.UTC)

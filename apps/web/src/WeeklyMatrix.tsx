@@ -6,6 +6,7 @@ import { TypeIcon, displayTitle, statusLabels, typeMeta } from "./content-meta";
 
 type Props = {
   items: ContentSummary[];
+  topics?: ContentSummary[];
   enabledTypes: ContentType[];
   onOpen: (id: string) => void;
   onSchedule: (id: string, day: string | undefined) => void;
@@ -37,12 +38,12 @@ function weekLabel(start: Date, end: Date) {
   return `${starts} – ${ends}`;
 }
 
-export default function WeeklyMatrix({ items, enabledTypes, onOpen, onSchedule, onCreate, createPending = false, createError, completedAttemptId, frozenPlan, blockedIds = new Set(), pendingIds = new Set(), error }: Props) {
+export default function WeeklyMatrix({ items, topics = [], enabledTypes, onOpen, onSchedule, onCreate, createPending = false, createError, completedAttemptId, frozenPlan, blockedIds = new Set(), pendingIds = new Set(), error }: Props) {
   const [weekStart, setWeekStart] = useState(() => mondayOf(frozenPlan ? new Date(`${frozenPlan.day}T12:00:00`) : new Date()));
   const [dragging, setDragging] = useState<string>();
   const [dragOver, setDragOver] = useState<string>();
   const [composer, setComposer] = useState<{ cell: string; title: string; attemptId: string }>();
-  const draggingType = useRef<ContentType>();
+  const draggingType = useRef<ContentType | undefined>(undefined);
   const suppressOpen = useRef(false);
   const composerInput = useRef<HTMLInputElement>(null);
   const days = useMemo(() => datesForWeek(weekStart), [weekStart]);
@@ -157,7 +158,7 @@ export default function WeeklyMatrix({ items, enabledTypes, onOpen, onSchedule, 
       >
         <button className="weekly-card-open" disabled={schedulePending} onClick={() => { if (!suppressOpen.current) onOpen(item.id); }} aria-label={`Open ${displayTitle(item)}`}>
           <strong>{displayTitle(item)}</strong>
-          <span>{statusLabels[item.status]}</span>
+          <span>{item.format ? `${item.format} · ` : ""}{statusLabels[item.status]}</span>{item.topic_id && <small className="weekly-topic">{topics.find((topic) => topic.id === item.topic_id)?.working_title || "Topic group"}</small>}
         </button>
         <label className="weekly-card-move">
           <span className="visually-hidden">Move {displayTitle(item)}</span>
@@ -179,7 +180,7 @@ export default function WeeklyMatrix({ items, enabledTypes, onOpen, onSchedule, 
     <section className="page weekly-page" aria-label="Weekly content matrix">
       <header className="page-header weekly-header">
         <div>
-          <p className="eyebrow">Content cadence</p>
+
           <h1>Weekly matrix</h1>
           <p className="weekly-summary">{scheduledThisWeek} {scheduledThisWeek === 1 ? "piece" : "pieces"} scheduled this week</p>
         </div>

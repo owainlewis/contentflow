@@ -1,7 +1,8 @@
 export const contentTypes = ["youtube", "linkedin", "x", "instagram", "tiktok", "email", "substack"] as const;
 export const contentStatuses = ["idea", "draft", "ready", "published"] as const;
 
-export type ContentType = (typeof contentTypes)[number];
+export type Platform = (typeof contentTypes)[number];
+export type ContentType = Platform | "topic";
 export type ContentStatus = (typeof contentStatuses)[number];
 
 export type Section = {
@@ -26,7 +27,8 @@ export type YouTubeContent = {
 export type ContentPayload =
   | YouTubeContent
   | { body: string }
-  | { script: string }
+  | { script: string; caption?: string }
+  | { source: string; source_url: string }
   | { subject: string; body: string }
   | { headline: string; subheadline: string; body: string };
 
@@ -40,6 +42,10 @@ export type ContentSummary = {
   updated_at: string;
   expires_at: string;
   scheduled_at?: string;
+  topic_id?: string;
+  format?: string;
+  document_url?: string;
+  video_url?: string;
   asset_counts: Record<string, number>;
 };
 
@@ -150,7 +156,7 @@ export async function getContent(id: string, signal?: AbortSignal, requestTimeou
   return normalizeDetail(await (signal ? load(signal) : withRequestTimeout(load, requestTimeout)));
 }
 
-export type CreateOptions = { workingTitle?: string; scheduledAt?: string; requestTimeout?: number };
+export type CreateOptions = { workingTitle?: string; scheduledAt?: string; topicId?: string; format?: string; requestTimeout?: number };
 
 export async function createContent(type: ContentType, csrfToken: string, operationId: string, options: CreateOptions = {}): Promise<MutationResult> {
   const body = JSON.stringify({
@@ -159,6 +165,8 @@ export async function createContent(type: ContentType, csrfToken: string, operat
     status: "idea",
     operation_id: operationId,
     ...(options.scheduledAt ? { scheduled_at: options.scheduledAt } : {}),
+    ...(options.topicId ? { topic_id: options.topicId } : {}),
+    ...(options.format ? { format: options.format } : {}),
     content: wireContent(type, emptyContent(type)),
   });
   return withRequestTimeout((signal) => request<MutationResult>("/api/v1/content", { ...mutationInit("POST", body, csrfToken), signal }), options.requestTimeout ?? 10_000);
@@ -193,6 +201,10 @@ export function serializeReplacement(detail: ContentDetail, operationId: string)
     operation_id: operationId,
     revision: detail.revision,
     ...(detail.scheduled_at ? { scheduled_at: detail.scheduled_at } : {}),
+    topic_id: detail.topic_id ?? "",
+    format: detail.format ?? "",
+    document_url: detail.document_url ?? "",
+    video_url: detail.video_url ?? "",
     content: wireContent(detail.type, detail.content),
   });
 }
@@ -211,6 +223,7 @@ function wireContent(type: ContentType, content: ContentPayload): unknown {
 
 export function emptyContent(type: ContentType): ContentPayload {
   switch (type) {
+    case "topic": return { source: "", source_url: "" };
     case "youtube":
       return {
         topic: "",
@@ -220,14 +233,14 @@ export function emptyContent(type: ContentType): ContentPayload {
         publishing_title: "",
         description: "",
         transcript: "",
-        sections: ["Intro", "Main section", "Outro"].map((title, position) => ({
+        sections: [].map((title, position) => ({
           clientKey: newClientKey(),
           position,
           title,
           body: "",
         })),
       };
-    case "instagram":
+    case "instagram": return { script: "", caption: "" };
     case "tiktok":
       return { script: "" };
     case "email":
