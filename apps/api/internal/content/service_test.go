@@ -102,7 +102,7 @@ func TestBatchCreateIsAtomicIdempotentBoundedAndWorkspaceScoped(t *testing.T) {
 		t.Fatalf("batch result is incomplete: %#v", results[0])
 	}
 	for index := range results[0].ItemIDs {
-		if results[0].Revisions[index] != 1 || !results[0].ExpiresAt[index].Equal(now.Truncate(time.Microsecond).Add(ContentLifetime)) {
+		if results[0].Revisions[index] != 1 || !results[0].ExpiresAt[index].Equal(permanentContentExpiry) {
 			t.Fatalf("result %d has wrong revision or expiry", index)
 		}
 	}
@@ -318,8 +318,8 @@ func TestFullReplacementSectionsTranscriptConflictsAndReceipts(t *testing.T) {
 		t.Fatalf("replacement changed expiry: %#v, %v", stored, err)
 	}
 	now = expiresAt
-	if _, err := service.Get(ctx, "workspace", id); err == nil {
-		t.Fatal("expired item remained readable at its deadline")
+	if _, err := service.Get(ctx, "workspace", id); err != nil {
+		t.Fatal("permanent content disappeared")
 	}
 }
 

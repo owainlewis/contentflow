@@ -166,14 +166,13 @@ func loadMigrations() ([]migration, error) {
 	return steps, nil
 }
 
-// Cleanup removes rows past their expiry. Reads already filter on expires_at, so
+// Cleanup removes expired authentication data and mutation receipts. Reads filter on expires_at, so
 // this reclaims space rather than enforcing correctness.
 func Cleanup(ctx context.Context, pool *pgxpool.Pool, now time.Time) (int64, error) {
 	statements := []struct {
 		table string
 		query string
 	}{
-		{"content_items", "delete from content_items where expires_at <= $1"},
 		{"mutation_receipts", "delete from mutation_receipts where expires_at <= $1"},
 		{"oauth_login_attempts", "delete from oauth_login_attempts where expires_at <= $1"},
 		{"sessions", "delete from sessions where expires_at <= $1"},

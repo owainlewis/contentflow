@@ -60,8 +60,8 @@ func (s *Service) Create(ctx context.Context, workspaceID string, request Create
 	item := Item{
 		ID: id, WorkspaceID: workspaceID, Type: request.Type, Status: request.Status,
 		WorkingTitle: request.WorkingTitle, NormalizedWorkingTitle: NormalizeTitle(request.WorkingTitle),
-		Revision: 1, CreatedAt: now, UpdatedAt: now, ExpiresAt: now.Add(ContentLifetime),
-		ScheduledAt: request.ScheduledAt, Content: contentValue,
+		Revision: 1, CreatedAt: now, UpdatedAt: now, ExpiresAt: permanentContentExpiry,
+		TopicID: request.TopicID, Format: request.Format, DocumentURL: request.DocumentURL, VideoURL: request.VideoURL, ScheduledAt: request.ScheduledAt, Content: contentValue,
 	}
 	item.SearchableWorkingTitle = SearchableTitle(item.NormalizedWorkingTitle)
 	result := MutationResult{OperationID: request.OperationID, ItemIDs: []string{id}, Revisions: []int64{1}, ExpiresAt: []time.Time{item.ExpiresAt}, Status: "created"}
@@ -92,8 +92,8 @@ func (s *Service) BatchCreate(ctx context.Context, workspaceID string, request B
 		item := Item{
 			ID: id, WorkspaceID: workspaceID, Type: requestItem.Type, Status: requestItem.Status,
 			WorkingTitle: requestItem.WorkingTitle, NormalizedWorkingTitle: NormalizeTitle(requestItem.WorkingTitle),
-			Revision: 1, CreatedAt: now, UpdatedAt: now, ExpiresAt: now.Add(ContentLifetime),
-			ScheduledAt: requestItem.ScheduledAt, Content: requestItem.Content,
+			Revision: 1, CreatedAt: now, UpdatedAt: now, ExpiresAt: permanentContentExpiry,
+			TopicID: requestItem.TopicID, Format: requestItem.Format, DocumentURL: requestItem.DocumentURL, VideoURL: requestItem.VideoURL, ScheduledAt: requestItem.ScheduledAt, Content: requestItem.Content,
 		}
 		item.SearchableWorkingTitle = SearchableTitle(item.NormalizedWorkingTitle)
 		items[index] = item
@@ -134,7 +134,7 @@ func (s *Service) Replace(ctx context.Context, workspaceID, id string, request R
 		ID: current.ID, WorkspaceID: current.WorkspaceID, Type: current.Type, Status: request.Status,
 		WorkingTitle: request.WorkingTitle, NormalizedWorkingTitle: NormalizeTitle(request.WorkingTitle),
 		Revision: request.Revision + 1, CreatedAt: current.CreatedAt, UpdatedAt: now,
-		ExpiresAt: current.ExpiresAt, ScheduledAt: request.ScheduledAt, Content: contentValue,
+		ExpiresAt: current.ExpiresAt, TopicID: request.TopicID, Format: request.Format, DocumentURL: request.DocumentURL, VideoURL: request.VideoURL, ScheduledAt: request.ScheduledAt, Content: contentValue,
 	}
 	replacement.SearchableWorkingTitle = SearchableTitle(replacement.NormalizedWorkingTitle)
 	result := MutationResult{OperationID: request.OperationID, ItemIDs: []string{id}, Revisions: []int64{replacement.Revision}, ExpiresAt: []time.Time{replacement.ExpiresAt}, Status: "updated"}

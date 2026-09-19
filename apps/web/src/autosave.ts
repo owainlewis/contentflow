@@ -112,7 +112,7 @@ export class AutosaveManager {
     }
     if (queue.inFlight || queue.conflict || queue.unauthorizedRetry) return false;
     if (queue.version > queue.persistedVersion) {
-      queue.draft = rebaseConflictState(queue.draft, server);
+      queue.draft = { ...rebaseConflictState(queue.draft, server), scheduled_at: server.scheduled_at };
       this.options.onDocument(queue.draft);
       return true;
     }
@@ -362,7 +362,6 @@ export function mergeServerState(latest: ContentDetail, server: ContentDetail, f
     revision: server.revision,
     updated_at: server.updated_at,
     expires_at: server.expires_at,
-    scheduled_at: server.scheduled_at,
     content: {
       ...latestContent,
       sections: latestContent.sections.map((section, position) => ({
@@ -397,6 +396,5 @@ function mergeMetadata(local: ContentDetail, server: ContentDetail): ContentDeta
     revision: server.revision,
     updated_at: server.updated_at,
     expires_at: server.expires_at,
-    scheduled_at: server.scheduled_at,
   };
 }

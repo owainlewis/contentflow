@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/url"
 	"strconv"
 	"strings"
 	"text/tabwriter"
@@ -13,6 +14,12 @@ import (
 )
 
 type summary struct {
+	TopicID     string     `json:"topic_id,omitempty"`
+	Format      string     `json:"format,omitempty"`
+	DocumentURL string     `json:"document_url,omitempty"`
+	VideoURL    string     `json:"video_url,omitempty"`
+	ScheduledAt *time.Time `json:"scheduled_at,omitempty"`
+
 	ID           string          `json:"id"`
 	Type         string          `json:"type"`
 	Status       string          `json:"status"`
@@ -29,6 +36,12 @@ type listResponse struct {
 }
 
 type itemResponse struct {
+	TopicID     string     `json:"topic_id,omitempty"`
+	Format      string     `json:"format,omitempty"`
+	DocumentURL string     `json:"document_url,omitempty"`
+	VideoURL    string     `json:"video_url,omitempty"`
+	ScheduledAt *time.Time `json:"scheduled_at,omitempty"`
+
 	ID           string          `json:"id"`
 	Type         string          `json:"type"`
 	Status       string          `json:"status"`
@@ -60,13 +73,13 @@ func renderList(destination io.Writer, raw []byte) error {
 
 func renderListStream(destination io.Writer, source io.Reader) error {
 	table := tabwriter.NewWriter(destination, 0, 4, 2, ' ', 0)
-	_, _ = fmt.Fprintln(table, "ID\tTYPE\tSTATUS\tREVISION\tASSETS\tWORKING TITLE")
+	_, _ = fmt.Fprintln(table, "ID\tTYPE\tSTATUS\tREVISION\tASSETS\tWORKING TITLE\tTOPIC\tFORMAT\tSCHEDULED\tDOCUMENT\tVIDEO")
 	err := decodeListStream(source, func(item summary) error {
 		assets := 0
 		for _, count := range item.AssetCounts {
 			assets += *count
 		}
-		_, _ = fmt.Fprintf(table, "%s\t%s\t%s\t%d\t%d\t%s\n", item.ID, item.Type, item.Status, item.Revision, assets, quoteHumanText(item.WorkingTitle))
+		_, _ = fmt.Fprintf(table, "%s\t%s\t%s\t%d\t%d\t%s\t%s\t%s\t%s\t%s\t%s\n", item.ID, item.Type, item.Status, item.Revision, assets, quoteHumanText(item.WorkingTitle), item.TopicID, quoteHumanText(item.Format), formattedSchedule(item.ScheduledAt), quoteHumanText(item.DocumentURL), quoteHumanText(item.VideoURL))
 		return nil
 	})
 	if err != nil {
@@ -76,6 +89,9 @@ func renderListStream(destination io.Writer, source io.Reader) error {
 }
 
 func validSummary(item summary) bool {
+	if !validResourceMetadata(item.Type, item.TopicID, item.Format, item.DocumentURL, item.VideoURL, item.ScheduledAt) {
+		return false
+	}
 	if !isCanonicalULID(item.ID) || !validContentType(item.Type) || !validContentStatus(item.Status) || len([]byte(item.WorkingTitle)) > 500<<10 || item.Revision < 1 || item.CreatedAt.IsZero() || item.UpdatedAt.IsZero() || item.ExpiresAt.IsZero() || item.AssetCounts == nil {
 		return false
 	}
@@ -105,15 +121,15 @@ func renderItemForID(destination io.Writer, raw []byte, expectedID string) error
 	if err := json.Indent(&content, item.Content, "", "  "); err != nil {
 		return err
 	}
-	_, err = fmt.Fprintf(destination, "ID: %s\nType: %s\nStatus: %s\nWorking title: %s\nRevision: %d\nCreated at: %s\nUpdated at: %s\nExpires at: %s\nContent:\n%s\n",
+	_, err = fmt.Fprintf(destination, "ID: %s\nType: %s\nStatus: %s\nWorking title: %s\nRevision: %d\nCreated at: %s\nUpdated at: %s\nExpires at: %s\n%sContent:\n%s\n",
 		item.ID, item.Type, item.Status, quoteHumanText(item.WorkingTitle), item.Revision,
-		item.CreatedAt.UTC().Format(time.RFC3339Nano), item.UpdatedAt.UTC().Format(time.RFC3339Nano), item.ExpiresAt.UTC().Format(time.RFC3339Nano), content.String())
+		item.CreatedAt.UTC().Format(time.RFC3339Nano), item.UpdatedAt.UTC().Format(time.RFC3339Nano), item.ExpiresAt.UTC().Format(time.RFC3339Nano), humanResourceMetadata(item), content.String())
 	return err
 }
 
 func decodeItemResponse(raw []byte) (itemResponse, error) {
 	var fields map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &fields); err != nil {
+	if err := json.Unmarshal(raw, &fields); err != nil || nullResourceMetadata(fields) {
 		return itemResponse{}, fmt.Errorf("invalid item response")
 	}
 	var item itemResponse
@@ -123,7 +139,7 @@ func decodeItemResponse(raw []byte) (itemResponse, error) {
 	if !isCanonicalULID(item.ID) || !validContentType(item.Type) || !validContentStatus(item.Status) || len([]byte(item.WorkingTitle)) > 500<<10 || item.Revision < 1 || item.CreatedAt.IsZero() || item.UpdatedAt.IsZero() || item.ExpiresAt.IsZero() {
 		return itemResponse{}, fmt.Errorf("invalid item response")
 	}
-	if !validItemContent(item.Type, item.Content) {
+	if !validResourceMetadata(item.Type, item.TopicID, item.Format, item.DocumentURL, item.VideoURL, item.ScheduledAt) || !validItemContent(item.Type, item.Content) {
 		return itemResponse{}, fmt.Errorf("invalid item response")
 	}
 	return item, nil
@@ -153,6 +169,18 @@ func validItemContent(contentType string, raw []byte) bool {
 		return false
 	}
 	switch contentType {
+	case "topic":
+		var content struct {
+			Source    string `json:"source"`
+			SourceURL string `json:"source_url"`
+		}
+		return decodesStrictContent(raw, &content) && validTextFields(content.Source) && validResourceURL(content.SourceURL)
+	case "instagram":
+		var content struct {
+			Script  string `json:"script"`
+			Caption string `json:"caption"`
+		}
+		return decodesStrictContent(raw, &content) && validTextFields(content.Script, content.Caption)
 	case "youtube":
 		if _, exists := fields["transcript"]; !exists {
 			return false
@@ -196,7 +224,7 @@ func validItemContent(contentType string, raw []byte) bool {
 			Body string `json:"body"`
 		}
 		return decodesStrictContent(raw, &content) && validTextFields(content.Body)
-	case "instagram", "tiktok":
+	case "tiktok":
 		var content struct {
 			Script string `json:"script"`
 		}
@@ -355,7 +383,7 @@ func decodeListStream(source io.Reader, visit func(summary) error) error {
 			return fmt.Errorf("invalid list response")
 		}
 		var fields map[string]json.RawMessage
-		if err := json.Unmarshal(raw, &fields); err != nil {
+		if err := json.Unmarshal(raw, &fields); err != nil || nullResourceMetadata(fields) {
 			return fmt.Errorf("invalid list response")
 		}
 		var item summary
@@ -501,7 +529,7 @@ func consumeUniqueJSONValue(decoder *json.Decoder) error {
 
 func validContentType(value string) bool {
 	switch value {
-	case "youtube", "linkedin", "x", "instagram", "tiktok", "email", "substack":
+	case "topic", "youtube", "linkedin", "x", "instagram", "tiktok", "email", "substack":
 		return true
 	default:
 		return false
@@ -524,4 +552,42 @@ func validMutationStatus(value string) bool {
 	default:
 		return false
 	}
+}
+
+func validResourceURL(value string) bool {
+	if value == "" {
+		return true
+	}
+	if len(value) > 8192 {
+		return false
+	}
+	parsed, err := url.Parse(value)
+	return err == nil && (parsed.Scheme == "https" || parsed.Scheme == "http") && parsed.Hostname() != "" && parsed.User == nil
+}
+func validResourceMetadata(kind, topicID, format, documentURL, videoURL string, scheduled *time.Time) bool {
+	return (topicID == "" || isCanonicalULID(topicID)) && len(format) <= 100 && validResourceURL(documentURL) && validResourceURL(videoURL) && (scheduled == nil || !scheduled.IsZero()) && (kind != "topic" || (topicID == "" && scheduled == nil))
+}
+func formattedSchedule(value *time.Time) string {
+	if value == nil {
+		return ""
+	}
+	return value.UTC().Format(time.RFC3339Nano)
+}
+func humanResourceMetadata(item itemResponse) string {
+	var result strings.Builder
+	for _, field := range [][2]string{{"Topic", item.TopicID}, {"Format", item.Format}, {"Scheduled at", formattedSchedule(item.ScheduledAt)}, {"Document", item.DocumentURL}, {"Video", item.VideoURL}} {
+		if field[1] != "" {
+			fmt.Fprintf(&result, "%s: %s\n", field[0], quoteHumanText(field[1]))
+		}
+	}
+	return result.String()
+}
+
+func nullResourceMetadata(fields map[string]json.RawMessage) bool {
+	for _, name := range []string{"topic_id", "format", "document_url", "video_url", "scheduled_at"} {
+		if explicitNull(fields, name) {
+			return true
+		}
+	}
+	return false
 }

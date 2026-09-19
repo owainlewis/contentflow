@@ -31,7 +31,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
     post:
       operationId: createContent
-      description: Creates one item with a server-owned ULID, revision 1, and expiry exactly 56 days after server creation time.
+      description: Creates one permanently stored item with a server-owned ULID and revision 1.
       requestBody:
         required: true
         content:
@@ -139,13 +139,13 @@ components:
       description: Insufficient scope or owner session required.
       content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
     NotFound:
-      description: Missing, expired, or out-of-workspace content.
+      description: Missing or out-of-workspace content.
       content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
     Conflict:
       description: Revision conflict, operation ID conflict, or missing transcript. Revision conflicts include the current item.
       content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
     TooLarge:
-      description: JSON over 1 MiB, a text field over 500 KiB, a parent document over 900 KiB, or a Firestore document over its platform limit.
+      description: JSON over 1 MiB or a text field over 500 KiB.
       content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
     TooManyRequests:
       description: The authenticated client exceeded its request rate limit.
@@ -157,9 +157,19 @@ components:
     ULID:
       type: string
       pattern: '^[0-9A-HJKMNP-TV-Z]{26}$'
+    OptionalTopicID:
+      description: Canonical uppercase topic group ID in the same workspace. Empty means standalone.
+      anyOf:
+        - { type: string, const: '' }
+        - { type: string, pattern: '^[0-7][0-9A-HJKMNP-TV-Z]{25}$' }
+    TopicOnly:
+      type: object
+      properties:
+        topic_id: { type: string, const: '' }
+        scheduled_at: false
     ContentType:
       type: string
-      enum: [youtube, linkedin, x, instagram, tiktok, email, substack]
+      enum: [topic, youtube, linkedin, x, instagram, tiktok, email, substack]
     ContentStatus:
       type: string
       enum: [idea, draft, ready, published]
@@ -198,10 +208,18 @@ components:
       type: object
       additionalProperties: false
       properties: { body: { $ref: '#/components/schemas/Text' } }
+    TopicContent:
+      type: object
+      additionalProperties: false
+      properties:
+        source: { $ref: '#/components/schemas/Text' }
+        source_url: { type: string, maxLength: 8192, description: External HTTP or HTTPS source URL. }
     InstagramContent:
       type: object
       additionalProperties: false
-      properties: { script: { $ref: '#/components/schemas/Text' } }
+      properties:
+        script: { $ref: '#/components/schemas/Text' }
+        caption: { $ref: '#/components/schemas/Text' }
     TikTokContent:
       type: object
       additionalProperties: false
@@ -223,6 +241,10 @@ components:
       type: object
       required: [type, working_title, status, operation_id, content]
       properties:
+        topic_id: { $ref: '#/components/schemas/OptionalTopicID' }
+        format: { type: string, maxLength: 100 }
+        document_url: { type: string, maxLength: 8192, description: External HTTP or HTTPS document URL. }
+        video_url: { type: string, maxLength: 8192, description: External HTTP or HTTPS video URL such as Frame.io. }
         type: { $ref: '#/components/schemas/ContentType' }
         working_title: { $ref: '#/components/schemas/Text' }
         status: { $ref: '#/components/schemas/ContentStatus' }
@@ -234,6 +256,13 @@ components:
         - type: object
           required: [revision]
           properties: { revision: { type: integer, minimum: 1 } }
+    TopicCreate:
+      allOf:
+        - { $ref: '#/components/schemas/TopicOnly' }
+        - { $ref: '#/components/schemas/CreateCommon' }
+        - type: object
+          properties: { type: { const: topic }, content: { $ref: '#/components/schemas/TopicContent' } }
+      unevaluatedProperties: false
     YouTubeCreate:
       allOf:
         - { $ref: '#/components/schemas/CreateCommon' }
@@ -278,6 +307,7 @@ components:
       unevaluatedProperties: false
     CreateContentRequest:
       oneOf:
+        - { $ref: '#/components/schemas/TopicCreate' }
         - { $ref: '#/components/schemas/YouTubeCreate' }
         - { $ref: '#/components/schemas/LinkedInCreate' }
         - { $ref: '#/components/schemas/XCreate' }
@@ -288,6 +318,7 @@ components:
       discriminator:
         propertyName: type
         mapping:
+          topic: '#/components/schemas/TopicCreate'
           youtube: '#/components/schemas/YouTubeCreate'
           linkedin: '#/components/schemas/LinkedInCreate'
           x: '#/components/schemas/XCreate'
@@ -312,10 +343,21 @@ components:
       type: object
       required: [type, working_title, status, content]
       properties:
+        topic_id: { $ref: '#/components/schemas/OptionalTopicID' }
+        format: { type: string, maxLength: 100 }
+        document_url: { type: string, maxLength: 8192 }
+        video_url: { type: string, maxLength: 8192 }
         type: { $ref: '#/components/schemas/ContentType' }
         working_title: { $ref: '#/components/schemas/Text' }
         status: { $ref: '#/components/schemas/ContentStatus' }
         scheduled_at: { type: string, format: date-time, description: Optional planned publish date. Omitting it on replace clears it. }
+    BatchTopicCreate:
+      allOf:
+        - { $ref: '#/components/schemas/TopicOnly' }
+        - { $ref: '#/components/schemas/BatchItemCommon' }
+        - type: object
+          properties: { type: { const: topic }, content: { $ref: '#/components/schemas/TopicContent' } }
+      unevaluatedProperties: false
     BatchYouTubeCreate:
       allOf:
         - { $ref: '#/components/schemas/BatchItemCommon' }
@@ -360,6 +402,7 @@ components:
       unevaluatedProperties: false
     BatchCreateItem:
       oneOf:
+        - { $ref: '#/components/schemas/BatchTopicCreate' }
         - { $ref: '#/components/schemas/BatchYouTubeCreate' }
         - { $ref: '#/components/schemas/BatchLinkedInCreate' }
         - { $ref: '#/components/schemas/BatchXCreate' }
@@ -379,6 +422,13 @@ components:
           minItems: 1
           maxItems: 50
           items: { $ref: '#/components/schemas/BatchCreateItem' }
+    TopicReplace:
+      allOf:
+        - { $ref: '#/components/schemas/TopicOnly' }
+        - { $ref: '#/components/schemas/ReplaceCommon' }
+        - type: object
+          properties: { type: { const: topic }, content: { $ref: '#/components/schemas/TopicContent' } }
+      unevaluatedProperties: false
     YouTubeReplace:
       allOf:
         - { $ref: '#/components/schemas/ReplaceCommon' }
@@ -423,6 +473,7 @@ components:
       unevaluatedProperties: false
     ReplaceContentRequest:
       oneOf:
+        - { $ref: '#/components/schemas/TopicReplace' }
         - { $ref: '#/components/schemas/YouTubeReplace' }
         - { $ref: '#/components/schemas/LinkedInReplace' }
         - { $ref: '#/components/schemas/XReplace' }
@@ -446,15 +497,27 @@ components:
         revision: { type: integer, minimum: 1 }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
-        expires_at: { type: string, format: date-time, description: Server-owned and fixed at creation plus 56 days. }
+        expires_at: { type: string, format: date-time, description: Legacy timestamp retained for compatibility. Content is stored permanently. }
         scheduled_at: { type: string, format: date-time, description: Optional planned publish date. Omitting it on replace clears it. }
     ItemCommon:
       type: object
       required: [type, working_title, status, content]
       properties:
+        topic_id: { $ref: '#/components/schemas/OptionalTopicID' }
+        format: { type: string, maxLength: 100 }
+        document_url: { type: string, maxLength: 8192, description: External HTTP or HTTPS document URL. }
+        video_url: { type: string, maxLength: 8192, description: External HTTP or HTTPS video URL such as Frame.io. }
         type: { $ref: '#/components/schemas/ContentType' }
         working_title: { type: string }
         status: { $ref: '#/components/schemas/ContentStatus' }
+    TopicItem:
+      allOf:
+        - { $ref: '#/components/schemas/TopicOnly' }
+        - { $ref: '#/components/schemas/ServerFields' }
+        - { $ref: '#/components/schemas/ItemCommon' }
+        - type: object
+          properties: { type: { const: topic }, content: { $ref: '#/components/schemas/TopicContent' } }
+      unevaluatedProperties: false
     YouTubeItem:
       allOf:
         - { $ref: '#/components/schemas/ServerFields' }
@@ -506,6 +569,7 @@ components:
       unevaluatedProperties: false
     ContentItem:
       oneOf:
+        - { $ref: '#/components/schemas/TopicItem' }
         - { $ref: '#/components/schemas/YouTubeItem' }
         - { $ref: '#/components/schemas/LinkedInItem' }
         - { $ref: '#/components/schemas/XItem' }
@@ -519,6 +583,10 @@ components:
       additionalProperties: false
       required: [id, type, status, working_title, revision, created_at, updated_at, expires_at, asset_counts]
       properties:
+        topic_id: { $ref: '#/components/schemas/OptionalTopicID' }
+        format: { type: string, maxLength: 100 }
+        document_url: { type: string, maxLength: 8192, description: External HTTP or HTTPS document URL. }
+        video_url: { type: string, maxLength: 8192, description: External HTTP or HTTPS video URL such as Frame.io. }
         id: { $ref: '#/components/schemas/ULID' }
         type: { $ref: '#/components/schemas/ContentType' }
         status: { $ref: '#/components/schemas/ContentStatus' }

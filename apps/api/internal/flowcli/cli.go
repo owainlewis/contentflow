@@ -1080,7 +1080,8 @@ func terminalMutationStatus(status int) bool {
 
 func validErrorCode(value string) bool {
 	switch value {
-	case "authentication_required", "authentication_unavailable", "insufficient_scope", "invalid_bearer_token", "rate_limit_exceeded",
+	case "invalid_topic_id", "invalid_topic", "invalid_format", "invalid_external_url", "topic_not_empty", "invalid_scheduled_at",
+		"authentication_required", "authentication_unavailable", "insufficient_scope", "invalid_bearer_token", "rate_limit_exceeded",
 		"batch_item_not_standalone", "content_document_too_large", "content_encoding_failed", "content_not_found", "content_unavailable",
 		"duplicate_section_id", "id_generation_failed", "invalid_batch_size", "invalid_content", "invalid_discriminator", "invalid_operation_id",
 		"invalid_query", "invalid_request", "invalid_revision", "invalid_section_id", "invalid_section_order", "invalid_status", "invalid_status_filter",

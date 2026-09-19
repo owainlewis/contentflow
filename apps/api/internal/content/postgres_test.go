@@ -31,7 +31,7 @@ func newPostgresStore(t *testing.T) (*PostgresStore, *pgxpool.Pool) {
 	return NewPostgresStore(pool), pool
 }
 
-func TestPostgresStorePersistsEveryTypeAndEnforcesExpiry(t *testing.T) {
+func TestPostgresStorePersistsEveryTypeWithoutExpiry(t *testing.T) {
 	store, _ := newPostgresStore(t)
 	ctx := context.Background()
 	service := NewService(store)
@@ -86,11 +86,11 @@ func TestPostgresStorePersistsEveryTypeAndEnforcesExpiry(t *testing.T) {
 		t.Fatalf("filtered prefix search returned %#v, %v", listed, err)
 	}
 
-	now = now.Add(ContentLifetime)
-	if _, err := service.Get(ctx, "workspace-a", ids[TypeX]); err == nil {
-		t.Fatal("expired item stayed readable at its deadline")
+	now = now.Add(365 * 24 * time.Hour)
+	if _, err := service.Get(ctx, "workspace-a", ids[TypeX]); err != nil {
+		t.Fatal("stored item disappeared after a year")
 	}
-	if expired, err := service.List(ctx, "workspace-a", ListQuery{}); err != nil || len(expired) != 0 {
+	if expired, err := service.List(ctx, "workspace-a", ListQuery{}); err != nil || len(expired) != len(cases) {
 		t.Fatalf("expired items stayed listed: %#v, %v", expired, err)
 	}
 }
@@ -193,7 +193,7 @@ func TestPostgresStoreReplaysConcurrentIdenticalOperations(t *testing.T) {
 	}
 }
 
-func TestPostgresCleanupRemovesExpiredRows(t *testing.T) {
+func TestPostgresCleanupRemovesExpiredReceiptsButPreservesContent(t *testing.T) {
 	store, pool := newPostgresStore(t)
 	ctx := context.Background()
 	service := NewService(store)
@@ -201,7 +201,7 @@ func TestPostgresCleanupRemovesExpiredRows(t *testing.T) {
 	service.now = func() time.Time { return now }
 
 	if _, err := service.Create(ctx, "workspace", CreateRequest{
-		Type: TypeX, WorkingTitle: "Temporary", Status: StatusDraft, OperationID: testOperationID(), Content: XContent{Body: "body"},
+		Type: TypeX, WorkingTitle: "Permanent", Status: StatusDraft, OperationID: testOperationID(), Content: XContent{Body: "body"},
 	}, "cleanup"); err != nil {
 		t.Fatal(err)
 	}
@@ -214,7 +214,7 @@ func TestPostgresCleanupRemovesExpiredRows(t *testing.T) {
 		t.Fatalf("cleanup removed %d live rows", removed)
 	}
 
-	removed, err = database.Cleanup(ctx, pool, now.Add(ContentLifetime+time.Hour))
+	removed, err = database.Cleanup(ctx, pool, now.Add(365*24*time.Hour+time.Hour))
 	if err != nil {
 		t.Fatalf("cleanup after expiry: %v", err)
 	}
@@ -225,7 +225,7 @@ func TestPostgresCleanupRemovesExpiredRows(t *testing.T) {
 	if err := pool.QueryRow(ctx, "select count(*) from content_items").Scan(&remaining); err != nil {
 		t.Fatal(err)
 	}
-	if remaining != 0 {
-		t.Fatalf("%d expired items survived cleanup", remaining)
+	if remaining != 1 {
+		t.Fatalf("expected permanent content to survive cleanup, got %d items", remaining)
 	}
 }

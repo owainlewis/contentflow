@@ -1,6 +1,6 @@
 # Reference external-agent flow
 
-This flow gives an external agent only the canonical YouTube transcript, then writes standalone drafts through one atomic batch. ContentFlow does not generate copy, call an AI model, store source lineage, or expose script sections.
+This flow gives an external agent only the canonical YouTube transcript, then writes standalone drafts through one atomic batch. This example does not generate copy inside ContentFlow, call an AI model from the app, or send script sections to the external agent. The API supports optional topic grouping; this example creates standalone pieces.
 
 Configure `CONTENTFLOW_API_URL` and `CONTENTFLOW_API_TOKEN` first. The token needs `content:read` for the transcript command and `content:write` for the batch command. Set `CONTENTFLOW_AGENT_RECOVERY_DIR` to an existing absolute directory on durable storage that survives a host restart or container replacement. The script refuses to start a new generation run without it.
 

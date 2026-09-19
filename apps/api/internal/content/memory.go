@@ -39,6 +39,9 @@ func (s *MemoryStore) Create(_ context.Context, item Item, receipt Receipt) (Mut
 	if result, found, err := s.receiptLocked(receipt); found || err != nil {
 		return result, err
 	}
+	if err := s.validateTopicLocked(item); err != nil {
+		return MutationResult{}, err
+	}
 	key := memoryKey(item.WorkspaceID, item.ID)
 	if _, found := s.items[key]; found {
 		return MutationResult{}, unavailable(errIDCollision{})
@@ -55,6 +58,9 @@ func (s *MemoryStore) BatchCreate(_ context.Context, items []Item, receipt Recei
 		return result, err
 	}
 	for _, item := range items {
+		if err := s.validateTopicLocked(item); err != nil {
+			return MutationResult{}, err
+		}
 		if _, found := s.items[memoryKey(item.WorkspaceID, item.ID)]; found {
 			return MutationResult{}, unavailable(errIDCollision{})
 		}
@@ -72,9 +78,12 @@ func (s *MemoryStore) Replace(_ context.Context, item Item, revision int64, rece
 	if result, found, err := s.receiptLocked(receipt); found || err != nil {
 		return result, err
 	}
+	if err := s.validateTopicLocked(item); err != nil {
+		return MutationResult{}, err
+	}
 	key := memoryKey(item.WorkspaceID, item.ID)
 	current, found := s.items[key]
-	if !found || !current.ExpiresAt.After(item.UpdatedAt) {
+	if !found {
 		return MutationResult{}, notFound()
 	}
 	if current.Revision != revision {
@@ -100,12 +109,17 @@ func (s *MemoryStore) Delete(_ context.Context, workspaceID, id string, revision
 	}
 	key := memoryKey(workspaceID, id)
 	current, found := s.items[key]
-	if !found || !current.ExpiresAt.After(now) {
+	if !found {
 		return MutationResult{}, notFound()
 	}
 	if current.Revision != revision {
 		current = cloneItem(current)
 		return MutationResult{}, conflict(current)
+	}
+	for _, piece := range s.items {
+		if piece.WorkspaceID == workspaceID && piece.TopicID == id {
+			return MutationResult{}, problem(409, "topic_not_empty")
+		}
 	}
 	delete(s.items, key)
 	s.receipts[memoryKey(receipt.WorkspaceID, receipt.OperationID)] = cloneReceipt(receipt)
@@ -116,7 +130,7 @@ func (s *MemoryStore) Get(_ context.Context, workspaceID, id string, now time.Ti
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	item, found := s.items[memoryKey(workspaceID, id)]
-	if !found || !item.ExpiresAt.After(now) {
+	if !found {
 		return Item{}, notFound()
 	}
 	return cloneItem(item), nil
@@ -128,7 +142,7 @@ func (s *MemoryStore) List(_ context.Context, workspaceID string, query ListQuer
 	items := make([]Summary, 0)
 	prefix := workspaceID + "\x00"
 	for key, item := range s.items {
-		if !strings.HasPrefix(key, prefix) || !item.ExpiresAt.After(now) {
+		if !strings.HasPrefix(key, prefix) {
 			continue
 		}
 		if query.Type != "" && item.Type != query.Type {
@@ -216,3 +230,14 @@ func cloneReceipt(receipt Receipt) Receipt {
 type errIDCollision struct{}
 
 func (errIDCollision) Error() string { return "generated content ID already exists" }
+
+func (s *MemoryStore) validateTopicLocked(item Item) error {
+	if item.TopicID == "" {
+		return nil
+	}
+	topic, ok := s.items[memoryKey(item.WorkspaceID, item.TopicID)]
+	if !ok || topic.Type != TypeTopic || item.Type == TypeTopic {
+		return problem(400, "invalid_topic_id")
+	}
+	return nil
+}

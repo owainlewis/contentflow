@@ -12,9 +12,7 @@ import (
 	"github.com/owainlewis/contentflow/apps/api/internal/database"
 )
 
-// PostgresStore persists content in PostgreSQL. Sections live inside the content
-// JSONB rather than in a side table: they were only ever split out to dodge the
-// Firestore document size limit.
+// PostgresStore persists content and its sections in PostgreSQL JSONB.
 type PostgresStore struct {
 	pool *pgxpool.Pool
 }
@@ -24,7 +22,7 @@ func NewPostgresStore(pool *pgxpool.Pool) *PostgresStore {
 }
 
 const itemColumns = `id, workspace_id, type, status, working_title, normalized_working_title,
-	revision, created_at, updated_at, expires_at, scheduled_at, content`
+	revision, created_at, updated_at, expires_at, scheduled_at, content, topic_id, format, document_url, video_url`
 
 func (s *PostgresStore) Receipt(ctx context.Context, workspaceID, operationID, requestHash string, now time.Time) (MutationResult, bool, error) {
 	row := s.pool.QueryRow(ctx,
@@ -130,16 +128,19 @@ func writeReceipt(ctx context.Context, transaction pgx.Tx, receipt Receipt) erro
 }
 
 func insertItem(ctx context.Context, transaction pgx.Tx, item Item) error {
+	if err := validateTopicTransaction(ctx, transaction, item); err != nil {
+		return err
+	}
 	encoded, err := json.Marshal(item.Content)
 	if err != nil {
 		return unavailable(err)
 	}
 	tag, err := transaction.Exec(ctx,
 		`insert into content_items (`+itemColumns+`)
-		 values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+		 values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
 		 on conflict (id) do nothing`,
 		item.ID, item.WorkspaceID, item.Type, item.Status, item.WorkingTitle, item.SearchableWorkingTitle,
-		item.Revision, item.CreatedAt, item.UpdatedAt, item.ExpiresAt, item.ScheduledAt, encoded)
+		item.Revision, item.CreatedAt, item.UpdatedAt, item.ExpiresAt, item.ScheduledAt, encoded, item.TopicID, item.Format, item.DocumentURL, item.VideoURL)
 	if err != nil {
 		return unavailable(err)
 	}
@@ -178,6 +179,9 @@ func (s *PostgresStore) Replace(ctx context.Context, item Item, revision int64, 
 		if current.Type != item.Type {
 			return problem(400, "invalid_discriminator")
 		}
+		if err := validateTopicTransaction(ctx, transaction, item); err != nil {
+			return err
+		}
 		if err := validateSectionReplacement(current, item); err != nil {
 			return err
 		}
@@ -187,10 +191,10 @@ func (s *PostgresStore) Replace(ctx context.Context, item Item, revision int64, 
 		}
 		_, err = transaction.Exec(ctx,
 			`update content_items set type = $3, status = $4, working_title = $5, normalized_working_title = $6,
-			   revision = $7, updated_at = $8, expires_at = $9, scheduled_at = $10, content = $11
+			   revision = $7, updated_at = $8, expires_at = $9, scheduled_at = $10, content = $11, topic_id=$12, format=$13, document_url=$14, video_url=$15
 			 where id = $1 and workspace_id = $2`,
 			item.ID, item.WorkspaceID, item.Type, item.Status, item.WorkingTitle, item.SearchableWorkingTitle,
-			item.Revision, item.UpdatedAt, item.ExpiresAt, item.ScheduledAt, encoded)
+			item.Revision, item.UpdatedAt, item.ExpiresAt, item.ScheduledAt, encoded, item.TopicID, item.Format, item.DocumentURL, item.VideoURL)
 		if err != nil {
 			return unavailable(err)
 		}
@@ -206,6 +210,13 @@ func (s *PostgresStore) Delete(ctx context.Context, workspaceID, id string, revi
 		}
 		if current.Revision != revision {
 			return conflict(current)
+		}
+		var hasChildren bool
+		if err := transaction.QueryRow(ctx, `select exists(select 1 from content_items where workspace_id=$1 and topic_id=$2)`, workspaceID, id).Scan(&hasChildren); err != nil {
+			return err
+		}
+		if hasChildren {
+			return problem(409, "topic_not_empty")
 		}
 		if _, err := transaction.Exec(ctx, `delete from content_items where id = $1 and workspace_id = $2`, id, workspaceID); err != nil {
 			return unavailable(err)
@@ -227,9 +238,6 @@ func lockItem(ctx context.Context, transaction pgx.Tx, workspaceID, id string, n
 	if err != nil {
 		return Item{}, unavailable(err)
 	}
-	if !item.ExpiresAt.After(now) {
-		return Item{}, notFound()
-	}
 	return item, nil
 }
 
@@ -242,16 +250,13 @@ func (s *PostgresStore) Get(ctx context.Context, workspaceID, id string, now tim
 	if err != nil {
 		return Item{}, unavailable(err)
 	}
-	if !item.ExpiresAt.After(now) {
-		return Item{}, notFound()
-	}
 	return item, nil
 }
 
 func (s *PostgresStore) List(ctx context.Context, workspaceID string, filter ListQuery, now time.Time) ([]Summary, error) {
 	query := strings.Builder{}
-	query.WriteString(`select ` + itemColumns + ` from content_items where workspace_id = $1 and expires_at > $2`)
-	arguments := []any{workspaceID, now}
+	query.WriteString(`select ` + itemColumns + ` from content_items where workspace_id = $1`)
+	arguments := []any{workspaceID}
 	if filter.Type != "" {
 		arguments = append(arguments, filter.Type)
 		query.WriteString(` and type = $` + itoa(len(arguments)))
@@ -295,7 +300,7 @@ func scanItem(source scanner) (Item, error) {
 	var encoded []byte
 	if err := source.Scan(&item.ID, &item.WorkspaceID, &item.Type, &item.Status, &item.WorkingTitle,
 		&item.NormalizedWorkingTitle, &item.Revision, &item.CreatedAt, &item.UpdatedAt,
-		&item.ExpiresAt, &item.ScheduledAt, &encoded); err != nil {
+		&item.ExpiresAt, &item.ScheduledAt, &encoded, &item.TopicID, &item.Format, &item.DocumentURL, &item.VideoURL); err != nil {
 		return Item{}, err
 	}
 	contentValue, err := decodeTypedContent(item.Type, encoded)
@@ -312,4 +317,16 @@ func itoa(value int) string {
 		return string(rune('0' + value))
 	}
 	return string(rune('0'+value/10)) + string(rune('0'+value%10))
+}
+
+func validateTopicTransaction(ctx context.Context, tx pgx.Tx, item Item) error {
+	if item.TopicID == "" {
+		return nil
+	}
+	var kind Type
+	err := tx.QueryRow(ctx, `select type from content_items where workspace_id=$1 and id=$2 for share`, item.WorkspaceID, item.TopicID).Scan(&kind)
+	if errors.Is(err, pgx.ErrNoRows) || (err == nil && (kind != TypeTopic || item.Type == TypeTopic)) {
+		return problem(400, "invalid_topic_id")
+	}
+	return err
 }
