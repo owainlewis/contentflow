@@ -22,7 +22,7 @@ for (const [schema, validate] of Object.entries(validators)) {
     assert.equal(validate(request), true, JSON.stringify(validate.errors));
     assert.equal(validate({ ...request, topic_id: "" }), true);
     assert.equal(validate({ ...request, topic_id: operationID }), !isTopic);
-    assert.equal(validate({ ...request, topic_id: operationID.toLowerCase() }), !isTopic);
+    assert.equal(validate({ ...request, topic_id: operationID.toLowerCase() }), false);
     for (const topic_id of ["not-an-id", "81J00000000000000000000000", "01I00000000000000000000000"]) {
       assert.equal(validate({ ...request, topic_id }), false, `accepted invalid topic ID: ${topic_id}`);
     }
