@@ -145,7 +145,7 @@ components:
       description: Revision conflict, operation ID conflict, or missing transcript. Revision conflicts include the current item.
       content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
     TooLarge:
-      description: JSON over 1 MiB, a text field over 500 KiB, a parent document over 900 KiB, or a Firestore document over its platform limit.
+      description: JSON over 1 MiB or a text field over 500 KiB.
       content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } }
     TooManyRequests:
       description: The authenticated client exceeded its request rate limit.
@@ -157,6 +157,16 @@ components:
     ULID:
       type: string
       pattern: '^[0-9A-HJKMNP-TV-Z]{26}$'
+    OptionalTopicID:
+      description: Topic group ID in the same workspace. Empty means standalone.
+      anyOf:
+        - { type: string, const: '' }
+        - { type: string, pattern: '^[0-7][0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{25}$' }
+    TopicOnly:
+      type: object
+      properties:
+        topic_id: { type: string, const: '' }
+        scheduled_at: false
     ContentType:
       type: string
       enum: [topic, youtube, linkedin, x, instagram, tiktok, email, substack]
@@ -231,7 +241,7 @@ components:
       type: object
       required: [type, working_title, status, operation_id, content]
       properties:
-        topic_id: { type: string, description: Optional topic group ID in the same workspace. Empty means standalone. }
+        topic_id: { $ref: '#/components/schemas/OptionalTopicID' }
         format: { type: string, maxLength: 100 }
         document_url: { type: string, maxLength: 8192, description: External HTTP or HTTPS document URL. }
         video_url: { type: string, maxLength: 8192, description: External HTTP or HTTPS video URL such as Frame.io. }
@@ -248,6 +258,7 @@ components:
           properties: { revision: { type: integer, minimum: 1 } }
     TopicCreate:
       allOf:
+        - { $ref: '#/components/schemas/TopicOnly' }
         - { $ref: '#/components/schemas/CreateCommon' }
         - type: object
           properties: { type: { const: topic }, content: { $ref: '#/components/schemas/TopicContent' } }
@@ -332,7 +343,7 @@ components:
       type: object
       required: [type, working_title, status, content]
       properties:
-        topic_id: { type: string }
+        topic_id: { $ref: '#/components/schemas/OptionalTopicID' }
         format: { type: string, maxLength: 100 }
         document_url: { type: string, maxLength: 8192 }
         video_url: { type: string, maxLength: 8192 }
@@ -342,6 +353,7 @@ components:
         scheduled_at: { type: string, format: date-time, description: Optional planned publish date. Omitting it on replace clears it. }
     BatchTopicCreate:
       allOf:
+        - { $ref: '#/components/schemas/TopicOnly' }
         - { $ref: '#/components/schemas/BatchItemCommon' }
         - type: object
           properties: { type: { const: topic }, content: { $ref: '#/components/schemas/TopicContent' } }
@@ -412,6 +424,7 @@ components:
           items: { $ref: '#/components/schemas/BatchCreateItem' }
     TopicReplace:
       allOf:
+        - { $ref: '#/components/schemas/TopicOnly' }
         - { $ref: '#/components/schemas/ReplaceCommon' }
         - type: object
           properties: { type: { const: topic }, content: { $ref: '#/components/schemas/TopicContent' } }
@@ -490,7 +503,7 @@ components:
       type: object
       required: [type, working_title, status, content]
       properties:
-        topic_id: { type: string, description: Optional topic group ID in the same workspace. Empty means standalone. }
+        topic_id: { $ref: '#/components/schemas/OptionalTopicID' }
         format: { type: string, maxLength: 100 }
         document_url: { type: string, maxLength: 8192, description: External HTTP or HTTPS document URL. }
         video_url: { type: string, maxLength: 8192, description: External HTTP or HTTPS video URL such as Frame.io. }
@@ -499,6 +512,7 @@ components:
         status: { $ref: '#/components/schemas/ContentStatus' }
     TopicItem:
       allOf:
+        - { $ref: '#/components/schemas/TopicOnly' }
         - { $ref: '#/components/schemas/ServerFields' }
         - { $ref: '#/components/schemas/ItemCommon' }
         - type: object
@@ -569,7 +583,7 @@ components:
       additionalProperties: false
       required: [id, type, status, working_title, revision, created_at, updated_at, expires_at, asset_counts]
       properties:
-        topic_id: { type: string, description: Optional topic group ID in the same workspace. Empty means standalone. }
+        topic_id: { $ref: '#/components/schemas/OptionalTopicID' }
         format: { type: string, maxLength: 100 }
         document_url: { type: string, maxLength: 8192, description: External HTTP or HTTPS document URL. }
         video_url: { type: string, maxLength: 8192, description: External HTTP or HTTPS video URL such as Frame.io. }
