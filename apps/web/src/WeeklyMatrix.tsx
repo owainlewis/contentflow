@@ -47,6 +47,8 @@ export default function WeeklyMatrix({ items, topics = [], enabledTypes, onOpen,
   const suppressOpen = useRef(false);
   const composerInput = useRef<HTMLInputElement>(null);
   const days = useMemo(() => datesForWeek(weekStart), [weekStart]);
+  const currentWeek = mondayOf(new Date());
+  const nextWeek = new Date(currentWeek.getFullYear(), currentWeek.getMonth(), currentWeek.getDate() + 7);
   const today = dayKey(new Date());
   const label = weekLabel(days[0], days[6]);
   const restoredComposer = frozenPlan ? { cell: `${frozenPlan.type}:${frozenPlan.day}`, title: frozenPlan.title, attemptId: frozenPlan.attemptId } : undefined;
@@ -187,8 +189,8 @@ export default function WeeklyMatrix({ items, topics = [], enabledTypes, onOpen,
         <div className="calendar-controls">
           <button className="icon-button" aria-label="Previous week" onClick={() => moveWeek(-1)}><ChevronLeft size={18} /></button>
           <strong aria-live="polite">{label}</strong>
-          <button className="icon-button" aria-label="Next week" onClick={() => moveWeek(1)}><ChevronRight size={18} /></button>
-          <button className="secondary-button" onClick={() => setWeekStart(mondayOf(new Date()))}>This week</button>
+          <button className="icon-button" aria-label="Following week" onClick={() => moveWeek(1)}><ChevronRight size={18} /></button>
+          <div className="week-shortcuts" aria-label="Jump to week"><button className="secondary-button" aria-pressed={dayKey(weekStart) === dayKey(currentWeek)} onClick={() => setWeekStart(mondayOf(new Date()))}>This week</button><button className="secondary-button" aria-pressed={dayKey(weekStart) === dayKey(nextWeek)} onClick={() => { const start = mondayOf(new Date()); setWeekStart(new Date(start.getFullYear(), start.getMonth(), start.getDate() + 7)); }}>Next week</button></div>
         </div>
       </header>
 

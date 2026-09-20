@@ -660,3 +660,7 @@ button:focus-visible, summary:focus-visible, a:focus-visible, select:focus-visib
 .piece-topic-source > details[open], .piece-topic-source > .piece-resource-link:has(details[open]) { flex-basis: 100%; }
 .eyebrow { margin: 0; color: var(--text-muted); font-size: var(--font-label); font-weight: 650; letter-spacing: .08em; text-transform: uppercase; }
 .editor-document:not(.topic-document) .document-field-large input { font-size: 20px; letter-spacing: -.02em; line-height: 1.4; }
+
+.week-shortcuts { display: flex; gap: 6px; }
+.week-shortcuts button[aria-pressed="true"] { border-color: var(--accent); color: var(--ink); background: var(--surface-strong); }
+.weekly-header .calendar-controls { flex-wrap: wrap; }
