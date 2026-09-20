@@ -875,7 +875,7 @@ export default function Home() {
   return <main className="app-shell app-redesign">
     <header className="app-topbar">
       <Button className="app-brand" onClick={() => navigate("topics")} aria-label="ContentFlow home"><div className="brand-mark"><Zap size={17} fill="currentColor" /></div><span className="brand-name">ContentFlow</span></Button>
-      <nav className="app-nav" aria-label="Main navigation">{([["topics", "Topics"], ["weekly", "Week"], ["library", "Library"], ["settings", "Settings"]] as const).map(([page, label]) => <Button key={page} className={view === page ? "active" : ""} aria-current={view === page ? "page" : undefined} onClick={() => navigate(page)}>{label}</Button>)}</nav>
+      <nav className="app-nav" aria-label="Main navigation">{([["weekly", "Week"], ["topics", "Topics"], ["library", "Library"], ["settings", "Settings"]] as const).map(([page, label]) => <Button key={page} className={view === page ? "active" : ""} aria-current={view === page ? "page" : undefined} onClick={() => navigate(page)}>{label}</Button>)}</nav>
       <div className="app-topbar-actions"><Button className="icon-button" onClick={toggleTheme} aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}>{theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}</Button><Button className="primary-button" onClick={() => { setCreateTopicId(""); setCreateOpen(true); }}><Plus size={16} />New content</Button></div>
     </header>
 
