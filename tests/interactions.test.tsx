@@ -291,11 +291,6 @@ async function openPiece(user: ReturnType<typeof userEvent.setup>, name: RegExp)
   focusedContentId = new URLSearchParams(window.location.search).get("id") ?? "";
 }
 
-async function openDetails(user: ReturnType<typeof userEvent.setup>, field: HTMLElement) {
-  const details = field.closest("details");
-  if (details && !details.open) await user.click(details.querySelector("summary")!);
-}
-
 // Delete is the only lifecycle action, and it is confirmation-gated.
 async function runDelete(user: ReturnType<typeof userEvent.setup>) {
   if (!screen.queryByRole("button", { name: "Delete" })) {
@@ -344,8 +339,12 @@ describe("persistent ContentFlow workspace", () => {
     await user.click(screen.getByRole("button", { name: "New topic group" }));
     const title = await screen.findByLabelText("Working title");
     fireEvent.change(title, { target: { value: "One idea, many versions" } });
-    fireEvent.change(screen.getByLabelText("Source document"), { target: { value: "https://docs.google.com/document/d/source" } });
-    fireEvent.change(screen.getByLabelText("Topic notes"), { target: { value: "Start from the practical example." } });
+    await user.click(screen.getByRole("button", { name: "Add Source document" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Source document" }), { target: { value: "https://docs.google.com/document/d/source" } });
+    await user.keyboard("{Escape}");
+    await user.click(screen.getByRole("button", { name: "Topic notes" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Topic notes" }), { target: { value: "Start from the practical example." } });
+    await user.keyboard("{Escape}");
     await waitFor(() => expect([...api.items.values()].find((item) => item.type === "topic")?.working_title).toBe("One idea, many versions"), { timeout: 2500 });
     const topic = [...api.items.values()].find((item) => item.type === "topic")!;
 
@@ -355,7 +354,9 @@ describe("persistent ContentFlow workspace", () => {
     const reel = await screen.findByRole("region", { name: /^Instagram:/ });
     fireEvent.change(await within(reel).findByLabelText("Instagram script"), { target: { value: "Here is the Reel script." } });
     fireEvent.change(within(reel).getByLabelText("Instagram caption"), { target: { value: "The final Instagram caption." } });
-    fireEvent.change(within(reel).getByLabelText("Frame.io / media link"), { target: { value: "https://f.io/reel-asset" } });
+    await user.click(within(reel).getByRole("button", { name: "Add Frame.io / media link" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Frame.io / media link" }), { target: { value: "https://f.io/reel-asset" } });
+    await user.keyboard("{Escape}");
     await waitFor(() => expect([...api.items.values()].find((item) => item.type === "instagram")?.video_url).toBe("https://f.io/reel-asset"), { timeout: 2500 });
 
     await user.click(screen.getByRole("button", { name: "Add piece" }));
@@ -367,8 +368,9 @@ describe("persistent ContentFlow workspace", () => {
     const linkedin = await screen.findByRole("region", { name: /^LinkedIn:/ });
     fireEvent.change(await within(linkedin).findByLabelText("LinkedIn post"), { target: { value: "The LinkedIn version of this idea." } });
     await user.click(within(linkedin).getByRole("button", { name: /^Use video from/ }));
-    expect((within(linkedin).getByLabelText("Frame.io / media link") as HTMLInputElement).value).toBe("https://f.io/reel-asset");
-    fireEvent.change(within(linkedin).getByLabelText("Publish date"), { target: { value: "2026-09-23" } });
+    expect(within(linkedin).getByRole("link", { name: "Open Frame.io / media link" }).getAttribute("href")).toBe("https://f.io/reel-asset");
+    await user.click(within(linkedin).getByRole("button", { name: "Edit details" }));
+    fireEvent.change(screen.getByLabelText("Publish date"), { target: { value: "2026-09-23" } });
     await waitFor(() => {
       const piece = [...api.items.values()].find((item) => item.type === "linkedin")!;
       expect(piece.content).toEqual({ body: "The LinkedIn version of this idea." });
@@ -378,13 +380,14 @@ describe("persistent ContentFlow workspace", () => {
       expect(piece.scheduled_at?.startsWith("2026-09-23")).toBe(true);
     }, { timeout: 2500 });
 
+    await user.keyboard("{Escape}");
     first.unmount();
     renderWorkspace(api);
     expect(await screen.findByDisplayValue("One idea, many versions")).toBeTruthy();
     expect(await screen.findByDisplayValue("The final Instagram caption.")).toBeTruthy();
     await user.selectOptions(await screen.findByLabelText("Open alongside"), linked.id);
     expect(await screen.findByDisplayValue("The LinkedIn version of this idea.")).toBeTruthy();
-    expect(screen.getByDisplayValue("https://docs.google.com/document/d/source")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Open Source document" }).getAttribute("href")).toBe("https://docs.google.com/document/d/source");
   }, 15000);
 
   it("assigns a standalone piece to a topic and makes it standalone again", async () => {
@@ -395,7 +398,7 @@ describe("persistent ContentFlow workspace", () => {
     const user = userEvent.setup();
     renderWorkspace(api);
     await screen.findByLabelText("LinkedIn post");
-    await openDetails(user, screen.getByLabelText("Topic group"));
+    await user.click(screen.getByRole("button", { name: "Edit details" }));
     await user.selectOptions(screen.getByLabelText("Topic group"), topic.id);
     await waitFor(() => expect(api.items.get(piece.id)?.topic_id).toBe(topic.id), { timeout: 2500 });
     await user.selectOptions(screen.getByLabelText("Topic group"), "");
@@ -410,15 +413,17 @@ describe("persistent ContentFlow workspace", () => {
     vi.stubGlobal("fetch", api.fetch);
     const user = userEvent.setup();
     const first = renderWorkspace(api);
-    const document = await screen.findByLabelText("YouTube script document");
+    await user.click(await screen.findByRole("button", { name: "Add YouTube script document" }));
+    const document = screen.getByRole("textbox", { name: "YouTube script document" });
     fireEvent.change(document, { target: { value: "https://docs.google.com/document/d/youtube" } });
     await waitFor(() => expect(api.items.get(youtube.id)?.document_url).toBe("https://docs.google.com/document/d/youtube"), { timeout: 2500 });
+    await user.keyboard("{Escape}");
     expect(screen.getByRole("link", { name: /Open YouTube script document/ }).getAttribute("href")).toBe("https://docs.google.com/document/d/youtube");
-    await user.click(screen.getByText("Stored script sections"));
+    await user.click(screen.getByRole("tab", { name: "Script" }));
     expect(screen.getByDisplayValue("Previously stored script")).toBeTruthy();
     first.unmount();
     renderWorkspace(api);
-    expect(await screen.findByDisplayValue("https://docs.google.com/document/d/youtube")).toBeTruthy();
+    expect((await screen.findByRole("link", { name: "Open YouTube script document" })).getAttribute("href")).toBe("https://docs.google.com/document/d/youtube");
     expect(screen.queryByRole("button", { name: "Add section" })).toBeNull();
   });
 
@@ -811,7 +816,7 @@ describe("persistent ContentFlow workspace", () => {
   });
 
   it.each([
-    ["YouTube", "YouTube transcript: what was actually said"],
+    ["YouTube", "YouTube title"],
     ["LinkedIn", "LinkedIn post"],
     ["X", "X post"],
     ["Instagram", "Instagram script"],
@@ -984,15 +989,18 @@ describe("persistent ContentFlow workspace", () => {
     vi.stubGlobal("fetch", api.fetch);
     const user = userEvent.setup();
     const first = renderWorkspace(api);
-    const transcript = await screen.findByLabelText("YouTube transcript: what was actually said");
-    await user.click(screen.getByText("Recording transcript"));
+    await user.click(await screen.findByRole("tab", { name: "Transcript" }));
+    const transcript = screen.getByLabelText("YouTube transcript: what was actually said");
     await user.type(transcript, "Words actually spoken");
+    await user.click(screen.getByRole("tab", { name: "Script" }));
     expect((screen.getByLabelText("Intro script") as HTMLTextAreaElement).value).toBe("Planned opening");
     await waitFor(() => expect(api.replaceBodies.length).toBe(1), { timeout: 2500 });
     first.unmount();
 
     renderWorkspace(api);
+    await user.click(await screen.findByRole("tab", { name: "Transcript" }));
     expect(await screen.findByDisplayValue("Words actually spoken")).toBeTruthy();
+    await user.click(screen.getByRole("tab", { name: "Script" }));
     expect((screen.getByLabelText("Intro script") as HTMLTextAreaElement).value).toBe("Planned opening");
   });
 
@@ -1823,6 +1831,27 @@ describe("persistent ContentFlow workspace", () => {
     await user.keyboard("{Control>}k{/Control}");
     expect(await screen.findByRole("heading", { name: "Library" })).toBeTruthy();
     expect(screen.getByLabelText("Filter by platform")).toHaveProperty("value", "all");
+  });
+
+  it("keeps app shortcuts inside the piece details dialog and restores focus on Escape", async () => {
+    const api = new FakeAPI([detail("linkedin")]);
+    vi.stubGlobal("fetch", api.fetch);
+    const user = userEvent.setup();
+    renderWorkspace(api);
+    await screen.findByLabelText("LinkedIn post");
+    const trigger = screen.getByRole("button", { name: "Edit details" });
+    await user.click(trigger);
+    const dialog = screen.getByRole("dialog", { name: "Piece details" });
+    await user.keyboard("{Control>}k{/Control}");
+    expect(window.location.pathname).toBe("/content");
+    expect(dialog.contains(document.activeElement)).toBe(true);
+    await user.keyboard("n");
+    expect(screen.getAllByRole("dialog")).toHaveLength(1);
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog")).toBeNull();
+    await waitFor(() => expect(document.activeElement).toBe(trigger));
+    expect(screen.getByLabelText("Working title").tagName).toBe("INPUT");
+    expect(document.querySelector("details")).toBeNull();
   });
 
   it("opens Library search with the keyboard shortcut from a focused editor", async () => {

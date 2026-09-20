@@ -32,6 +32,9 @@ const eslintConfig = defineConfig([
       "jsx-a11y": {
         components: {
           AutoTextarea: "textarea",
+          Input: "input",
+          Button: "button",
+          Select: "select",
         },
       },
     },

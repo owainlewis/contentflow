@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Button, Input } from "./ui";
 import { ImagePlus } from "lucide-react";
 import { ApiError, deleteThumbnail, getThumbnail, isSessionRecoveryError, uploadThumbnail } from "./api";
 
@@ -58,15 +59,15 @@ export default function ThumbnailUpload({ id, csrfToken, onSessionExpired }: { i
 
   return <div className="thumbnail-upload" aria-busy={!!busy}>
     <span className="thumbnail-label">YouTube thumbnail</span>
-    <input ref={input} type="file" accept="image/jpeg,image/png" aria-label="Upload YouTube thumbnail" hidden disabled={!!busy} onChange={(event) => {
+    <Input ref={input} type="file" accept="image/jpeg,image/png" aria-label="Upload YouTube thumbnail" hidden disabled={!!busy} onChange={(event) => {
       const file = event.target.files?.[0]; event.target.value = "";
       if (file) void mutate(file);
     }} />
-    {preview ? <img className="thumbnail-preview" src={preview} alt="YouTube thumbnail" /> : <button className="thumbnail-placeholder" type="button" disabled={!!busy} onClick={() => input.current?.click()}><ImagePlus size={28} /><span>Upload thumbnail</span><small>JPEG or PNG · up to 5 MB</small></button>}
+    {preview ? <img className="thumbnail-preview" src={preview} alt="YouTube thumbnail" /> : <Button className="thumbnail-placeholder" type="button" disabled={!!busy} onClick={() => input.current?.click()}><ImagePlus size={28} /><span>Upload thumbnail</span><small>JPEG or PNG · up to 5 MB</small></Button>}
     <div className="thumbnail-actions">
-      {preview && <><button type="button" disabled={!!busy} onClick={() => input.current?.click()}>Replace thumbnail</button><button type="button" disabled={!!busy} onClick={() => void mutate()}>Remove thumbnail</button></>}
+      {preview && <><Button type="button" disabled={!!busy} onClick={() => input.current?.click()}>Replace thumbnail</Button><Button type="button" disabled={!!busy} onClick={() => void mutate()}>Remove thumbnail</Button></>}
       {busy && <span role="status">{busy}</span>}
-      {error && <><span role="alert">{error}</span><button type="button" disabled={!!busy} onClick={() => { setBusy("Loading thumbnail…"); setError(""); setReload((value) => value + 1); }}>Reload thumbnail</button></>}
+      {error && <><span role="alert">{error}</span><Button type="button" disabled={!!busy} onClick={() => { setBusy("Loading thumbnail…"); setError(""); setReload((value) => value + 1); }}>Reload thumbnail</Button></>}
     </div>
   </div>;
 }
