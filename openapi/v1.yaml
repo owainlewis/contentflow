@@ -109,6 +109,61 @@ paths:
         '409':
           description: The transcript contains only Unicode whitespace.
           content: { application/json: { schema: { $ref: '#/components/schemas/Error' }, examples: { missing: { value: { error: transcript_missing } } } } }
+  /content/{id}/thumbnail:
+    parameters:
+      - { $ref: '#/components/parameters/ContentID' }
+    get:
+      operationId: getYouTubeThumbnail
+      description: Reads the workspace-owned YouTube thumbnail. Requires content:read. Returns private, no-store caching and an ETag. Missing images return thumbnail_not_found.
+      responses:
+        '200':
+          description: Validated raster image.
+          headers:
+            ETag: { schema: { type: string } }
+            Cache-Control: { schema: { type: string, const: 'private, no-store' } }
+          content:
+            image/png: { schema: { type: string, format: binary } }
+            image/jpeg: { schema: { type: string, format: binary } }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+    put:
+      operationId: putYouTubeThumbnail
+      description: Uploads or replaces a YouTube thumbnail independently of content revision. Requires assets:write or an owner session with X-CSRF-Token. Raw JPEG/PNG bodies are bounded to 5 MiB, 8192 pixels per side and 16000000 total pixels. Images are fully decoded and re-encoded before storage. Invalid image or MIME returns invalid_thumbnail; oversized dimensions return thumbnail_dimensions_exceeded; oversized bytes return thumbnail_too_large; other content types return thumbnail_not_supported. Upload failure preserves the previous thumbnail.
+      requestBody:
+        required: true
+        content:
+          image/png: { schema: { type: string, format: binary, maxLength: 5242880 } }
+          image/jpeg: { schema: { type: string, format: binary, maxLength: 5242880 } }
+      responses:
+        '200':
+          description: Saved image route. Fetch it again to see the replacement.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [url]
+                additionalProperties: false
+                properties:
+                  url: { type: string, example: '/api/v1/content/01J00000000000000000000001/thumbnail' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '413': { $ref: '#/components/responses/TooLarge' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
+    delete:
+      operationId: deleteYouTubeThumbnail
+      description: Removes a thumbnail without changing content revision. Requires assets:write or an owner session with X-CSRF-Token. No body is needed. Removing an absent thumbnail succeeds; a missing parent item returns 404.
+      responses:
+        '204': { description: Thumbnail removed or already absent. }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '503': { $ref: '#/components/responses/ServiceUnavailable' }
 components:
   securitySchemes:
     bearerToken: { type: http, scheme: bearer }

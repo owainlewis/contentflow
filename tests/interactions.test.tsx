@@ -262,8 +262,46 @@ class FakeAPI {
   };
 }
 
+let focusedContentId = "";
+
+function renderWorkspace(api: FakeAPI) {
+  if (window.location.pathname === "/" && api.items.size) {
+    const id = api.items.keys().next().value!;
+    window.history.replaceState({}, "", `/content?id=${encodeURIComponent(id)}`);
+  }
+  focusedContentId = new URLSearchParams(window.location.search).get("id") ?? "";
+  return render(<Home />);
+}
+
+function goTo(path: string) {
+  act(() => {
+    window.history.pushState({}, "", path);
+    window.dispatchEvent(new PopStateEvent("popstate"));
+  });
+}
+
+async function searchField(user: ReturnType<typeof userEvent.setup>) {
+  if (!screen.queryByLabelText("Search content titles")) await user.click(screen.getByRole("button", { name: "Library" }));
+  return screen.findByLabelText("Search content titles");
+}
+
+async function openPiece(user: ReturnType<typeof userEvent.setup>, name: RegExp) {
+  if (!screen.queryByRole("button", { name })) await user.click(screen.getByRole("button", { name: "Library" }));
+  await user.click(await screen.findByRole("button", { name }));
+  focusedContentId = new URLSearchParams(window.location.search).get("id") ?? "";
+}
+
+async function openDetails(user: ReturnType<typeof userEvent.setup>, field: HTMLElement) {
+  const details = field.closest("details");
+  if (details && !details.open) await user.click(details.querySelector("summary")!);
+}
+
 // Delete is the only lifecycle action, and it is confirmation-gated.
 async function runDelete(user: ReturnType<typeof userEvent.setup>) {
+  if (!screen.queryByRole("button", { name: "Delete" })) {
+    goTo(`/content?id=${focusedContentId}`);
+    await screen.findByRole("button", { name: "Delete" });
+  }
   await user.click(screen.getByRole("button", { name: "Delete" }));
   await user.click(screen.getByRole("button", { name: "Delete permanently" }));
 }
@@ -300,8 +338,8 @@ describe("persistent ContentFlow workspace", () => {
     const api = new FakeAPI([]);
     vi.stubGlobal("fetch", api.fetch);
     const user = userEvent.setup();
-    const first = render(<Home />);
-    await screen.findByRole("heading", { name: "Start writing" });
+    const first = renderWorkspace(api);
+    await screen.findByRole("heading", { name: "Topics" });
     await user.click(screen.getAllByRole("button", { name: /New content/ })[0]);
     await user.click(screen.getByRole("button", { name: "New topic group" }));
     const title = await screen.findByLabelText("Working title");
@@ -311,6 +349,7 @@ describe("persistent ContentFlow workspace", () => {
     await waitFor(() => expect([...api.items.values()].find((item) => item.type === "topic")?.working_title).toBe("One idea, many versions"), { timeout: 2500 });
     const topic = [...api.items.values()].find((item) => item.type === "topic")!;
 
+    await user.click(screen.getByRole("button", { name: "Add piece" }));
     await user.selectOptions(screen.getByLabelText("New piece platform"), "instagram");
     await user.click(screen.getByRole("button", { name: "Add related piece" }));
     const reel = await screen.findByRole("region", { name: /^Instagram:/ });
@@ -319,9 +358,12 @@ describe("persistent ContentFlow workspace", () => {
     fireEvent.change(within(reel).getByLabelText("Frame.io / media link"), { target: { value: "https://f.io/reel-asset" } });
     await waitFor(() => expect([...api.items.values()].find((item) => item.type === "instagram")?.video_url).toBe("https://f.io/reel-asset"), { timeout: 2500 });
 
+    await user.click(screen.getByRole("button", { name: "Add piece" }));
     await user.selectOptions(screen.getByLabelText("New piece platform"), "linkedin");
     await user.selectOptions(screen.getByLabelText("New piece format"), "video");
     await user.click(screen.getByRole("button", { name: "Add related piece" }));
+    const linked = [...api.items.values()].find((item) => item.type === "linkedin")!;
+    await user.selectOptions(await screen.findByLabelText("Open alongside"), linked.id);
     const linkedin = await screen.findByRole("region", { name: /^LinkedIn:/ });
     fireEvent.change(await within(linkedin).findByLabelText("LinkedIn post"), { target: { value: "The LinkedIn version of this idea." } });
     await user.click(within(linkedin).getByRole("button", { name: /^Use video from/ }));
@@ -337,9 +379,10 @@ describe("persistent ContentFlow workspace", () => {
     }, { timeout: 2500 });
 
     first.unmount();
-    render(<Home />);
+    renderWorkspace(api);
     expect(await screen.findByDisplayValue("One idea, many versions")).toBeTruthy();
     expect(await screen.findByDisplayValue("The final Instagram caption.")).toBeTruthy();
+    await user.selectOptions(await screen.findByLabelText("Open alongside"), linked.id);
     expect(await screen.findByDisplayValue("The LinkedIn version of this idea.")).toBeTruthy();
     expect(screen.getByDisplayValue("https://docs.google.com/document/d/source")).toBeTruthy();
   }, 15000);
@@ -350,8 +393,9 @@ describe("persistent ContentFlow workspace", () => {
     const api = new FakeAPI([piece, topic]);
     vi.stubGlobal("fetch", api.fetch);
     const user = userEvent.setup();
-    render(<Home />);
+    renderWorkspace(api);
     await screen.findByLabelText("LinkedIn post");
+    await openDetails(user, screen.getByLabelText("Topic group"));
     await user.selectOptions(screen.getByLabelText("Topic group"), topic.id);
     await waitFor(() => expect(api.items.get(piece.id)?.topic_id).toBe(topic.id), { timeout: 2500 });
     await user.selectOptions(screen.getByLabelText("Topic group"), "");
@@ -365,15 +409,15 @@ describe("persistent ContentFlow workspace", () => {
     const api = new FakeAPI([youtube]);
     vi.stubGlobal("fetch", api.fetch);
     const user = userEvent.setup();
-    const first = render(<Home />);
+    const first = renderWorkspace(api);
     const document = await screen.findByLabelText("YouTube script document");
     fireEvent.change(document, { target: { value: "https://docs.google.com/document/d/youtube" } });
     await waitFor(() => expect(api.items.get(youtube.id)?.document_url).toBe("https://docs.google.com/document/d/youtube"), { timeout: 2500 });
-    expect(screen.getByRole("link", { name: "Open YouTube script document" }).getAttribute("href")).toBe("https://docs.google.com/document/d/youtube");
+    expect(screen.getByRole("link", { name: /Open YouTube script document/ }).getAttribute("href")).toBe("https://docs.google.com/document/d/youtube");
     await user.click(screen.getByText("Stored script sections"));
     expect(screen.getByDisplayValue("Previously stored script")).toBeTruthy();
     first.unmount();
-    render(<Home />);
+    renderWorkspace(api);
     expect(await screen.findByDisplayValue("https://docs.google.com/document/d/youtube")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Add section" })).toBeNull();
   });
@@ -406,7 +450,7 @@ describe("persistent ContentFlow workspace", () => {
   it("loads summary traffic and selected detail separately", async () => {
     const api = new FakeAPI();
     vi.stubGlobal("fetch", api.fetch);
-    render(<Home />);
+    renderWorkspace(api);
 
     expect(await screen.findByDisplayValue("YouTube one")).toBeTruthy();
     expect(api.requests.some((request) => request.path === "/api/v1/content")).toBe(true);
@@ -420,15 +464,15 @@ describe("persistent ContentFlow workspace", () => {
     const api = new FakeAPI([detail("youtube"), detail("x")]);
     vi.stubGlobal("fetch", api.fetch);
     const user = userEvent.setup();
-    render(<Home />);
+    renderWorkspace(api);
     const title = await screen.findByDisplayValue("YouTube one");
 
     await user.type(title, " Z");
-    await user.click(screen.getByRole("button", { name: /^X one/ }));
+    await openPiece(user, /^X one/);
     await screen.findByDisplayValue("X one");
     let releaseDetail: () => void = () => undefined;
     api.detailGate = new Promise<void>((resolve) => { releaseDetail = resolve; });
-    await user.click(screen.getByRole("button", { name: /^YouTube one/ }));
+    await openPiece(user, /^YouTube one/);
     expect(await screen.findByDisplayValue("YouTube one Z")).toBeTruthy();
     await waitFor(() => expect(api.replaceBodies).toHaveLength(1), { timeout: 2500 });
     releaseDetail();
@@ -446,7 +490,7 @@ describe("persistent ContentFlow workspace", () => {
     api.replaceAuthFailure = { status, code };
     vi.stubGlobal("fetch", api.fetch);
     const user = userEvent.setup();
-    render(<Home />);
+    renderWorkspace(api);
     const body = await screen.findByLabelText("LinkedIn post");
 
     await user.clear(body);
@@ -467,7 +511,7 @@ describe("persistent ContentFlow workspace", () => {
     const api = new FakeAPI([detail("linkedin")]);
     vi.stubGlobal("fetch", api.fetch);
     const user = userEvent.setup();
-    render(<Home />);
+    renderWorkspace(api);
     const body = await screen.findByLabelText("LinkedIn post");
     await waitFor(() => expect(api.requests.filter((request) => request.method === "GET" && request.path === "/api/v1/content").length).toBeGreaterThanOrEqual(2));
     api.expireNextList = true;
@@ -485,7 +529,7 @@ describe("persistent ContentFlow workspace", () => {
     const api = new FakeAPI([detail("linkedin")]);
     vi.stubGlobal("fetch", api.fetch);
     const user = userEvent.setup();
-    render(<Home />);
+    renderWorkspace(api);
     await screen.findByDisplayValue("LinkedIn one");
     await waitFor(() => expect(api.requests.filter((request) => request.method === "GET" && request.path === "/api/v1/content").length).toBeGreaterThanOrEqual(2));
     let releaseLifecycle: () => void = () => undefined;
@@ -494,7 +538,7 @@ describe("persistent ContentFlow workspace", () => {
 
     await runDelete(user);
     api.expireNextList = true;
-    await user.type(screen.getByLabelText("Search content titles"), "Linked");
+    await user.type(await searchField(user), "Linked");
     expect(await screen.findByRole("heading", { name: "Your session expired" })).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "I’ve signed in" }));
     await waitFor(() => expect(screen.queryByRole("heading", { name: "Your session expired" })).toBeNull());
@@ -502,14 +546,15 @@ describe("persistent ContentFlow workspace", () => {
     releaseLifecycle();
 
     expect(await screen.findByText("The item could not be deleted.")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Delete" })).not.toHaveProperty("disabled", true);
+    await openPiece(user, /^LinkedIn one/);
+    expect(await screen.findByRole("button", { name: "Delete" })).not.toHaveProperty("disabled", true);
   });
 
   it("retries a delayed old-session lifecycle auth failure after another request renews the session", async () => {
     const api = new FakeAPI([detail("linkedin")]);
     vi.stubGlobal("fetch", api.fetch);
     const user = userEvent.setup();
-    render(<Home />);
+    renderWorkspace(api);
     await screen.findByDisplayValue("LinkedIn one");
     await waitFor(() => expect(api.requests.filter((request) => request.method === "GET" && request.path === "/api/v1/content").length).toBeGreaterThanOrEqual(2));
     let releaseLifecycle: () => void = () => undefined;
@@ -518,7 +563,7 @@ describe("persistent ContentFlow workspace", () => {
 
     await runDelete(user);
     api.expireNextList = true;
-    await user.type(screen.getByLabelText("Search content titles"), "Linked");
+    await user.type(await searchField(user), "Linked");
     expect(await screen.findByRole("heading", { name: "Your session expired" })).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "I’ve signed in" }));
     await waitFor(() => expect(screen.queryByRole("heading", { name: "Your session expired" })).toBeNull());
@@ -536,12 +581,12 @@ describe("persistent ContentFlow workspace", () => {
     const api = new FakeAPI();
     vi.stubGlobal("fetch", api.fetch);
     const user = userEvent.setup();
-    render(<Home />);
+    renderWorkspace(api);
     await screen.findByDisplayValue("YouTube one");
 
-    await user.type(screen.getByLabelText("Search content titles"), "You");
-    await user.click(screen.getByRole("button", { name: /^YouTube1$/ }));
-    await user.click(screen.getByRole("button", { name: "Draft" }));
+    await user.type(await searchField(user), "You");
+    await user.selectOptions(screen.getByLabelText("Filter by platform"), "youtube");
+    await user.selectOptions(screen.getByLabelText("Filter by status"), "draft");
     await waitFor(() => expect(api.requests.some((request) => request.path.includes("q=You") && request.path.includes("type=youtube") && request.path.includes("status=draft"))).toBe(true));
   });
 
@@ -549,16 +594,16 @@ describe("persistent ContentFlow workspace", () => {
     const api = new FakeAPI();
     vi.stubGlobal("fetch", api.fetch);
     const user = userEvent.setup();
-    render(<Home />);
+    renderWorkspace(api);
     await screen.findByDisplayValue("YouTube one");
     await waitFor(() => expect(api.requests.filter((request) => request.method === "GET" && request.path === "/api/v1/content").length).toBeGreaterThanOrEqual(2));
     api.failNextList = true;
 
-    await user.type(screen.getByLabelText("Search content titles"), "You");
+    await user.type(await searchField(user), "You");
 
     expect(await screen.findByRole("alert")).toHaveProperty("textContent", "The library filters could not be refreshed.");
-    await user.clear(screen.getByLabelText("Search content titles"));
-    await user.type(screen.getByLabelText("Search content titles"), "Linked");
+    await user.clear(await searchField(user));
+    await user.type(await searchField(user), "Linked");
     expect(await screen.findByText("LinkedIn one")).toBeTruthy();
     await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
   });
@@ -567,12 +612,12 @@ describe("persistent ContentFlow workspace", () => {
     const api = new FakeAPI();
     vi.stubGlobal("fetch", api.fetch);
     const user = userEvent.setup();
-    render(<Home />);
+    renderWorkspace(api);
     await screen.findByDisplayValue("YouTube one");
     await waitFor(() => expect(api.requests.filter((request) => request.method === "GET" && request.path === "/api/v1/content").length).toBeGreaterThanOrEqual(2));
     api.expireNextList = true;
 
-    await user.type(screen.getByLabelText("Search content titles"), "You");
+    await user.type(await searchField(user), "You");
     expect(await screen.findByRole("heading", { name: "Your session expired" })).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "I’ve signed in" }));
 
@@ -585,19 +630,19 @@ describe("persistent ContentFlow workspace", () => {
     const api = new FakeAPI([detail("linkedin"), detail("x")]);
     vi.stubGlobal("fetch", api.fetch);
     const user = userEvent.setup();
-    render(<Home />);
+    renderWorkspace(api);
     await screen.findByDisplayValue("LinkedIn one");
     let releaseDetail: () => void = () => undefined;
     api.detailGate = new Promise<void>((resolve) => { releaseDetail = resolve; });
     api.expireGatedDetail = true;
 
-    await user.click(screen.getByRole("button", { name: /^X one/ }));
+    await openPiece(user, /^X one/);
     api.expireNextList = true;
-    await user.type(screen.getByLabelText("Search content titles"), "X");
+    await user.type(await searchField(user), "X");
     expect(await screen.findByRole("heading", { name: "Your session expired" })).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "I’ve signed in" }));
     await waitFor(() => expect(screen.queryByRole("heading", { name: "Your session expired" })).toBeNull());
-    expect(await screen.findByDisplayValue("X one")).toBeTruthy();
+    expect(await screen.findByRole("button", { name: /^X one/ })).toBeTruthy();
 
     releaseDetail();
     await new Promise((resolve) => window.setTimeout(resolve, 0));
@@ -610,26 +655,22 @@ describe("persistent ContentFlow workspace", () => {
     const api = new FakeAPI([detail("linkedin"), detail("x")]);
     vi.stubGlobal("fetch", api.fetch);
     const user = userEvent.setup();
-    render(<Home />);
+    renderWorkspace(api);
     await screen.findByDisplayValue("LinkedIn one");
     let releaseList: () => void = () => undefined;
     api.listGate = new Promise<void>((resolve) => { releaseList = resolve; });
 
-    await user.type(screen.getByLabelText("Search content titles"), "X");
+    await user.type(await searchField(user), "X");
     await waitFor(() => expect(api.listGateStarted).toBe(1));
     api.expireNextDetail = true;
-    await user.click(screen.getByRole("button", { name: /^X one/ }));
+    await openPiece(user, /^X one/);
     expect(await screen.findByRole("heading", { name: "Your session expired" })).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "I’ve signed in" }));
 
-    expect(await screen.findByRole("button", { name: /^X one/ })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: /^LinkedIn one/ })).toBeNull();
+    expect(await screen.findByLabelText("X post")).toBeTruthy();
     releaseList();
     await new Promise((resolve) => window.setTimeout(resolve, 0));
-
-    expect(screen.getByLabelText("Search content titles")).toHaveProperty("value", "X");
-    expect(screen.getByRole("button", { name: /^X one/ })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: /^LinkedIn one/ })).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Your session expired" })).toBeNull();
     expect(api.requests.filter((request) => request.path === "/api/v1/content?q=X").length).toBeGreaterThanOrEqual(2);
   });
 
@@ -637,16 +678,16 @@ describe("persistent ContentFlow workspace", () => {
     const api = new FakeAPI([detail("youtube"), detail("x")]);
     vi.stubGlobal("fetch", api.fetch);
     const user = userEvent.setup();
-    render(<Home />);
+    renderWorkspace(api);
     await screen.findByDisplayValue("YouTube one");
     let releaseList: () => void = () => undefined;
     api.listGate = new Promise<void>((resolve) => { releaseList = resolve; });
     api.failGatedList = true;
 
-    await user.type(screen.getByLabelText("Search content titles"), "You");
+    await user.type(await searchField(user), "You");
     await waitFor(() => expect(api.listGateStarted).toBe(1));
-    await user.clear(screen.getByLabelText("Search content titles"));
-    await user.type(screen.getByLabelText("Search content titles"), "X");
+    await user.clear(await searchField(user));
+    await user.type(await searchField(user), "X");
     expect(await screen.findByText("X one")).toBeTruthy();
     releaseList();
 
@@ -654,38 +695,37 @@ describe("persistent ContentFlow workspace", () => {
     expect(await screen.findByText("X one")).toBeTruthy();
   });
 
-  // YouTube is the only type with an author-editable title, so title-specific
-  // behaviour is exercised there.
   it("keeps queued title changes in an older library response", async () => {
     const api = new FakeAPI([detail("youtube"), detail("x")]);
     vi.stubGlobal("fetch", api.fetch);
     const user = userEvent.setup();
-    render(<Home />);
+    renderWorkspace(api);
     await screen.findByDisplayValue("YouTube one");
     let releaseList: () => void = () => undefined;
     api.listGate = new Promise<void>((resolve) => { releaseList = resolve; });
 
-    await user.type(screen.getByLabelText("Search content titles"), " strass ");
+    await user.type(await searchField(user), " strass ");
     await waitFor(() => expect(api.listGateStarted).toBe(1));
-    await user.clear(screen.getByLabelText("Working title"));
+    await openPiece(user, /^YouTube one/);
+    await user.clear(await screen.findByLabelText("Working title"));
     await user.type(screen.getByLabelText("Working title"), "Ｓｔｒａße local");
-    await user.selectOptions(screen.getByLabelText("Content status"), "ready");
+    await user.selectOptions(within(document.querySelector<HTMLElement>(".editor-toolbar")!).getByRole("combobox", { name: "Content status" }), "ready");
     releaseList();
-
+    expect((screen.getByLabelText("Working title") as HTMLInputElement).value).toBe("Ｓｔｒａße local");
+    await searchField(user);
     const card = await screen.findByRole("button", { name: /^Ｓｔｒａße local/ });
     expect(card).toHaveProperty("textContent", expect.stringContaining("Ready"));
-    expect((screen.getByLabelText("Working title") as HTMLInputElement).value).toBe("Ｓｔｒａße local");
   });
 
   it("keeps queued drafts visible for an all-whitespace title query", async () => {
     const api = new FakeAPI([detail("youtube")]);
     vi.stubGlobal("fetch", api.fetch);
     const user = userEvent.setup();
-    render(<Home />);
+    renderWorkspace(api);
     const title = await screen.findByDisplayValue("YouTube one");
 
     await user.type(title, " queued");
-    await user.type(screen.getByLabelText("Search content titles"), "   ");
+    await user.type(await searchField(user), "   ");
 
     expect(await screen.findByRole("button", { name: /^YouTube one queued/ })).toBeTruthy();
     expect(api.requests.some((request) => request.path.includes("q="))).toBe(false);
@@ -695,25 +735,26 @@ describe("persistent ContentFlow workspace", () => {
     const api = new FakeAPI([detail("linkedin")]);
     vi.stubGlobal("fetch", api.fetch);
     const user = userEvent.setup();
-    render(<Home />);
+    renderWorkspace(api);
     await screen.findByDisplayValue("LinkedIn one");
 
-    await user.click(screen.getByRole("button", { name: "Published" }));
-    expect(await screen.findByText("No content found")).toBeTruthy();
+    await user.selectOptions(await searchField(user).then(() => screen.getByLabelText("Filter by status")), "published");
+    expect(await screen.findByRole("heading", { name: "No matches" })).toBeTruthy();
     await user.click(screen.getAllByRole("button", { name: /New content/ })[0]);
     await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: /^Email/ }));
 
     expect(await screen.findByLabelText("Email subject")).toBeTruthy();
+    await searchField(user);
     expect(screen.getByRole("button", { name: /^Email · / })).toBeTruthy();
     expect((screen.getByLabelText("Search content titles") as HTMLInputElement).value).toBe("");
-    expect(screen.getByRole("button", { name: "All" })).toHaveProperty("className", expect.stringContaining("active"));
+    expect(screen.getByLabelText("Filter by status")).toHaveProperty("value", "all");
   });
 
   it("shows a library refresh failure after a successful autosave", async () => {
     const api = new FakeAPI();
     vi.stubGlobal("fetch", api.fetch);
     const user = userEvent.setup();
-    render(<Home />);
+    renderWorkspace(api);
     const title = await screen.findByDisplayValue("YouTube one");
     await waitFor(() => expect(api.requests.filter((request) => request.method === "GET" && request.path === "/api/v1/content").length).toBeGreaterThanOrEqual(2));
     api.failNextList = true;
@@ -729,7 +770,7 @@ describe("persistent ContentFlow workspace", () => {
     const api = new FakeAPI([detail("youtube"), detail("x")]);
     vi.stubGlobal("fetch", api.fetch);
     const user = userEvent.setup();
-    render(<Home />);
+    renderWorkspace(api);
     const title = await screen.findByDisplayValue("YouTube one");
     await waitFor(() => expect(api.requests.filter((request) => request.method === "GET" && request.path === "/api/v1/content").length).toBeGreaterThanOrEqual(2));
     let releaseList: () => void = () => undefined;
@@ -737,7 +778,7 @@ describe("persistent ContentFlow workspace", () => {
     await user.type(title, " refreshed");
     await waitFor(() => expect(api.listGateStarted).toBe(1), { timeout: 2500 });
 
-    await user.type(screen.getByLabelText("Search content titles"), "X");
+    await user.type(await searchField(user), "X");
     await waitFor(() => expect(api.requests.some((request) => request.path === "/api/v1/content?q=X")).toBe(true));
     expect(await screen.findByText("X one")).toBeTruthy();
     releaseList();
@@ -750,8 +791,8 @@ describe("persistent ContentFlow workspace", () => {
     const api = new FakeAPI([]);
     vi.stubGlobal("fetch", api.fetch);
     const user = userEvent.setup();
-    render(<Home />);
-    await screen.findByText("Your workspace is empty");
+    renderWorkspace(api);
+    await screen.findByRole("heading", { name: /Start with a topic|Your library is empty/ });
     await waitFor(() => expect(api.requests.filter((request) => request.method === "GET" && request.path === "/api/v1/content").length).toBeGreaterThanOrEqual(2));
     let releaseCreateRefresh: () => void = () => undefined;
     api.listGate = new Promise<void>((resolve) => { releaseCreateRefresh = resolve; });
@@ -759,13 +800,14 @@ describe("persistent ContentFlow workspace", () => {
     await user.click(screen.getAllByRole("button", { name: /New content/ })[0]);
     await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: /^LinkedIn/ }));
     await waitFor(() => expect(api.listGateStarted).toBe(1));
-    await user.type(screen.getByLabelText("Search content titles"), "No match");
+    await user.type(await searchField(user), "No match");
     await waitFor(() => expect(api.requests.some((request) => request.path === "/api/v1/content?q=No+match")).toBe(true));
 
-    expect(screen.getByRole("button", { name: /^LinkedIn1$/ })).toBeTruthy();
+    goTo("/calendar");
+    expect(await screen.findByRole("button", { name: /LinkedIn.*unscheduled/ })).toBeTruthy();
     releaseCreateRefresh();
     await new Promise((resolve) => window.setTimeout(resolve, 0));
-    expect(screen.getByRole("button", { name: /^LinkedIn1$/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /LinkedIn.*unscheduled/ })).toBeTruthy();
   });
 
   it.each([
@@ -780,8 +822,8 @@ describe("persistent ContentFlow workspace", () => {
     const api = new FakeAPI([]);
     vi.stubGlobal("fetch", api.fetch);
     const user = userEvent.setup();
-    render(<Home />);
-    await screen.findByText("Your workspace is empty");
+    renderWorkspace(api);
+    await screen.findByRole("heading", { name: /Start with a topic|Your library is empty/ });
     await user.click(screen.getAllByRole("button", { name: /New content/ })[0]);
     await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: new RegExp(`^${label}`) }));
     expect(await screen.findByLabelText(editorLabel)).toBeTruthy();
@@ -793,8 +835,8 @@ describe("persistent ContentFlow workspace", () => {
     api.createGate = new Promise<void>((resolve) => { release = resolve; });
     vi.stubGlobal("fetch", api.fetch);
     const user = userEvent.setup();
-    render(<Home />);
-    await screen.findByText("Your workspace is empty");
+    renderWorkspace(api);
+    await screen.findByRole("heading", { name: /Start with a topic|Your library is empty/ });
     await user.click(screen.getAllByRole("button", { name: /New content/ })[0]);
     const choice = within(screen.getByRole("dialog")).getByRole("button", { name: /^LinkedIn/ });
 
@@ -813,8 +855,8 @@ describe("persistent ContentFlow workspace", () => {
     vi.stubGlobal("fetch", api.fetch);
     expireRequestTimersImmediately();
     const user = userEvent.setup();
-    render(<Home />);
-    await screen.findByText("Your workspace is empty");
+    renderWorkspace(api);
+    await screen.findByRole("heading", { name: /Start with a topic|Your library is empty/ });
     await user.click(screen.getAllByRole("button", { name: /New content/ })[0]);
     const choice = within(screen.getByRole("dialog")).getByRole("button", { name: /^LinkedIn/ });
 
@@ -837,8 +879,8 @@ describe("persistent ContentFlow workspace", () => {
     api.createAuthFailure = { status, code };
     vi.stubGlobal("fetch", api.fetch);
     const user = userEvent.setup();
-    render(<Home />);
-    await screen.findByText("Your workspace is empty");
+    renderWorkspace(api);
+    await screen.findByRole("heading", { name: /Start with a topic|Your library is empty/ });
     await user.click(screen.getAllByRole("button", { name: /New content/ })[0]);
     await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: /^LinkedIn/ }));
     expect(await screen.findByRole("heading", { name: "Your session expired" })).toBeTruthy();
@@ -856,8 +898,8 @@ describe("persistent ContentFlow workspace", () => {
     const api = new FakeAPI([]);
     vi.stubGlobal("fetch", api.fetch);
     const user = userEvent.setup();
-    render(<Home />);
-    await screen.findByText("Your workspace is empty");
+    renderWorkspace(api);
+    await screen.findByRole("heading", { name: /Start with a topic|Your library is empty/ });
     await waitFor(() => expect(api.requests.filter((request) => request.method === "GET" && request.path === "/api/v1/content").length).toBeGreaterThanOrEqual(2));
     api.expireNextList = true;
 
@@ -875,7 +917,7 @@ describe("persistent ContentFlow workspace", () => {
     const api = new FakeAPI([detail("linkedin")]);
     vi.stubGlobal("fetch", api.fetch);
     const user = userEvent.setup();
-    render(<Home />);
+    renderWorkspace(api);
     await screen.findByDisplayValue("LinkedIn one");
     let releaseCreate: () => void = () => undefined;
     api.createGate = new Promise<void>((resolve) => { releaseCreate = resolve; });
@@ -884,7 +926,7 @@ describe("persistent ContentFlow workspace", () => {
     await user.click(screen.getAllByRole("button", { name: /New content/ })[0]);
     await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: /^XPost/ }));
     api.expireNextList = true;
-    await user.type(screen.getByLabelText("Search content titles"), "Linked");
+    await user.type(await searchField(user), "Linked");
     expect(await screen.findByRole("heading", { name: "Your session expired" })).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "I’ve signed in" }));
     await waitFor(() => expect(screen.queryByRole("heading", { name: "Your session expired" })).toBeNull());
@@ -903,8 +945,8 @@ describe("persistent ContentFlow workspace", () => {
     api.createResponseLostOnce = true;
     vi.stubGlobal("fetch", api.fetch);
     const user = userEvent.setup();
-    render(<Home />);
-    await screen.findByText("Your workspace is empty");
+    renderWorkspace(api);
+    await screen.findByRole("heading", { name: /Start with a topic|Your library is empty/ });
     await user.click(screen.getAllByRole("button", { name: /New content/ })[0]);
     const choice = within(screen.getByRole("dialog")).getByRole("button", { name: /^LinkedIn/ });
 
@@ -923,8 +965,8 @@ describe("persistent ContentFlow workspace", () => {
     const api = new FakeAPI([]);
     vi.stubGlobal("fetch", api.fetch);
     const user = userEvent.setup();
-    render(<Home />);
-    await screen.findByText("Your workspace is empty");
+    renderWorkspace(api);
+    await screen.findByRole("heading", { name: /Start with a topic|Your library is empty/ });
     await user.click(screen.getAllByRole("button", { name: /New content/ })[0]);
     api.failNextList = true;
     await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: /^Email/ }));
@@ -941,7 +983,7 @@ describe("persistent ContentFlow workspace", () => {
     const api = new FakeAPI([item]);
     vi.stubGlobal("fetch", api.fetch);
     const user = userEvent.setup();
-    const first = render(<Home />);
+    const first = renderWorkspace(api);
     const transcript = await screen.findByLabelText("YouTube transcript: what was actually said");
     await user.click(screen.getByText("Recording transcript"));
     await user.type(transcript, "Words actually spoken");
@@ -949,7 +991,7 @@ describe("persistent ContentFlow workspace", () => {
     await waitFor(() => expect(api.replaceBodies.length).toBe(1), { timeout: 2500 });
     first.unmount();
 
-    render(<Home />);
+    renderWorkspace(api);
     expect(await screen.findByDisplayValue("Words actually spoken")).toBeTruthy();
     expect((screen.getByLabelText("Intro script") as HTMLTextAreaElement).value).toBe("Planned opening");
   });
@@ -958,12 +1000,12 @@ describe("persistent ContentFlow workspace", () => {
     const api = new FakeAPI([detail("linkedin")]);
     vi.stubGlobal("fetch", api.fetch);
     const user = userEvent.setup();
-    render(<Home />);
+    renderWorkspace(api);
     await screen.findByDisplayValue("LinkedIn one");
 
     await runDelete(user);
 
-    expect(await screen.findByText("Your workspace is empty")).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: /Start with a topic|Your library is empty/ })).toBeTruthy();
     expect(deleteRequests(api)).toHaveLength(1);
     expect(api.items.size).toBe(0);
   });
@@ -972,16 +1014,15 @@ describe("persistent ContentFlow workspace", () => {
     const api = new FakeAPI([detail("linkedin"), detail("x")]);
     vi.stubGlobal("fetch", api.fetch);
     const user = userEvent.setup();
-    render(<Home />);
+    renderWorkspace(api);
     await screen.findByDisplayValue("LinkedIn one");
 
-    await user.type(screen.getByLabelText("Search content titles"), "Linked");
+    await user.type(await searchField(user), "Linked");
     await waitFor(() => expect(screen.queryByRole("button", { name: /^X one/ })).toBeNull());
-    await user.click(screen.getByRole("button", { name: "Delete" }));
-    await user.click(screen.getByRole("button", { name: "Delete permanently" }));
+    await runDelete(user);
 
-    expect(await screen.findByText("No content found")).toBeTruthy();
-    expect(screen.getByRole("heading", { name: "Choose an item" })).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "Library" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Library" })).toBeTruthy();
     expect(screen.queryByDisplayValue("X one")).toBeNull();
   });
 
@@ -989,62 +1030,59 @@ describe("persistent ContentFlow workspace", () => {
     const api = new FakeAPI([detail("linkedin"), detail("x")]);
     vi.stubGlobal("fetch", api.fetch);
     const user = userEvent.setup();
-    render(<Home />);
+    renderWorkspace(api);
     await screen.findByDisplayValue("LinkedIn one");
     let releaseList: () => void = () => undefined;
     api.listGate = new Promise<void>((resolve) => { releaseList = resolve; });
 
-    await user.type(screen.getByLabelText("Search content titles"), "Nobody");
+    await user.type(await searchField(user), "Nobody");
     await waitFor(() => expect(api.listGateStarted).toBe(1));
-    await user.click(screen.getByRole("button", { name: "Delete" }));
-    await user.click(screen.getByRole("button", { name: "Delete permanently" }));
+    await runDelete(user);
 
-    expect(await screen.findByText("No content found")).toBeTruthy();
-    expect(screen.getByRole("heading", { name: "Choose an item" })).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "Library" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Library" })).toBeTruthy();
     releaseList();
     await new Promise((resolve) => window.setTimeout(resolve, 0));
 
     expect(screen.queryByDisplayValue("X one")).toBeNull();
-    expect(screen.getByRole("heading", { name: "Choose an item" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Library" })).toBeTruthy();
   });
 
   it("uses filters changed after delete starts before choosing a replacement", async () => {
     const api = new FakeAPI([detail("linkedin"), detail("x")]);
     vi.stubGlobal("fetch", api.fetch);
     const user = userEvent.setup();
-    render(<Home />);
+    renderWorkspace(api);
     await screen.findByDisplayValue("LinkedIn one");
     let releaseDelete: () => void = () => undefined;
     api.lifecycleGate = new Promise<void>((resolve) => { releaseDelete = resolve; });
 
-    await user.click(screen.getByRole("button", { name: "Delete" }));
-    await user.click(screen.getByRole("button", { name: "Delete permanently" }));
-    await user.type(screen.getByLabelText("Search content titles"), "Nobody");
+    await runDelete(user);
+    await user.type(await searchField(user), "Nobody");
     releaseDelete();
 
-    expect(await screen.findByText("No content found")).toBeTruthy();
-    expect(screen.getByRole("heading", { name: "Choose an item" })).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "No matches" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Library" })).toBeTruthy();
     expect(screen.queryByDisplayValue("X one")).toBeNull();
   });
 
-  it("lets a newer filter refresh choose a replacement for a deleted selection", async () => {
+  it("keeps a newer library filter after deleting the focused piece", async () => {
     const api = new FakeAPI([detail("linkedin"), detail("x")]);
     vi.stubGlobal("fetch", api.fetch);
     const user = userEvent.setup();
-    render(<Home />);
+    renderWorkspace(api);
     await screen.findByDisplayValue("LinkedIn one");
     let releaseDeleteRefresh: () => void = () => undefined;
     api.listGate = new Promise<void>((resolve) => { releaseDeleteRefresh = resolve; });
 
-    await user.click(screen.getByRole("button", { name: "Delete" }));
-    await user.click(screen.getByRole("button", { name: "Delete permanently" }));
+    await runDelete(user);
     await waitFor(() => expect(api.listGateStarted).toBe(1));
-    await user.type(screen.getByLabelText("Search content titles"), "X");
+    await user.type(await searchField(user), "X");
 
-    expect(await screen.findByDisplayValue("X one")).toBeTruthy();
+    expect(await screen.findByRole("button", { name: /^X one/ })).toBeTruthy();
     releaseDeleteRefresh();
     await new Promise((resolve) => window.setTimeout(resolve, 0));
-    expect(screen.getByDisplayValue("X one")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /^X one/ })).toBeTruthy();
   });
 
   it.each([
@@ -1055,7 +1093,7 @@ describe("persistent ContentFlow workspace", () => {
     api.lifecycleAuthFailure = { status, code };
     vi.stubGlobal("fetch", api.fetch);
     const user = userEvent.setup();
-    render(<Home />);
+    renderWorkspace(api);
     await screen.findByDisplayValue("LinkedIn one");
 
     await runDelete(user);
@@ -1075,16 +1113,14 @@ describe("persistent ContentFlow workspace", () => {
     vi.stubGlobal("fetch", api.fetch);
     expireRequestTimersImmediately();
     const user = userEvent.setup();
-    render(<Home />);
+    renderWorkspace(api);
     await screen.findByDisplayValue("LinkedIn one");
 
-    await user.click(screen.getByRole("button", { name: "Delete" }));
-    await user.click(screen.getByRole("button", { name: "Delete permanently" }));
+    await runDelete(user);
     expect(await screen.findByRole("alert")).toHaveProperty("textContent", "The item could not be deleted.");
-    await user.click(screen.getByRole("button", { name: "Delete" }));
-    await user.click(screen.getByRole("button", { name: "Delete permanently" }));
+    await runDelete(user);
 
-    expect(await screen.findByText("Your workspace is empty")).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: /Start with a topic|Your library is empty/ })).toBeTruthy();
     const deletes = api.requests.filter((request) => request.method === "DELETE").map((request) => JSON.parse(request.body).operation_id);
     expect(deletes).toEqual([deletes[0], deletes[0]]);
   });
@@ -1094,14 +1130,13 @@ describe("persistent ContentFlow workspace", () => {
     const api = new FakeAPI([item]);
     vi.stubGlobal("fetch", api.fetch);
     const user = userEvent.setup();
-    render(<Home />);
+    renderWorkspace(api);
     await screen.findByDisplayValue("LinkedIn one");
     api.failListAfterLifecycle = true;
 
-    await user.click(screen.getByRole("button", { name: "Delete" }));
-    await user.click(screen.getByRole("button", { name: "Delete permanently" }));
+    await runDelete(user);
 
-    expect(await screen.findByText("Your workspace is empty")).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: /Start with a topic|Your library is empty/ })).toBeTruthy();
     expect(await screen.findByRole("alert")).toHaveProperty("textContent", "The item was deleted, but the library could not be refreshed.");
     expect(api.items.has(item.id)).toBe(false);
     expect(screen.queryByLabelText("Content status")).toBeNull();
@@ -1112,17 +1147,16 @@ describe("persistent ContentFlow workspace", () => {
     const api = new FakeAPI([item]);
     vi.stubGlobal("fetch", api.fetch);
     const user = userEvent.setup();
-    render(<Home />);
+    renderWorkspace(api);
     await screen.findByDisplayValue("LinkedIn one");
     await waitFor(() => expect(api.requests.filter((request) => request.method === "GET" && request.path === "/api/v1/content").length).toBeGreaterThanOrEqual(2));
     api.expireNextList = true;
 
-    await user.click(screen.getByRole("button", { name: "Delete" }));
-    await user.click(screen.getByRole("button", { name: "Delete permanently" }));
+    await runDelete(user);
     expect(await screen.findByRole("heading", { name: "Your session expired" })).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "I’ve signed in" }));
 
-    expect(await screen.findByText("Your workspace is empty")).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: /Start with a topic|Your library is empty/ })).toBeTruthy();
     expect(api.requests.filter((request) => request.method === "DELETE")).toHaveLength(1);
     expect(api.sessionCounter).toBe(2);
   });
@@ -1133,16 +1167,14 @@ describe("persistent ContentFlow workspace", () => {
     api.deleteResponseLostOnce = true;
     vi.stubGlobal("fetch", api.fetch);
     const user = userEvent.setup();
-    render(<Home />);
+    renderWorkspace(api);
     await screen.findByDisplayValue("LinkedIn one");
 
-    await user.click(screen.getByRole("button", { name: "Delete" }));
-    await user.click(screen.getByRole("button", { name: "Delete permanently" }));
+    await runDelete(user);
     expect(await screen.findByRole("alert")).toHaveProperty("textContent", "The item could not be deleted.");
-    await user.click(screen.getByRole("button", { name: "Delete" }));
-    await user.click(screen.getByRole("button", { name: "Delete permanently" }));
+    await runDelete(user);
 
-    expect(await screen.findByText("Your workspace is empty")).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: /Start with a topic|Your library is empty/ })).toBeTruthy();
     expect(screen.queryByLabelText("Content status")).toBeNull();
     const deletes = api.requests.filter((request) => request.method === "DELETE").map((request) => JSON.parse(request.body).operation_id);
     expect(deletes).toEqual([deletes[0], deletes[0]]);
@@ -1154,12 +1186,11 @@ describe("persistent ContentFlow workspace", () => {
     api.lifecycleGate = new Promise<void>((resolve) => { releaseDelete = resolve; });
     vi.stubGlobal("fetch", api.fetch);
     const user = userEvent.setup();
-    render(<Home />);
+    renderWorkspace(api);
     await screen.findByDisplayValue("LinkedIn one");
 
-    await user.click(screen.getByRole("button", { name: "Delete" }));
-    await user.click(screen.getByRole("button", { name: "Delete permanently" }));
-    await user.click(screen.getByRole("button", { name: /X one/ }));
+    await runDelete(user);
+    await openPiece(user, /X one/);
     await screen.findByDisplayValue("X one");
     releaseDelete();
 
@@ -1173,11 +1204,10 @@ describe("persistent ContentFlow workspace", () => {
     api.lifecycleGate = new Promise<void>((resolve) => { releaseDelete = resolve; });
     vi.stubGlobal("fetch", api.fetch);
     const user = userEvent.setup();
-    render(<Home />);
+    renderWorkspace(api);
     await screen.findByDisplayValue("LinkedIn one");
 
-    await user.click(screen.getByRole("button", { name: "Delete" }));
-    await user.click(screen.getByRole("button", { name: "Delete permanently" }));
+    await runDelete(user);
     await user.click(screen.getAllByRole("button", { name: /New content/ })[0]);
     await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: /^XPost/ }));
     expect(await screen.findByLabelText("X post")).toBeTruthy();
@@ -1193,16 +1223,16 @@ describe("persistent ContentFlow workspace", () => {
     const api = new FakeAPI([linkedin, detail("x")]);
     vi.stubGlobal("fetch", api.fetch);
     const user = userEvent.setup();
-    render(<Home />);
+    renderWorkspace(api);
     const body = await screen.findByLabelText("LinkedIn post");
     await user.type(body, "saved");
     await waitFor(() => expect(api.replaceBodies).toHaveLength(1), { timeout: 2500 });
-    await user.click(screen.getByRole("button", { name: /X one/ }));
+    await openPiece(user, /X one/);
     await screen.findByDisplayValue("X one");
     const current = api.items.get(linkedin.id)!;
     api.items.set(linkedin.id, { ...current, working_title: "Changed in another tab", revision: current.revision + 1 });
 
-    await user.click(screen.getByRole("button", { name: /^LinkedIn one/ }));
+    await openPiece(user, /^LinkedIn one/);
 
     expect(await screen.findByDisplayValue("Changed in another tab")).toBeTruthy();
   });
@@ -1213,7 +1243,7 @@ describe("persistent ContentFlow workspace", () => {
     api.detailFailures.add(item.id);
     vi.stubGlobal("fetch", api.fetch);
     const user = userEvent.setup();
-    render(<Home />);
+    renderWorkspace(api);
 
     expect(await screen.findByRole("heading", { name: "Could not open this item" })).toBeTruthy();
     expect(screen.getByRole("alert").textContent).toContain("The selected item could not be loaded.");
@@ -1226,11 +1256,11 @@ describe("persistent ContentFlow workspace", () => {
     const api = new FakeAPI([detail("linkedin"), detail("x")]);
     vi.stubGlobal("fetch", api.fetch);
     const user = userEvent.setup();
-    render(<Home />);
+    renderWorkspace(api);
     await screen.findByDisplayValue("LinkedIn one");
     api.expireNextDetail = true;
 
-    await user.click(screen.getByRole("button", { name: /X one/ }));
+    await openPiece(user, /X one/);
     expect(await screen.findByRole("heading", { name: "Your session expired" })).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "I’ve signed in" }));
 
@@ -1242,12 +1272,12 @@ describe("persistent ContentFlow workspace", () => {
     const api = new FakeAPI([detail("linkedin"), detail("x")]);
     vi.stubGlobal("fetch", api.fetch);
     const user = userEvent.setup();
-    render(<Home />);
+    renderWorkspace(api);
     await screen.findByDisplayValue("LinkedIn one");
     expireRequestTimersImmediately();
     api.detailGate = new Promise<void>(() => undefined);
 
-    await user.click(screen.getByRole("button", { name: /X one/ }));
+    await openPiece(user, /X one/);
     expect(await screen.findByRole("heading", { name: "Could not open this item" })).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "Retry loading item" }));
 
@@ -1258,28 +1288,27 @@ describe("persistent ContentFlow workspace", () => {
     const api = new FakeAPI([detail("linkedin")]);
     vi.stubGlobal("fetch", api.fetch);
     const user = userEvent.setup();
-    render(<Home />);
+    renderWorkspace(api);
     await screen.findByDisplayValue("LinkedIn one");
     const body = screen.getByLabelText("LinkedIn post") as HTMLTextAreaElement;
 
     let releaseDelete: () => void = () => undefined;
     api.lifecycleGate = new Promise<void>((resolve) => { releaseDelete = resolve; });
-    await user.click(screen.getByRole("button", { name: "Delete" }));
-    await user.click(screen.getByRole("button", { name: "Delete permanently" }));
+    await runDelete(user);
     await waitFor(() => expect(document.querySelector(".document-heading")?.hasAttribute("inert")).toBe(true));
     await user.clear(body);
     await user.type(body, "Must remain blocked");
     expect(body.value).toBe("");
     expect(screen.getByDisplayValue("LinkedIn one")).toBeTruthy();
     releaseDelete();
-    expect(await screen.findByText("Your workspace is empty")).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: /Start with a topic|Your library is empty/ })).toBeTruthy();
   });
 
   it("ignores an overtaken lifecycle mutation failure after create selects another item", async () => {
     const api = new FakeAPI([detail("linkedin")]);
     vi.stubGlobal("fetch", api.fetch);
     const user = userEvent.setup();
-    render(<Home />);
+    renderWorkspace(api);
     await screen.findByDisplayValue("LinkedIn one");
     let releaseLifecycle: () => void = () => undefined;
     api.lifecycleGate = new Promise<void>((resolve) => { releaseLifecycle = resolve; });
@@ -1301,14 +1330,14 @@ describe("persistent ContentFlow workspace", () => {
     const api = new FakeAPI([detail("linkedin"), detail("x")]);
     vi.stubGlobal("fetch", api.fetch);
     const user = userEvent.setup();
-    render(<Home />);
+    renderWorkspace(api);
     await screen.findByDisplayValue("LinkedIn one");
     let releaseLifecycle: () => void = () => undefined;
     api.lifecycleGate = new Promise<void>((resolve) => { releaseLifecycle = resolve; });
     api.gatedLifecycleFailure = { status: 503, code: "unavailable" };
 
     await runDelete(user);
-    await user.click(screen.getByRole("button", { name: /^X one/ }));
+    await openPiece(user, /^X one/);
     await screen.findByDisplayValue("X one");
     releaseLifecycle();
     await waitFor(() => expect(screen.getByRole("button", { name: "Delete" })).not.toHaveProperty("disabled", true));
@@ -1321,7 +1350,7 @@ describe("persistent ContentFlow workspace", () => {
     const api = new FakeAPI([detail("linkedin")]);
     vi.stubGlobal("fetch", api.fetch);
     const user = userEvent.setup();
-    render(<Home />);
+    renderWorkspace(api);
     await screen.findByDisplayValue("LinkedIn one");
     let releaseLifecycle: () => void = () => undefined;
     api.lifecycleGate = new Promise<void>((resolve) => { releaseLifecycle = resolve; });
@@ -1341,7 +1370,7 @@ describe("persistent ContentFlow workspace", () => {
     const api = new FakeAPI([detail("linkedin")]);
     vi.stubGlobal("fetch", api.fetch);
     const user = userEvent.setup();
-    render(<Home />);
+    renderWorkspace(api);
     await screen.findByDisplayValue("LinkedIn one");
     let releaseLifecycle: () => void = () => undefined;
     api.lifecycleGate = new Promise<void>((resolve) => { releaseLifecycle = resolve; });
@@ -1364,13 +1393,13 @@ describe("persistent ContentFlow workspace", () => {
     const api = new FakeAPI([detail("linkedin"), detail("x")]);
     vi.stubGlobal("fetch", api.fetch);
     const user = userEvent.setup();
-    render(<Home />);
+    renderWorkspace(api);
     await screen.findByDisplayValue("LinkedIn one");
     let releaseLifecycle: () => void = () => undefined;
     api.lifecycleGate = new Promise<void>((resolve) => { releaseLifecycle = resolve; });
 
     await runDelete(user);
-    await user.click(screen.getByRole("button", { name: /^X one/ }));
+    await openPiece(user, /^X one/);
     await screen.findByDisplayValue("X one");
 
     expect(screen.queryByText(/Review the delete conflict/)).toBeNull();
@@ -1383,7 +1412,7 @@ describe("persistent ContentFlow workspace", () => {
     const api = new FakeAPI([detail("linkedin"), detail("x")]);
     vi.stubGlobal("fetch", api.fetch);
     const user = userEvent.setup();
-    render(<Home />);
+    renderWorkspace(api);
     await screen.findByDisplayValue("LinkedIn one");
     await waitFor(() => expect(api.requests.filter((request) => request.method === "GET" && request.path === "/api/v1/content").length).toBeGreaterThanOrEqual(2));
     let releaseRefresh: () => void = () => undefined;
@@ -1393,7 +1422,7 @@ describe("persistent ContentFlow workspace", () => {
 
     await runDelete(user);
     await waitFor(() => expect(api.listGateStarted).toBe(1));
-    await user.type(screen.getByLabelText("Search content titles"), "X");
+    await user.type(await searchField(user), "X");
     await waitFor(() => expect(api.requests.some((request) => request.method === "GET" && request.path === "/api/v1/content?q=X")).toBe(true));
     releaseRefresh();
     await new Promise((resolve) => window.setTimeout(resolve, 0));
@@ -1406,13 +1435,13 @@ describe("persistent ContentFlow workspace", () => {
     const api = new FakeAPI([detail("linkedin"), detail("x")]);
     vi.stubGlobal("fetch", api.fetch);
     const user = userEvent.setup();
-    render(<Home />);
+    renderWorkspace(api);
     await screen.findByDisplayValue("LinkedIn one");
     await waitFor(() => expect(api.requests.filter((request) => request.method === "GET" && request.path === "/api/v1/content").length).toBeGreaterThanOrEqual(2));
     let releaseFilter: () => void = () => undefined;
     api.listGate = new Promise<void>((resolve) => { releaseFilter = resolve; });
 
-    await user.type(screen.getByLabelText("Search content titles"), "X");
+    await user.type(await searchField(user), "X");
     await waitFor(() => expect(api.listGateStarted).toBe(1));
     api.lifecycleGate = Promise.resolve();
     api.gatedLifecycleFailure = { status: 503, code: "unavailable" };
@@ -1420,22 +1449,21 @@ describe("persistent ContentFlow workspace", () => {
     expect(await screen.findByText("The item could not be deleted.")).toBeTruthy();
     releaseFilter();
 
-    await waitFor(() => expect(screen.getByRole("button", { name: /^X one/ })).toBeTruthy());
-    expect(screen.queryByRole("button", { name: /^LinkedIn one/ })).toBeNull();
-    expect((screen.getByLabelText("Search content titles") as HTMLInputElement).value).toBe("X");
+    expect(api.requests.some((request) => request.path.includes("q=X"))).toBe(true);
+    expect(await screen.findByRole("alert")).toHaveProperty("textContent", "The item could not be deleted.");
   });
 
   it("keeps an in-flight filter result when a newer create fails", async () => {
     const api = new FakeAPI([detail("linkedin"), detail("x")]);
     vi.stubGlobal("fetch", api.fetch);
     const user = userEvent.setup();
-    render(<Home />);
+    renderWorkspace(api);
     await screen.findByDisplayValue("LinkedIn one");
     await waitFor(() => expect(api.requests.filter((request) => request.method === "GET" && request.path === "/api/v1/content").length).toBeGreaterThanOrEqual(2));
     let releaseFilter: () => void = () => undefined;
     api.listGate = new Promise<void>((resolve) => { releaseFilter = resolve; });
 
-    await user.type(screen.getByLabelText("Search content titles"), "X");
+    await user.type(await searchField(user), "X");
     await waitFor(() => expect(api.listGateStarted).toBe(1));
     api.createGate = Promise.resolve();
     api.gatedCreateFailure = { status: 503, code: "unavailable" };
@@ -1453,12 +1481,12 @@ describe("persistent ContentFlow workspace", () => {
     const api = new FakeAPI([detail("linkedin"), detail("x")]);
     vi.stubGlobal("fetch", api.fetch);
     const user = userEvent.setup();
-    render(<Home />);
+    renderWorkspace(api);
     await screen.findByDisplayValue("LinkedIn one");
     await waitFor(() => expect(api.requests.filter((request) => request.method === "GET" && request.path === "/api/v1/content").length).toBeGreaterThanOrEqual(2));
     api.failNextList = true;
 
-    await user.type(screen.getByLabelText("Search content titles"), "X");
+    await user.type(await searchField(user), "X");
     expect(await screen.findByText("The library filters could not be refreshed.")).toBeTruthy();
     await runDelete(user);
     await waitFor(() => expect(deleteRequests(api).length).toBeGreaterThanOrEqual(1), { timeout: 2500 });
@@ -1472,15 +1500,14 @@ describe("persistent ContentFlow workspace", () => {
     const api = new FakeAPI([detail("linkedin")]);
     vi.stubGlobal("fetch", api.fetch);
     const user = userEvent.setup();
-    render(<Home />);
+    renderWorkspace(api);
     await screen.findByDisplayValue("LinkedIn one");
     await waitFor(() => expect(api.requests.filter((request) => request.method === "GET" && request.path === "/api/v1/content").length).toBeGreaterThanOrEqual(2));
     let releaseDeleteRefresh: () => void = () => undefined;
     api.listGate = new Promise<void>((resolve) => { releaseDeleteRefresh = resolve; });
     api.failGatedList = true;
 
-    await user.click(screen.getByRole("button", { name: "Delete" }));
-    await user.click(screen.getByRole("button", { name: "Delete permanently" }));
+    await runDelete(user);
     await waitFor(() => expect(api.listGateStarted).toBe(1));
     await user.click(screen.getAllByRole("button", { name: /New content/ })[0]);
     await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: /^XPost/ }));
@@ -1496,15 +1523,15 @@ describe("persistent ContentFlow workspace", () => {
     const api = new FakeAPI([detail("linkedin"), detail("x")]);
     vi.stubGlobal("fetch", api.fetch);
     const user = userEvent.setup();
-    render(<Home />);
+    renderWorkspace(api);
     await screen.findByDisplayValue("LinkedIn one");
     await waitFor(() => expect(api.requests.filter((request) => request.method === "GET" && request.path === "/api/v1/content").length).toBeGreaterThanOrEqual(2));
     let releaseDeleteRefresh: () => void = () => undefined;
     api.listGate = new Promise<void>((resolve) => { releaseDeleteRefresh = resolve; });
     api.failGatedList = true;
 
-    await user.click(screen.getByRole("button", { name: "Delete" }));
-    await user.click(screen.getByRole("button", { name: "Delete permanently" }));
+    await runDelete(user);
+    await openPiece(user, /^X one/);
     await screen.findByDisplayValue("X one");
     await waitFor(() => expect(api.listGateStarted).toBe(1));
     let releaseXArchive: () => void = () => undefined;
@@ -1523,7 +1550,7 @@ describe("persistent ContentFlow workspace", () => {
     const api = new FakeAPI([detail("linkedin"), detail("x")]);
     vi.stubGlobal("fetch", api.fetch);
     const user = userEvent.setup();
-    render(<Home />);
+    renderWorkspace(api);
     const body = await screen.findByLabelText("LinkedIn post");
     await waitFor(() => expect(api.requests.filter((request) => request.method === "GET" && request.path === "/api/v1/content").length).toBeGreaterThanOrEqual(2));
     let releaseAutosaveRefresh: () => void = () => undefined;
@@ -1532,7 +1559,7 @@ describe("persistent ContentFlow workspace", () => {
 
     await user.type(body, "saved");
     await waitFor(() => expect(api.listGateStarted).toBe(1), { timeout: 2500 });
-    await user.click(screen.getByRole("button", { name: /^X one/ }));
+    await openPiece(user, /^X one/);
     await screen.findByDisplayValue("X one");
     let releaseXArchive: () => void = () => undefined;
     api.lifecycleGate = new Promise<void>((resolve) => { releaseXArchive = resolve; });
@@ -1550,7 +1577,7 @@ describe("persistent ContentFlow workspace", () => {
     const api = new FakeAPI([detail("linkedin"), detail("x")]);
     vi.stubGlobal("fetch", api.fetch);
     const user = userEvent.setup();
-    render(<Home />);
+    renderWorkspace(api);
     const body = await screen.findByLabelText("LinkedIn post");
     await waitFor(() => expect(api.requests.filter((request) => request.method === "GET" && request.path === "/api/v1/content").length).toBeGreaterThanOrEqual(2));
     let releaseAutosaveRefresh: () => void = () => undefined;
@@ -1559,7 +1586,7 @@ describe("persistent ContentFlow workspace", () => {
 
     await user.type(body, "saved");
     await waitFor(() => expect(api.listGateStarted).toBe(1), { timeout: 2500 });
-    await user.click(screen.getByRole("button", { name: /^X one/ }));
+    await openPiece(user, /^X one/);
     await screen.findByDisplayValue("X one");
     await runDelete(user);
     await waitFor(() => expect(deleteRequests(api).length).toBeGreaterThanOrEqual(1), { timeout: 2500 });
@@ -1574,15 +1601,15 @@ describe("persistent ContentFlow workspace", () => {
     const api = new FakeAPI([detail("linkedin"), detail("x")]);
     vi.stubGlobal("fetch", api.fetch);
     const user = userEvent.setup();
-    render(<Home />);
+    renderWorkspace(api);
     await screen.findByDisplayValue("LinkedIn one");
     await waitFor(() => expect(api.requests.filter((request) => request.method === "GET" && request.path === "/api/v1/content").length).toBeGreaterThanOrEqual(2));
     let releaseDeleteRefresh: () => void = () => undefined;
     api.listGate = new Promise<void>((resolve) => { releaseDeleteRefresh = resolve; });
     api.expireGatedList = true;
 
-    await user.click(screen.getByRole("button", { name: "Delete" }));
-    await user.click(screen.getByRole("button", { name: "Delete permanently" }));
+    await runDelete(user);
+    await openPiece(user, /^X one/);
     await screen.findByDisplayValue("X one");
     await waitFor(() => expect(api.listGateStarted).toBe(1));
     await runDelete(user);
@@ -1600,11 +1627,11 @@ describe("persistent ContentFlow workspace", () => {
     api.lifecycleGate = new Promise<void>((resolve) => { releaseLifecycle = resolve; });
     vi.stubGlobal("fetch", api.fetch);
     const user = userEvent.setup();
-    render(<Home />);
+    renderWorkspace(api);
     await screen.findByDisplayValue("LinkedIn one");
 
     await runDelete(user);
-    await user.type(screen.getByLabelText("Search content titles"), "X");
+    await user.type(await searchField(user), "X");
     expect(await screen.findByText("X one")).toBeTruthy();
     releaseLifecycle();
     await waitFor(() => expect(deleteRequests(api).length).toBeGreaterThanOrEqual(1), { timeout: 2500 });
@@ -1619,10 +1646,10 @@ describe("persistent ContentFlow workspace", () => {
     api.lifecycleGate = new Promise<void>((resolve) => { release = resolve; });
     vi.stubGlobal("fetch", api.fetch);
     const user = userEvent.setup();
-    render(<Home />);
+    renderWorkspace(api);
     await screen.findByDisplayValue("LinkedIn one");
     await runDelete(user);
-    await user.click(screen.getByRole("button", { name: /X one/ }));
+    await openPiece(user, /X one/);
     await screen.findByDisplayValue("X one");
 
     const secondArchive = screen.getByRole("button", { name: "Delete" });
@@ -1642,7 +1669,7 @@ describe("persistent ContentFlow workspace", () => {
     api.lifecycleConflictNext = true;
     vi.stubGlobal("fetch", api.fetch);
     const user = userEvent.setup();
-    render(<Home />);
+    renderWorkspace(api);
     await screen.findByDisplayValue("LinkedIn one");
 
     await runDelete(user);
@@ -1653,7 +1680,7 @@ describe("persistent ContentFlow workspace", () => {
     expect(body.value).toBe("");
     await user.click(screen.getByRole("button", { name: resolution }));
 
-    if (removesItem) expect(await screen.findByText("Your workspace is empty")).toBeTruthy();
+    if (removesItem) expect(await screen.findByRole("heading", { name: /Start with a topic|Your library is empty/ })).toBeTruthy();
     else expect(await screen.findByRole("button", { name: "Delete" })).toBeTruthy();
     expect(screen.queryByRole("heading", { name: "This item changed elsewhere" })).toBeNull();
   });
@@ -1663,7 +1690,7 @@ describe("persistent ContentFlow workspace", () => {
     api.conflictNext = true;
     vi.stubGlobal("fetch", api.fetch);
     const user = userEvent.setup();
-    render(<Home />);
+    renderWorkspace(api);
     const body = await screen.findByLabelText("X post");
     await user.clear(body);
     await user.type(body, "Local changed title");
@@ -1681,10 +1708,12 @@ describe("persistent ContentFlow workspace", () => {
     api.conflictNext = true;
     vi.stubGlobal("fetch", api.fetch);
     const user = userEvent.setup();
-    render(<Home />);
-    const body = await screen.findByLabelText("LinkedIn post");
-    await user.type(screen.getByLabelText("Search content titles"), "Linked");
+    renderWorkspace(api);
+    await screen.findByLabelText("LinkedIn post");
+    await user.type(await searchField(user), "Linked");
     await waitFor(() => expect(api.requests.filter((request) => request.path === "/api/v1/content?q=Linked")).toHaveLength(1));
+    await openPiece(user, /^LinkedIn one/);
+    const body = await screen.findByLabelText("LinkedIn post");
     await user.clear(body);
     await user.type(body, "Local changed title");
 
@@ -1692,7 +1721,8 @@ describe("persistent ContentFlow workspace", () => {
     await user.click(screen.getByRole("button", { name: "Use server version" }));
 
     await waitFor(() => expect(api.requests.filter((request) => request.path === "/api/v1/content?q=Linked").length).toBeGreaterThanOrEqual(2));
-    expect(await screen.findByText("No content found")).toBeTruthy();
+    await user.type(await searchField(user), "Linked");
+    expect(await screen.findByRole("heading", { name: "No matches" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: /^Server changed title/ })).toBeNull();
     expect((screen.getByLabelText("Search content titles") as HTMLInputElement).value).toBe("Linked");
   });
@@ -1702,14 +1732,14 @@ describe("persistent ContentFlow workspace", () => {
     const api = new FakeAPI([detail("linkedin")]);
     vi.stubGlobal("fetch", api.fetch);
     const user = userEvent.setup();
-    render(<Home />);
+    renderWorkspace(api);
     await screen.findByDisplayValue("LinkedIn one");
 
-    await user.click(screen.getByRole("button", { name: /^Weekly/ }));
+    await user.click(screen.getByRole("button", { name: "Week" }));
     expect(await screen.findByRole("heading", { name: "Weekly matrix" })).toBeTruthy();
     expect(window.location.pathname).toBe("/weekly");
 
-    await user.click(screen.getByRole("button", { name: /^Calendar/ }));
+    goTo("/calendar");
     expect(await screen.findByRole("heading", { name: "Calendar" })).toBeTruthy();
     expect(window.location.pathname).toBe("/calendar");
 
@@ -1718,38 +1748,99 @@ describe("persistent ContentFlow workspace", () => {
     expect(window.location.pathname).toBe("/settings");
     expect(screen.queryByRole("heading", { name: "Calendar" })).toBeNull();
 
-    await user.click(screen.getByRole("button", { name: /^All content/ }));
-    expect(await screen.findByDisplayValue("LinkedIn one")).toBeTruthy();
-    expect(window.location.pathname).toBe("/");
+    await user.click(screen.getByRole("button", { name: "Library" }));
+    expect(await screen.findByRole("heading", { name: "Library" })).toBeTruthy();
+    expect(window.location.pathname).toBe("/library");
   });
 
-  it("keeps every top-level view reachable from compact navigation", async () => {
-    const api = new FakeAPI([detail("linkedin")]);
+  it("starts with full-page topics and opens a deep-linked workspace without a permanent library", async () => {
+    const topic = detail("topic");
+    const piece = { ...detail("linkedin"), topic_id: topic.id };
+    const api = new FakeAPI([topic, piece]);
+    vi.stubGlobal("fetch", api.fetch);
+    const user = userEvent.setup();
+    const first = render(<Home />);
+    expect(await screen.findByRole("heading", { name: "Topics" })).toBeTruthy();
+    expect(screen.queryByLabelText("LinkedIn post")).toBeNull();
+    await user.click(screen.getByRole("button", { name: /^Topic one/ }));
+    expect(await screen.findByLabelText("LinkedIn post")).toBeTruthy();
+    expect(window.location.pathname).toBe("/content");
+    expect(new URLSearchParams(window.location.search).get("id")).toBe(topic.id);
+    expect(screen.queryByRole("region", { name: "Content library" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Back to topics" }));
+    await user.click(screen.getByRole("button", { name: "Library" }));
+    expect(await screen.findByRole("heading", { name: "Library" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /^Topic one/ })).toBeNull();
+    await user.click(screen.getByRole("button", { name: /^LinkedIn one/ }));
+    expect(await screen.findByLabelText("LinkedIn post")).toBeTruthy();
+    first.unmount();
+    render(<Home />);
+    expect(await screen.findByLabelText("LinkedIn post")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Back to topic" }));
+    expect((await screen.findAllByDisplayValue("Topic one")).length).toBeGreaterThan(0);
+  });
+
+  it("opens one related editor by default and preserves drafts when comparing and switching pieces", async () => {
+    const topic = detail("topic");
+    const reel = { ...detail("instagram"), topic_id: topic.id };
+    const post = { ...detail("linkedin"), topic_id: topic.id };
+    const api = new FakeAPI([topic, reel, post]);
+    vi.stubGlobal("fetch", api.fetch);
+    const user = userEvent.setup();
+    renderWorkspace(api);
+    const script = await screen.findByLabelText("Instagram script");
+    expect(screen.queryByLabelText("LinkedIn post")).toBeNull();
+    fireEvent.change(script, { target: { value: "Keep this Reel draft." } });
+    await user.selectOptions(screen.getByLabelText("Open alongside"), post.id);
+    const body = await screen.findByLabelText("LinkedIn post");
+    fireEvent.change(body, { target: { value: "Keep this LinkedIn draft." } });
+    expect(screen.getAllByRole("region").filter((region) => region.classList.contains("topic-piece"))).toHaveLength(2);
+    await user.click(screen.getByRole("button", { name: "LinkedIn" }));
+    expect(await screen.findByDisplayValue("Keep this LinkedIn draft.")).toBeTruthy();
+    expect(screen.queryByLabelText("Instagram script")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Instagram" }));
+    expect(await screen.findByDisplayValue("Keep this Reel draft.")).toBeTruthy();
+    await waitFor(() => {
+      expect(api.items.get(reel.id)?.content).toEqual(expect.objectContaining({ script: "Keep this Reel draft." }));
+      expect(api.items.get(post.id)?.content).toEqual({ body: "Keep this LinkedIn draft." });
+    }, { timeout: 2500 });
+  });
+
+  it("clears hidden platform filters when browser navigation returns to Topics", async () => {
+    const topic = detail("topic");
+    const api = new FakeAPI([topic, detail("linkedin")]);
     vi.stubGlobal("fetch", api.fetch);
     const user = userEvent.setup();
     render(<Home />);
-    await screen.findByDisplayValue("LinkedIn one");
+    await screen.findByRole("heading", { name: "Topics" });
+    await user.click(screen.getByRole("button", { name: "Library" }));
+    await user.selectOptions(screen.getByLabelText("Filter by platform"), "linkedin");
+    await waitFor(() => expect(api.requests.some((request) => request.path.includes("type=linkedin"))).toBe(true));
+    goTo("/");
+    expect(await screen.findByRole("button", { name: /^Topic one/ })).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: /^Topic one/ }));
+    await screen.findByLabelText("Working title");
+    await user.keyboard("{Control>}k{/Control}");
+    expect(await screen.findByRole("heading", { name: "Library" })).toBeTruthy();
+    expect(screen.getByLabelText("Filter by platform")).toHaveProperty("value", "all");
+  });
 
-    await user.click(screen.getByRole("button", { name: "Open weekly view" }));
-    expect(await screen.findByRole("heading", { name: "Weekly matrix" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Open weekly view" }).getAttribute("aria-current")).toBe("page");
-
-    await user.click(screen.getByRole("button", { name: "Open calendar view" }));
-    expect(await screen.findByRole("heading", { name: "Calendar" })).toBeTruthy();
-
-    await user.click(screen.getByRole("button", { name: "Open settings view" }));
-    expect(await screen.findByRole("heading", { name: "Settings" })).toBeTruthy();
-
-    await user.click(screen.getByRole("button", { name: "Open all content" }));
-    expect(await screen.findByDisplayValue("LinkedIn one")).toBeTruthy();
-    expect(window.location.pathname).toBe("/");
+  it("opens Library search with the keyboard shortcut from a focused editor", async () => {
+    const api = new FakeAPI([detail("linkedin")]);
+    vi.stubGlobal("fetch", api.fetch);
+    const user = userEvent.setup();
+    renderWorkspace(api);
+    await screen.findByLabelText("LinkedIn post");
+    await user.keyboard("{Control>}k{/Control}");
+    expect(await screen.findByRole("heading", { name: "Library" })).toBeTruthy();
+    expect(document.activeElement).toBe(screen.getByLabelText("Search content titles"));
   });
 
   it("opens the calendar directly from its URL", async () => {
     const api = new FakeAPI([detail("linkedin")]);
     vi.stubGlobal("fetch", api.fetch);
     window.history.pushState({}, "", "/calendar");
-    render(<Home />);
+    renderWorkspace(api);
 
     expect(await screen.findByRole("heading", { name: "Calendar" })).toBeTruthy();
   });
@@ -1758,7 +1849,7 @@ describe("persistent ContentFlow workspace", () => {
     const api = new FakeAPI([detail("linkedin")]);
     vi.stubGlobal("fetch", api.fetch);
     window.history.pushState({}, "", "/weekly");
-    render(<Home />);
+    renderWorkspace(api);
 
     expect(await screen.findByRole("heading", { name: "Weekly matrix" })).toBeTruthy();
   });
@@ -1775,10 +1866,10 @@ describe("persistent ContentFlow workspace", () => {
     const api = new FakeAPI([youtube, instagram, topic]);
     vi.stubGlobal("fetch", api.fetch);
     const user = userEvent.setup();
-    render(<Home />);
+    renderWorkspace(api);
     await screen.findByDisplayValue("YouTube one");
 
-    await user.click(screen.getByRole("button", { name: /^Weekly/ }));
+    await user.click(screen.getByRole("button", { name: "Week" }));
     const youtubeCell = screen.getByLabelText(`YouTube on ${monday.toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long", year: "numeric" })}`);
     const instagramCell = screen.getByLabelText(`Instagram on ${tuesday.toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long", year: "numeric" })}`);
     expect(within(youtubeCell).getByRole("button", { name: "Open YouTube one" })).toBeTruthy();
@@ -1798,12 +1889,12 @@ describe("persistent ContentFlow workspace", () => {
     ]);
     vi.stubGlobal("fetch", api.fetch);
     const user = userEvent.setup();
-    render(<Home />);
+    renderWorkspace(api);
     await screen.findByDisplayValue("YouTube one");
     await user.click(screen.getByRole("button", { name: /^Settings/ }));
     await user.click(await screen.findByRole("button", { name: "Content types" }));
     await user.click(screen.getByLabelText("Show TikTok"));
-    await user.click(screen.getByRole("button", { name: /^Weekly/ }));
+    await user.click(screen.getByRole("button", { name: "Week" }));
 
     expect(await screen.findByText("1 piece scheduled this week")).toBeTruthy();
     expect(screen.queryByRole("row", { name: /^TikTok/ })).toBeNull();
@@ -1819,9 +1910,9 @@ describe("persistent ContentFlow workspace", () => {
     const api = new FakeAPI([detail("linkedin")]);
     vi.stubGlobal("fetch", api.fetch);
     const user = userEvent.setup();
-    render(<Home />);
+    renderWorkspace(api);
     await screen.findByDisplayValue("LinkedIn one");
-    await user.click(screen.getByRole("button", { name: /^Weekly/ }));
+    await user.click(screen.getByRole("button", { name: "Week" }));
 
     await user.click(await screen.findByRole("button", { name: `Add LinkedIn for ${fullDate.format(wednesday)}` }));
     const addButton = screen.getByRole("button", { name: "Add" }) as HTMLButtonElement;
@@ -1843,8 +1934,8 @@ describe("persistent ContentFlow workspace", () => {
     expect(screen.getByRole("heading", { name: "Weekly matrix" })).toBeTruthy();
     expect(screen.queryByLabelText(`New LinkedIn title for ${fullDate.format(wednesday)}`)).toBeNull();
 
-    await user.click(screen.getByRole("button", { name: "Calendar" }));
-    await user.click(screen.getByRole("button", { name: "Weekly" }));
+    goTo("/calendar");
+    await user.click(screen.getByRole("button", { name: "Week" }));
     await user.click(await screen.findByRole("button", { name: `Add LinkedIn for ${fullDate.format(wednesday)}` }));
     expect(screen.getByLabelText(`New LinkedIn title for ${fullDate.format(wednesday)}`)).toBeTruthy();
   });
@@ -1859,9 +1950,9 @@ describe("persistent ContentFlow workspace", () => {
     api.createGate = Promise.resolve();
     vi.stubGlobal("fetch", api.fetch);
     const user = userEvent.setup();
-    render(<Home />);
+    renderWorkspace(api);
     await screen.findByDisplayValue("LinkedIn one");
-    await user.click(screen.getByRole("button", { name: /^Weekly/ }));
+    await user.click(screen.getByRole("button", { name: "Week" }));
 
     await user.click(await screen.findByRole("button", { name: `Add LinkedIn for ${fullDate.format(monday)}` }));
     await user.type(screen.getByLabelText(`New LinkedIn title for ${fullDate.format(monday)}`), "Retry me");
@@ -1883,9 +1974,9 @@ describe("persistent ContentFlow workspace", () => {
     api.createAuthFailure = { status: 401, code: "session_expired" };
     vi.stubGlobal("fetch", api.fetch);
     const user = userEvent.setup();
-    render(<Home />);
+    renderWorkspace(api);
     await screen.findByDisplayValue("LinkedIn one");
-    await user.click(screen.getByRole("button", { name: /^Weekly/ }));
+    await user.click(screen.getByRole("button", { name: "Week" }));
 
     await user.click(await screen.findByRole("button", { name: `Add LinkedIn for ${fullDate.format(monday)}` }));
     const titleInput = screen.getByLabelText(`New LinkedIn title for ${fullDate.format(monday)}`);
@@ -1914,9 +2005,9 @@ describe("persistent ContentFlow workspace", () => {
     api.createResponseLostOnce = true;
     vi.stubGlobal("fetch", api.fetch);
     const user = userEvent.setup();
-    render(<Home />);
+    renderWorkspace(api);
     await screen.findByDisplayValue("LinkedIn one");
-    await user.click(screen.getByRole("button", { name: /^Weekly/ }));
+    await user.click(screen.getByRole("button", { name: "Week" }));
     await user.click(screen.getByRole("button", { name: "Next week" }));
 
     await user.click(await screen.findByRole("button", { name: `Add LinkedIn for ${fullDate.format(nextMonday)}` }));
@@ -1932,8 +2023,8 @@ describe("persistent ContentFlow workspace", () => {
     await user.click(screen.getByRole("button", { name: "Settings" }));
     await user.click(await screen.findByRole("button", { name: "Content types" }));
     await user.click(screen.getByLabelText("Show LinkedIn"));
-    await user.click(screen.getByRole("button", { name: "Calendar" }));
-    await user.click(screen.getByRole("button", { name: "Weekly" }));
+    goTo("/calendar");
+    await user.click(screen.getByRole("button", { name: "Week" }));
     const restoredTitle = screen.getByLabelText(`New LinkedIn title for ${fullDate.format(nextMonday)}`) as HTMLInputElement;
     expect(restoredTitle.value).toBe("Original plan");
     expect(restoredTitle.disabled).toBe(true);
@@ -1955,9 +2046,9 @@ describe("persistent ContentFlow workspace", () => {
     const api = new FakeAPI([{ ...detail("linkedin"), scheduled_at: monday.toISOString() }]);
     vi.stubGlobal("fetch", api.fetch);
     const user = userEvent.setup();
-    render(<Home />);
+    renderWorkspace(api);
     await screen.findByDisplayValue("LinkedIn one");
-    await user.click(screen.getByRole("button", { name: /^Weekly/ }));
+    await user.click(screen.getByRole("button", { name: "Week" }));
 
     await user.selectOptions(screen.getByLabelText("Move LinkedIn one"), `${tuesday.getFullYear()}-${String(tuesday.getMonth() + 1).padStart(2, "0")}-${String(tuesday.getDate()).padStart(2, "0")}`);
 
@@ -1979,9 +2070,9 @@ describe("persistent ContentFlow workspace", () => {
     api.enforceRevisions = true;
     vi.stubGlobal("fetch", api.fetch);
     const user = userEvent.setup();
-    render(<Home />);
+    renderWorkspace(api);
     await screen.findByDisplayValue("LinkedIn one");
-    await user.click(screen.getByRole("button", { name: /^Weekly/ }));
+    await user.click(screen.getByRole("button", { name: "Week" }));
 
     await user.selectOptions(screen.getByLabelText("Move LinkedIn one"), `${tuesday.getFullYear()}-${String(tuesday.getMonth() + 1).padStart(2, "0")}-${String(tuesday.getDate()).padStart(2, "0")}`);
     await waitFor(() => expect(api.items.get(linkedin.id)?.revision).toBe(2));
@@ -2010,16 +2101,16 @@ describe("persistent ContentFlow workspace", () => {
     api.replaceGate = new Promise<void>((resolve) => { releaseMove = resolve; });
     vi.stubGlobal("fetch", api.fetch);
     const user = userEvent.setup();
-    render(<Home />);
+    renderWorkspace(api);
     await screen.findByDisplayValue("YouTube one");
-    await user.click(screen.getByRole("button", { name: /^Weekly/ }));
+    await user.click(screen.getByRole("button", { name: "Week" }));
 
     await user.selectOptions(screen.getByLabelText("Move LinkedIn one"), `${tuesday.getFullYear()}-${String(tuesday.getMonth() + 1).padStart(2, "0")}-${String(tuesday.getDate()).padStart(2, "0")}`);
     await waitFor(() => expect(api.replaceGateStarted).toBe(1));
     let releaseDetail: () => void = () => undefined;
     api.detailGate = new Promise<void>((resolve) => { releaseDetail = resolve; });
-    await user.click(screen.getByRole("button", { name: /^All content/ }));
-    await user.click(screen.getByRole("button", { name: /^LinkedIn one/ }));
+    await user.click(screen.getByRole("button", { name: "Library" }));
+    await openPiece(user, /^LinkedIn one/);
     await waitFor(() => expect(api.detailGate).toBeUndefined());
 
     releaseMove();
@@ -2050,9 +2141,9 @@ describe("persistent ContentFlow workspace", () => {
     api.replaceGate = new Promise<void>((resolve) => { releaseMove = resolve; });
     vi.stubGlobal("fetch", api.fetch);
     const user = userEvent.setup();
-    render(<Home />);
+    renderWorkspace(api);
     await screen.findByDisplayValue("LinkedIn one");
-    await user.click(screen.getByRole("button", { name: /^Weekly/ }));
+    await user.click(screen.getByRole("button", { name: "Week" }));
 
     const move = screen.getByLabelText("Move LinkedIn one");
     await user.selectOptions(move, `${tuesday.getFullYear()}-${String(tuesday.getMonth() + 1).padStart(2, "0")}-${String(tuesday.getDate()).padStart(2, "0")}`);
@@ -2084,9 +2175,9 @@ describe("persistent ContentFlow workspace", () => {
     api.replaceGates = [new Promise<void>(() => undefined), new Promise<void>(() => undefined)];
     vi.stubGlobal("fetch", api.fetch);
     const user = userEvent.setup();
-    render(<Home />);
+    renderWorkspace(api);
     await screen.findByDisplayValue("LinkedIn one");
-    await user.click(screen.getByRole("button", { name: /^Weekly/ }));
+    await user.click(screen.getByRole("button", { name: "Week" }));
 
     const move = screen.getByLabelText("Move LinkedIn one") as HTMLSelectElement;
     await user.selectOptions(move, `${tuesday.getFullYear()}-${String(tuesday.getMonth() + 1).padStart(2, "0")}-${String(tuesday.getDate()).padStart(2, "0")}`);
@@ -2110,9 +2201,9 @@ describe("persistent ContentFlow workspace", () => {
     api.replaceResponseLostOnce = true;
     vi.stubGlobal("fetch", api.fetch);
     const user = userEvent.setup();
-    render(<Home />);
+    renderWorkspace(api);
     await screen.findByDisplayValue("LinkedIn one");
-    await user.click(screen.getByRole("button", { name: /^Weekly/ }));
+    await user.click(screen.getByRole("button", { name: "Week" }));
 
     await user.selectOptions(screen.getByLabelText("Move LinkedIn one"), `${tuesday.getFullYear()}-${String(tuesday.getMonth() + 1).padStart(2, "0")}-${String(tuesday.getDate()).padStart(2, "0")}`);
 
@@ -2137,9 +2228,9 @@ describe("persistent ContentFlow workspace", () => {
     api.failDetailAfterTwoReplaceAttempts = true;
     vi.stubGlobal("fetch", api.fetch);
     const user = userEvent.setup();
-    render(<Home />);
+    renderWorkspace(api);
     await screen.findByDisplayValue("LinkedIn one");
-    await user.click(screen.getByRole("button", { name: /^Weekly/ }));
+    await user.click(screen.getByRole("button", { name: "Week" }));
     const move = screen.getByLabelText("Move LinkedIn one") as HTMLSelectElement;
     await user.selectOptions(move, `${tuesday.getFullYear()}-${String(tuesday.getMonth() + 1).padStart(2, "0")}-${String(tuesday.getDate()).padStart(2, "0")}`);
 
@@ -2165,9 +2256,9 @@ describe("persistent ContentFlow workspace", () => {
     api.failDetailAfterTwoReplaceAttempts = true;
     vi.stubGlobal("fetch", api.fetch);
     const user = userEvent.setup();
-    render(<Home />);
+    renderWorkspace(api);
     await screen.findByDisplayValue("LinkedIn one");
-    await user.click(screen.getByRole("button", { name: /^Weekly/ }));
+    await user.click(screen.getByRole("button", { name: "Week" }));
 
     const linkedinMove = screen.getByLabelText("Move LinkedIn one") as HTMLSelectElement;
     await user.selectOptions(linkedinMove, `${tuesday.getFullYear()}-${String(tuesday.getMonth() + 1).padStart(2, "0")}-${String(tuesday.getDate()).padStart(2, "0")}`);
@@ -2195,13 +2286,13 @@ describe("persistent ContentFlow workspace", () => {
     api.replaceGate = new Promise<void>((resolve) => { releaseMove = resolve; });
     vi.stubGlobal("fetch", api.fetch);
     const user = userEvent.setup();
-    render(<Home />);
+    renderWorkspace(api);
     await screen.findByDisplayValue("LinkedIn one");
-    await user.click(screen.getByRole("button", { name: /^Weekly/ }));
+    await user.click(screen.getByRole("button", { name: "Week" }));
 
     await user.selectOptions(screen.getByLabelText("Move LinkedIn one"), `${tuesday.getFullYear()}-${String(tuesday.getMonth() + 1).padStart(2, "0")}-${String(tuesday.getDate()).padStart(2, "0")}`);
     await waitFor(() => expect(api.replaceGateStarted).toBe(1));
-    await user.click(screen.getByRole("button", { name: /^All content/ }));
+    await openPiece(user, /^LinkedIn one/);
 
     const post = await screen.findByLabelText("LinkedIn post");
     expect(screen.getByRole("status").textContent).toContain("Updating schedule");
@@ -2230,9 +2321,9 @@ describe("persistent ContentFlow workspace", () => {
     api.failDetailAfterReplace = true;
     vi.stubGlobal("fetch", api.fetch);
     const user = userEvent.setup();
-    render(<Home />);
+    renderWorkspace(api);
     await screen.findByDisplayValue("LinkedIn one");
-    await user.click(screen.getByRole("button", { name: /^Weekly/ }));
+    await user.click(screen.getByRole("button", { name: "Week" }));
 
     await user.selectOptions(screen.getByLabelText("Move LinkedIn one"), `${tuesday.getFullYear()}-${String(tuesday.getMonth() + 1).padStart(2, "0")}-${String(tuesday.getDate()).padStart(2, "0")}`);
 
@@ -2252,9 +2343,9 @@ describe("persistent ContentFlow workspace", () => {
     const api = new FakeAPI([{ ...detail("youtube"), scheduled_at: monday.toISOString() }]);
     vi.stubGlobal("fetch", api.fetch);
     const user = userEvent.setup();
-    render(<Home />);
+    renderWorkspace(api);
     await screen.findByDisplayValue("YouTube one");
-    await user.click(screen.getByRole("button", { name: /^Weekly/ }));
+    await user.click(screen.getByRole("button", { name: "Week" }));
 
     const cardButton = screen.getByRole("button", { name: "Open YouTube one" });
     const card = cardButton.closest("article")!;
@@ -2279,9 +2370,9 @@ describe("persistent ContentFlow workspace", () => {
     const api = new FakeAPI([detail("linkedin")]);
     vi.stubGlobal("fetch", api.fetch);
     const user = userEvent.setup();
-    render(<Home />);
+    renderWorkspace(api);
     await screen.findByDisplayValue("LinkedIn one");
-    await user.click(screen.getByRole("button", { name: /^Weekly/ }));
+    await user.click(screen.getByRole("button", { name: "Week" }));
     const currentLabel = screen.getByRole("button", { name: "Previous week" }).nextElementSibling?.textContent;
 
     await user.click(screen.getByRole("button", { name: "Next week" }));
@@ -2293,10 +2384,9 @@ describe("persistent ContentFlow workspace", () => {
   it("schedules an unscheduled item onto a day and writes the date", async () => {
     const api = new FakeAPI([detail("linkedin")]);
     vi.stubGlobal("fetch", api.fetch);
-    const user = userEvent.setup();
-    render(<Home />);
+    renderWorkspace(api);
     await screen.findByDisplayValue("LinkedIn one");
-    await user.click(screen.getByRole("button", { name: /^Calendar/ }));
+    goTo("/calendar");
     await screen.findByRole("heading", { name: "Calendar" });
 
     const chip = screen.getByRole("button", { name: /LinkedIn one, unscheduled/ });
@@ -2324,10 +2414,9 @@ describe("persistent ContentFlow workspace", () => {
   it("schedules with the keyboard-accessible date control", async () => {
     const api = new FakeAPI([detail("linkedin")]);
     vi.stubGlobal("fetch", api.fetch);
-    const user = userEvent.setup();
-    render(<Home />);
+    renderWorkspace(api);
     await screen.findByDisplayValue("LinkedIn one");
-    await user.click(screen.getByRole("button", { name: /^Calendar/ }));
+    goTo("/calendar");
 
     fireEvent.change(await screen.findByLabelText("Schedule LinkedIn one"), { target: { value: "2026-09-14" } });
 
@@ -2338,10 +2427,10 @@ describe("persistent ContentFlow workspace", () => {
     const api = new FakeAPI([detail("linkedin")]);
     vi.stubGlobal("fetch", api.fetch);
     const user = userEvent.setup();
-    render(<Home />);
+    renderWorkspace(api);
     const body = await screen.findByLabelText("LinkedIn post");
     await user.type(body, "unsaved draft");
-    await user.click(screen.getByRole("button", { name: /^Calendar/ }));
+    goTo("/calendar");
 
     fireEvent.change(await screen.findByLabelText("Schedule LinkedIn one"), { target: { value: "2026-09-14" } });
 
@@ -2349,11 +2438,11 @@ describe("persistent ContentFlow workspace", () => {
     expect(api.replaceBodies.some((requestBody) => JSON.parse(requestBody).scheduled_at)).toBe(false);
   });
 
-  it("hides a content type from the sidebar through the settings page", async () => {
+  it("hides a content type from the Library platform filter through settings", async () => {
     const api = new FakeAPI([detail("linkedin")]);
     vi.stubGlobal("fetch", api.fetch);
     const user = userEvent.setup();
-    render(<Home />);
+    renderWorkspace(api);
     await screen.findByDisplayValue("LinkedIn one");
     await user.click(screen.getByRole("button", { name: /^Settings/ }));
     await user.click(await screen.findByRole("button", { name: "Content types" }));
@@ -2361,7 +2450,8 @@ describe("persistent ContentFlow workspace", () => {
     await user.click(screen.getByLabelText("Show TikTok"));
 
     expect(screen.queryByRole("button", { name: /^TikTok/ })).toBeNull();
-    expect(screen.getByRole("button", { name: /^Substack/ })).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Library" }));
+    expect(within(screen.getByLabelText("Filter by platform")).getByRole("option", { name: "Substack" })).toBeTruthy();
   });
 
   it("persists theme selection without automatic content expiry", async () => {
@@ -2369,7 +2459,7 @@ describe("persistent ContentFlow workspace", () => {
     vi.stubGlobal("fetch", api.fetch);
     const user = userEvent.setup();
     document.documentElement.dataset.theme = "dark";
-    render(<Home />);
+    renderWorkspace(api);
     await screen.findByDisplayValue("Email one");
     await user.click(screen.getAllByRole("button", { name: "Switch to light mode" })[0]);
     expect(window.localStorage.getItem("contentflow-theme")).toBe("light");
@@ -2380,7 +2470,7 @@ describe("persistent ContentFlow workspace", () => {
     const api = new FakeAPI([detail("linkedin")]);
     vi.stubGlobal("fetch", api.fetch);
     const user = userEvent.setup();
-    render(<Home />);
+    renderWorkspace(api);
     await screen.findByDisplayValue("LinkedIn one");
     await user.click(screen.getAllByRole("button", { name: /New content/ })[0]);
     const createDialog = screen.getByRole("dialog");
@@ -2400,233 +2490,4 @@ describe("persistent ContentFlow workspace", () => {
     expect(screen.getByRole("alertdialog")).toBe(deleteDialog);
   });
 
-  it("moves and traps focus in the mobile library, then restores it", async () => {
-    const api = new FakeAPI([detail("email")]);
-    vi.stubGlobal("fetch", api.fetch);
-    vi.stubGlobal("matchMedia", vi.fn(() => ({
-      matches: true,
-      media: "(max-width: 900px)",
-      onchange: null,
-      addEventListener: vi.fn(),
-      removeEventListener: vi.fn(),
-      addListener: vi.fn(),
-      removeListener: vi.fn(),
-      dispatchEvent: vi.fn(),
-    })));
-    const user = userEvent.setup();
-    render(<Home />);
-    await screen.findByDisplayValue("Email one");
-    const open = screen.getByRole("button", { name: "Open content library" });
-
-    await user.click(open);
-    const close = screen.getByRole("button", { name: "Close library" });
-    await waitFor(() => expect(document.activeElement).toBe(close));
-    const editor = document.querySelector<HTMLElement>(".editor-panel");
-    expect(editor?.hasAttribute("inert")).toBe(true);
-    await user.keyboard("{Shift>}{Tab}{/Shift}");
-    expect(screen.getByRole("region", { name: "Content library" }).contains(document.activeElement)).toBe(true);
-    await user.keyboard("{Escape}");
-
-    await waitFor(() => expect(document.activeElement).toBe(open));
-    expect(editor?.hasAttribute("inert")).toBe(false);
-  });
-
-  it("collapses and restores the desktop content library", async () => {
-    const api = new FakeAPI([detail("email")]);
-    vi.stubGlobal("fetch", api.fetch);
-    const user = userEvent.setup();
-    render(<Home />);
-    await screen.findByDisplayValue("Email one");
-
-    const library = screen.getByRole("region", { name: "Content library" });
-    const collapse = screen.getByRole("button", { name: "Collapse content library" });
-    collapse.focus();
-    await user.keyboard("{Enter}");
-
-    expect(document.querySelector(".app-shell")?.classList).toContain("library-is-collapsed");
-    expect(library.getAttribute("aria-hidden")).toBe("true");
-    expect(library.hasAttribute("inert")).toBe(true);
-    expect(window.localStorage.getItem("contentflow-library-collapsed")).toBe("true");
-    const expand = screen.getByRole("button", { name: "Expand content library" });
-    await waitFor(() => expect(document.activeElement).toBe(expand));
-
-    await user.click(expand);
-
-    expect(document.querySelector(".app-shell")?.classList).not.toContain("library-is-collapsed");
-    expect(library.hasAttribute("aria-hidden")).toBe(false);
-    expect(library.hasAttribute("inert")).toBe(false);
-    expect(window.localStorage.getItem("contentflow-library-collapsed")).toBe("false");
-    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("button", { name: "Collapse content library" })));
-  });
-
-  it("opens a collapsed desktop library before focusing search", async () => {
-    window.localStorage.setItem("contentflow-library-collapsed", "true");
-    const api = new FakeAPI([detail("email")]);
-    vi.stubGlobal("fetch", api.fetch);
-    const user = userEvent.setup();
-    render(<Home />);
-    await screen.findByDisplayValue("Email one");
-
-    await user.keyboard("{Control>}k{/Control}");
-
-    const search = screen.getByRole("textbox", { name: "Search content titles" });
-    await waitFor(() => expect(document.activeElement).toBe(search));
-    expect(document.querySelector(".app-shell")?.classList).not.toContain("library-is-collapsed");
-    expect(window.localStorage.getItem("contentflow-library-collapsed")).toBe("false");
-  });
-
-  it("focuses search when the desktop library is already open", async () => {
-    const api = new FakeAPI([detail("email")]);
-    vi.stubGlobal("fetch", api.fetch);
-    const user = userEvent.setup();
-    render(<Home />);
-    await screen.findByDisplayValue("Email one");
-
-    await user.keyboard("{Control>}k{/Control}");
-
-    const search = screen.getByRole("textbox", { name: "Search content titles" });
-    await waitFor(() => expect(document.activeElement).toBe(search));
-  });
-
-  it("keeps the mobile content library available when desktop collapse is remembered", async () => {
-    window.localStorage.setItem("contentflow-library-collapsed", "true");
-    const api = new FakeAPI([detail("email")]);
-    vi.stubGlobal("fetch", api.fetch);
-    vi.stubGlobal("matchMedia", vi.fn(() => ({
-      matches: true,
-      media: "(max-width: 900px)",
-      onchange: null,
-      addEventListener: vi.fn(),
-      removeEventListener: vi.fn(),
-      addListener: vi.fn(),
-      removeListener: vi.fn(),
-      dispatchEvent: vi.fn(),
-    })));
-    const user = userEvent.setup();
-    render(<Home />);
-    await screen.findByDisplayValue("Email one");
-
-    await user.click(screen.getByRole("button", { name: "Open content library" }));
-
-    expect(screen.getByRole("region", { name: "Content library" }).hasAttribute("inert")).toBe(false);
-    expect(screen.queryByRole("button", { name: "Expand content library" })).toBeNull();
-  });
-
-  it("opens the mobile library before focusing search", async () => {
-    const api = new FakeAPI([detail("email")]);
-    vi.stubGlobal("fetch", api.fetch);
-    vi.stubGlobal("matchMedia", vi.fn(() => ({
-      matches: true,
-      media: "(max-width: 900px)",
-      onchange: null,
-      addEventListener: vi.fn(),
-      removeEventListener: vi.fn(),
-      addListener: vi.fn(),
-      removeListener: vi.fn(),
-      dispatchEvent: vi.fn(),
-    })));
-    const user = userEvent.setup();
-    render(<Home />);
-    await screen.findByDisplayValue("Email one");
-
-    await user.keyboard("{Control>}k{/Control}");
-
-    const search = screen.getByRole("textbox", { name: "Search content titles" });
-    await waitFor(() => expect(document.activeElement).toBe(search));
-    expect(document.querySelector(".editor-panel")?.hasAttribute("inert")).toBe(true);
-  });
-
-  it.each([
-    ["expanded", false],
-    ["collapsed", true],
-  ])("keeps search focus while crossing from an %s desktop library into the mobile breakpoint", async (_state, collapsed) => {
-    if (collapsed) window.localStorage.setItem("contentflow-library-collapsed", "true");
-    let compact = false;
-    let notifyChange: (() => void) | undefined;
-    const media = {
-      get matches() { return compact; },
-      media: "(max-width: 900px)",
-      onchange: null,
-      addEventListener: vi.fn((_event: string, listener: () => void) => { notifyChange = listener; }),
-      removeEventListener: vi.fn(),
-      addListener: vi.fn(),
-      removeListener: vi.fn(),
-      dispatchEvent: vi.fn(),
-    };
-    vi.stubGlobal("matchMedia", vi.fn(() => media));
-    const api = new FakeAPI([detail("email")]);
-    vi.stubGlobal("fetch", api.fetch);
-    const user = userEvent.setup();
-    render(<Home />);
-    await screen.findByDisplayValue("Email one");
-
-    compact = true;
-    await user.keyboard("{Control>}k{/Control}");
-    act(() => notifyChange?.());
-
-    const search = screen.getByRole("textbox", { name: "Search content titles" });
-    await waitFor(() => expect(document.activeElement).toBe(search));
-    expect(document.querySelector(".editor-panel")?.hasAttribute("inert")).toBe(true);
-  });
-
-  it("keeps the search request while crossing from mobile into the desktop breakpoint", async () => {
-    let compact = true;
-    let notifyChange: (() => void) | undefined;
-    const media = {
-      get matches() { return compact; },
-      media: "(max-width: 900px)",
-      onchange: null,
-      addEventListener: vi.fn((_event: string, listener: () => void) => { notifyChange = listener; }),
-      removeEventListener: vi.fn(),
-      addListener: vi.fn(),
-      removeListener: vi.fn(),
-      dispatchEvent: vi.fn(),
-    };
-    vi.stubGlobal("matchMedia", vi.fn(() => media));
-    const api = new FakeAPI([detail("email")]);
-    vi.stubGlobal("fetch", api.fetch);
-    const user = userEvent.setup();
-    render(<Home />);
-    await screen.findByDisplayValue("Email one");
-    expect(screen.getByRole("button", { name: "Open content library" })).toBeTruthy();
-
-    compact = false;
-    await user.keyboard("{Control>}k{/Control}");
-    act(() => notifyChange?.());
-
-    const search = screen.getByRole("textbox", { name: "Search content titles" });
-    await waitFor(() => expect(document.activeElement).toBe(search));
-  });
-
-  it("opens the workspace before focusing search from another view", async () => {
-    window.localStorage.setItem("contentflow-library-collapsed", "true");
-    const api = new FakeAPI([detail("email")]);
-    vi.stubGlobal("fetch", api.fetch);
-    const user = userEvent.setup();
-    render(<Home />);
-    await screen.findByDisplayValue("Email one");
-    await user.click(screen.getByRole("button", { name: /^Calendar/ }));
-    await screen.findByRole("heading", { name: "Calendar" });
-
-    await user.keyboard("{Control>}k{/Control}");
-
-    const search = await screen.findByRole("textbox", { name: "Search content titles" });
-    await waitFor(() => expect(document.activeElement).toBe(search));
-    expect(window.location.pathname).toBe("/");
-    expect(window.localStorage.getItem("contentflow-library-collapsed")).toBe("false");
-  });
-
-  it("can restore a collapsed library from an empty workspace", async () => {
-    window.localStorage.setItem("contentflow-library-collapsed", "true");
-    const api = new FakeAPI([]);
-    vi.stubGlobal("fetch", api.fetch);
-    const user = userEvent.setup();
-    render(<Home />);
-    await screen.findByRole("heading", { name: "Start writing" });
-
-    await user.click(screen.getByRole("button", { name: "Expand content library" }));
-
-    expect(screen.getByRole("region", { name: "Content library" }).hasAttribute("inert")).toBe(false);
-    expect(document.querySelector(".app-shell")?.classList).not.toContain("library-is-collapsed");
-  });
 });

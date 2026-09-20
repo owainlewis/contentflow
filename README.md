@@ -8,11 +8,11 @@ See the [MVP design](docs/mvp/design.md) for the domain model, interfaces, lifec
 
 ## Organise a weekly batch
 
-Create a **topic group** for each idea. Keep notes and a source document on the group, then add related platform pieces. The topic workspace lets you edit a Reel script and caption alongside its LinkedIn post, carousel, newsletter, or YouTube video. Each piece has its own format, status, publish date, native text, external document link, and media link. A related piece can reuse another piece’s video link; each saved link remains independently editable.
+Create a **topic group** for each idea. Keep notes and a source document on the group, then add related platform pieces. Open a group from **Topics** to focus on one piece. Switch between platform versions with the piece buttons, or use **Open alongside** to write a second version beside it. **Library** is a separate browsing page, so lists and navigation panels do not crowd the editor. Each piece has its own format, status, publish date, native text, external document link, and media link. A related piece can reuse another piece’s video link; each saved link remains independently editable.
 
-YouTube scripts link to Google Docs or another external document. Existing in-app scripts and briefs remain accessible under stored sections. Instagram captions and LinkedIn posts are plain text. There are no temporary upload previews that could be mistaken for stored media.
+YouTube scripts link to Google Docs or another external document. Existing in-app scripts and briefs remain accessible under stored sections. Instagram captions and LinkedIn posts are plain text. YouTube title and thumbnail appear together. Upload a JPEG or PNG up to 5 MiB; previews reflect a successfully saved image and survive reloads. Replace or remove it from the same editor. Thumbnails are stored in PostgreSQL separately from text revisions and are deleted with their content item. Image dimensions are limited to 8192 pixels per side and 16 million pixels in total.
 
-Use **Weekly** to view scheduled pieces by platform and day. Move pieces between days or back to unscheduled. Topic groups stay in the production workspace and can span weeks. A piece can remain standalone or be assigned to a group. To delete a group, first detach or delete its pieces; deleting a group never silently deletes its content.
+Use **Week** to view scheduled pieces by platform and day. Move pieces between days or back to unscheduled. Topic groups stay in the production workspace and can span weeks. A piece can remain standalone or be assigned to a group. To delete a group, first detach or delete its pieces; deleting a group never silently deletes its content.
 
 ## Repository layout
 

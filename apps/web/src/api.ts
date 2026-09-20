@@ -120,8 +120,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return parseResponse<T>(response);
 }
 
-async function withRequestTimeout<T>(request: (signal: AbortSignal) => Promise<T>, timeoutMs: number) {
+async function withRequestTimeout<T>(request: (signal: AbortSignal) => Promise<T>, timeoutMs: number, callerSignal?: AbortSignal) {
   const controller = new AbortController();
+  const abortFromCaller = () => controller.abort(callerSignal?.reason);
+  if (callerSignal?.aborted) abortFromCaller();
+  else callerSignal?.addEventListener("abort", abortFromCaller, { once: true });
   let timeout: number | undefined;
   const timedOut = new Promise<never>((_, reject) => {
     timeout = window.setTimeout(() => {
@@ -133,6 +136,7 @@ async function withRequestTimeout<T>(request: (signal: AbortSignal) => Promise<T
     return await Promise.race([request(controller.signal), timedOut]);
   } finally {
     if (timeout) window.clearTimeout(timeout);
+    callerSignal?.removeEventListener("abort", abortFromCaller);
   }
 }
 
@@ -284,4 +288,32 @@ export function newOperationId(now = Date.now()): string {
     }
   }
   return encodedTime + encodedRandom.slice(0, 16);
+}
+
+export async function getThumbnail(id: string, signal?: AbortSignal, requestTimeout = 10_000): Promise<Blob | null> {
+  return withRequestTimeout(async (requestSignal) => {
+    const response = await fetch(`/api/v1/content/${encodeURIComponent(id)}/thumbnail`, { credentials: "same-origin", signal: requestSignal });
+    if (response.status === 404) return null;
+    if (!response.ok) await parseResponse(response);
+    return response.blob();
+  }, requestTimeout, signal);
+}
+
+export async function uploadThumbnail(id: string, file: File, csrfToken: string, signal?: AbortSignal, requestTimeout = 10_000): Promise<void> {
+  return withRequestTimeout(async (requestSignal) => {
+    const response = await fetch(`/api/v1/content/${encodeURIComponent(id)}/thumbnail`, {
+      method: "PUT", credentials: "same-origin", body: file, signal: requestSignal,
+      headers: { "Content-Type": file.type, "X-CSRF-Token": csrfToken },
+    });
+    if (!response.ok) await parseResponse(response);
+  }, requestTimeout, signal);
+}
+
+export async function deleteThumbnail(id: string, csrfToken: string, signal?: AbortSignal, requestTimeout = 10_000): Promise<void> {
+  return withRequestTimeout(async (requestSignal) => {
+    const response = await fetch(`/api/v1/content/${encodeURIComponent(id)}/thumbnail`, {
+      method: "DELETE", credentials: "same-origin", signal: requestSignal, headers: { "X-CSRF-Token": csrfToken },
+    });
+    if (!response.ok) await parseResponse(response);
+  }, requestTimeout, signal);
 }

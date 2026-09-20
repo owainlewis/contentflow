@@ -12,6 +12,9 @@ import (
 )
 
 type Store interface {
+	GetThumbnail(context.Context, string, string) (Thumbnail, error)
+	PutThumbnail(context.Context, string, string, Thumbnail) error
+	DeleteThumbnail(context.Context, string, string) error
 	Receipt(context.Context, string, string, string, time.Time) (MutationResult, bool, error)
 	Create(context.Context, Item, Receipt) (MutationResult, error)
 	BatchCreate(context.Context, []Item, Receipt) (MutationResult, error)

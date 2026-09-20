@@ -25,7 +25,7 @@ func newPostgresStore(t *testing.T) (*PostgresStore, *pgxpool.Pool) {
 		t.Fatalf("open test database: %v", err)
 	}
 	t.Cleanup(pool.Close)
-	if _, err := pool.Exec(context.Background(), "truncate content_items, mutation_receipts"); err != nil {
+	if _, err := pool.Exec(context.Background(), "truncate content_thumbnails, content_items, mutation_receipts"); err != nil {
 		t.Fatalf("truncate: %v", err)
 	}
 	return NewPostgresStore(pool), pool

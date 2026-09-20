@@ -684,7 +684,7 @@ func requiresOwnerSession(method, path string) bool {
 }
 
 func requiredScope(method, path string) Scope {
-	if strings.HasPrefix(path, "/api/v1/assets") || strings.Contains(path, "/assets") {
+	if strings.HasPrefix(path, "/api/v1/assets") || strings.Contains(path, "/assets") || (strings.HasPrefix(path, "/api/v1/content/") && strings.HasSuffix(path, "/thumbnail")) {
 		if isMutation(method) {
 			return ScopeAssetsWrite
 		}
