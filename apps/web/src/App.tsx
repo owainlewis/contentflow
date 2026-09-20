@@ -1,22 +1,13 @@
+import { Button, Input, Select } from "./ui";
 import {
   AlertTriangle,
   ArrowLeft,
-  CalendarDays,
   Check,
   ChevronDown,
-  Clock3,
-  Inbox,
-  LayoutGrid,
-  Lightbulb,
   LoaderCircle,
-  Menu,
-  MoreHorizontal,
   Moon,
-  PanelLeftClose,
-  PanelLeftOpen,
   Plus,
   Search,
-  Settings as SettingsIcon,
   SquarePen,
   Sun,
   Trash2,
@@ -41,7 +32,6 @@ import {
   type ContentStatus,
   type ContentSummary,
   type ContentType,
-  type YouTubeContent,
 } from "./api";
 import PieceEditor from "./PieceEditor";
 import TopicPieces from "./TopicPieces";
@@ -53,7 +43,7 @@ import { AutosaveManager, type ConflictView, type SaveState } from "./autosave";
 import { normalizeUnicode15Title } from "./unicode-normalization";
 
 type Theme = "light" | "dark";
-type View = "workspace" | "weekly" | "calendar" | "settings";
+type View = "topics" | "library" | "workspace" | "weekly" | "calendar" | "settings";
 
 // The server serves index.html for any extensionless path, so views are real
 // URLs: deep links and the browser back button both work.
@@ -61,10 +51,12 @@ function viewFromPath(pathname: string): View {
   if (pathname.startsWith("/weekly")) return "weekly";
   if (pathname.startsWith("/calendar")) return "calendar";
   if (pathname.startsWith("/settings")) return "settings";
-  return "workspace";
+  if (pathname.startsWith("/content")) return "workspace";
+  if (pathname.startsWith("/library")) return "library";
+  return "topics";
 }
 
-const viewPaths: Record<View, string> = { workspace: "/", weekly: "/weekly", calendar: "/calendar", settings: "/settings" };
+const viewPaths: Record<View, string> = { topics: "/", library: "/library", workspace: "/content", weekly: "/weekly", calendar: "/calendar", settings: "/settings" };
 type LifecycleAction = "delete";
 type CreatePlan = { day: string; title: string; attemptId: string };
 
@@ -85,8 +77,6 @@ class ScheduleLock {
 }
 
 const enabledTypesKey = "contentflow-enabled-types";
-const sidebarCollapsedKey = "contentflow-sidebar-collapsed";
-const libraryCollapsedKey = "contentflow-library-collapsed";
 
 // Preferences live in localStorage beside the theme. They are per-browser, not
 // per-account, because the API has no settings resource to store them in.
@@ -104,38 +94,8 @@ function readEnabledTypes(): ContentType[] {
   }
 }
 
-function readSidebarCollapsed(): boolean {
-  try {
-    return window.localStorage.getItem(sidebarCollapsedKey) === "true";
-  } catch {
-    return false;
-  }
-}
-
-function readLibraryCollapsed(): boolean {
-  try {
-    return window.localStorage.getItem(libraryCollapsedKey) === "true";
-  } catch {
-    return false;
-  }
-}
-
-function wordCount(value: string) {
-  return value.trim() ? value.trim().split(/\s+/).length : 0;
-}
-
 function normalizeSearchTitle(value: string) {
   return normalizeUnicode15Title(value);
-}
-
-function documentWordCount(detail: ContentDetail) {
-  if (detail.type === "youtube") {
-    const content = detail.content as YouTubeContent;
-    return content.sections.reduce((total, section) => total + wordCount(section.body), 0) + wordCount(content.transcript);
-  }
-  if ("body" in detail.content) return wordCount(detail.content.body);
-  if ("script" in detail.content) return wordCount(detail.content.script);
-  return 0;
 }
 
 function formatRelativeTime(value: string) {
@@ -166,7 +126,7 @@ function saveLabel(state: SaveState) {
 export default function Home() {
   const [summaries, setSummaries] = useState<ContentSummary[]>([]);
   const [allSummaries, setAllSummaries] = useState<ContentSummary[]>([]);
-  const [selectedId, setSelectedId] = useState("");
+  const [selectedId, setSelectedId] = useState(() => new URLSearchParams(window.location.search).get("id") ?? "");
   const [selected, setSelected] = useState<ContentDetail>();
   const [documents, setDocuments] = useState<Record<string, ContentDetail>>({});
   const [createTopicId, setCreateTopicId] = useState("");
@@ -198,12 +158,8 @@ export default function Home() {
   const [scheduleUncertainIds, setScheduleUncertainIds] = useState<ReadonlySet<string>>(() => new Set());
   const [workspaceId, setWorkspaceId] = useState<string>();
   const [enabledTypes, setEnabledTypes] = useState<ContentType[]>(readEnabledTypes);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(readSidebarCollapsed);
-  const [libraryCollapsed, setLibraryCollapsed] = useState<boolean>(readLibraryCollapsed);
   const [createPending, setCreatePending] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
-  const [libraryOpen, setLibraryOpen] = useState(false);
-  const [isCompact, setIsCompact] = useState(false);
   const [theme, setTheme] = useState<Theme>("dark");
   const [saveStates, setSaveStates] = useState<Record<string, SaveState>>({});
   const [autosaveManager, setAutosaveManager] = useState<AutosaveManager>();
@@ -214,13 +170,7 @@ export default function Home() {
   const [searchFocusRequest, setSearchFocusRequest] = useState(0);
   const createModalRef = useRef<HTMLElement>(null);
   const deleteModalRef = useRef<HTMLElement>(null);
-  const libraryPanelRef = useRef<HTMLElement>(null);
-  const libraryCollapseButtonRef = useRef<HTMLButtonElement>(null);
-  const libraryExpandButtonRef = useRef<HTMLButtonElement>(null);
-  const libraryToggleRequestedRef = useRef(false);
   const searchFocusRequestedRef = useRef(false);
-  const mobileLibraryButtonRef = useRef<HTMLButtonElement>(null);
-  const libraryWasOpenRef = useRef(false);
   const searchRef = useRef<HTMLInputElement>(null);
   const selectedIdRef = useRef("");
   const allSummariesRef = useRef<ContentSummary[]>([]);
@@ -232,7 +182,6 @@ export default function Home() {
   const lifecycleOperationIdsRef = useRef(new Map<string, string>());
   const lifecycleSynchronizationRef = useRef(0);
   const pendingLifecycleRef = useRef<PendingLifecycle | undefined>(undefined);
-  const pendingDeletedSelectionRef = useRef(false);
   const refreshLibraryRef = useRef<(filters?: LibraryFilters) => Promise<void>>(async () => undefined);
   const requestSequence = useRef(0);
   const sessionGenerationRef = useRef(0);
@@ -270,7 +219,7 @@ export default function Home() {
     const currentSelectedId = selectedIdRef.current;
     if (currentSelectedId && !mergedAll.some((item) => item.id === currentSelectedId)) {
       manager?.discard(currentSelectedId);
-      const replacementId = mergedVisible[0]?.id ?? "";
+      const replacementId = "";
       selectedIdRef.current = replacementId;
       setSelectedId(replacementId);
       setSelected(undefined);
@@ -282,22 +231,11 @@ export default function Home() {
       });
       setActionError("");
     }
-    if (pendingDeletedSelectionRef.current) {
-      pendingDeletedSelectionRef.current = false;
-      if (!selectedIdRef.current) {
-        const replacementId = mergedVisible[0]?.id;
-        if (replacementId) {
-          selectedIdRef.current = replacementId;
-          setSelectedId(replacementId);
-        }
-      }
-    }
     setFilterError("");
   }, [query, statusFilter, typeFilter]);
 
   useEffect(() => {
     selectedIdRef.current = selectedId;
-    if (selectedId) pendingDeletedSelectionRef.current = false;
   }, [selectedId]);
   useLayoutEffect(() => {
     activeFiltersRef.current = { query, type: typeFilter, status: statusFilter };
@@ -318,7 +256,6 @@ export default function Home() {
         summariesRef.current = items;
         setAllSummaries(items);
         setSummaries(items);
-        setSelectedId((current) => current || items[0]?.id || "");
         setAuthState("ready");
       } catch (error) {
         if (!active) return;
@@ -427,67 +364,21 @@ export default function Home() {
   }, [detailReload, selectedId]);
 
   useEffect(() => {
-    const sync = () => setView(viewFromPath(window.location.pathname));
+    const sync = () => {
+      const next = viewFromPath(window.location.pathname);
+      if (next === "topics" || next === "library") { setTypeFilter("all"); setStatusFilter("all"); setQuery(""); }
+      setView(next);
+      setSelectedId(new URLSearchParams(window.location.search).get("id") ?? "");
+    };
     window.addEventListener("popstate", sync);
     return () => window.removeEventListener("popstate", sync);
   }, []);
 
   useEffect(() => {
-    if (typeof window.matchMedia !== "function") return;
-    const media = window.matchMedia("(max-width: 900px)");
-    const sync = () => setIsCompact(media.matches);
-    sync();
-    media.addEventListener("change", sync);
-    return () => media.removeEventListener("change", sync);
-  }, []);
-
-  useEffect(() => {
-    if (!isCompact) {
-      libraryWasOpenRef.current = false;
-      return;
-    }
-    if (!libraryOpen) {
-      if (libraryWasOpenRef.current) mobileLibraryButtonRef.current?.focus();
-      libraryWasOpenRef.current = false;
-      return;
-    }
-    const panel = libraryPanelRef.current;
-    if (!panel) return;
-    libraryWasOpenRef.current = true;
-    const focusable = Array.from(panel.querySelectorAll<HTMLElement>('button:not([disabled]), input, textarea, select, [tabindex]:not([tabindex="-1"])'));
-    if (!searchFocusRequestedRef.current && !panel.contains(document.activeElement)) focusable[0]?.focus();
-    function handleKey(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        setLibraryOpen(false);
-        return;
-      }
-      if (event.key !== "Tab" || !focusable.length) return;
-      const first = focusable[0];
-      const last = focusable[focusable.length - 1];
-      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
-      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
-    }
-    document.addEventListener("keydown", handleKey);
-    return () => document.removeEventListener("keydown", handleKey);
-  }, [isCompact, libraryOpen]);
-
-  useEffect(() => {
-    if (!libraryToggleRequestedRef.current || isCompact) return;
-    libraryToggleRequestedRef.current = false;
-    (libraryCollapsed ? libraryExpandButtonRef : libraryCollapseButtonRef).current?.focus();
-  }, [isCompact, libraryCollapsed]);
-
-  useEffect(() => {
-    if (!searchFocusRequestedRef.current) return;
-    if (view !== "workspace") return;
-    const libraryAccessible = isCompact ? libraryOpen : !libraryCollapsed;
-    if (!libraryAccessible) return;
-    const search = searchRef.current;
-    if (!search) return;
-    search.focus();
-    if (document.activeElement === search) searchFocusRequestedRef.current = false;
-  }, [isCompact, libraryCollapsed, libraryOpen, searchFocusRequest, view]);
+    if (!searchFocusRequestedRef.current || view !== "library") return;
+    searchRef.current?.focus();
+    searchFocusRequestedRef.current = false;
+  }, [searchFocusRequest, view]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => setTheme(document.documentElement.dataset.theme === "light" ? "light" : "dark"), 0);
@@ -518,35 +409,27 @@ export default function Home() {
 
   useEffect(() => {
     function shortcut(event: KeyboardEvent) {
-      if (createOpen || deleteOpen) return;
+      if (createOpen || deleteOpen || (event.target instanceof Element && event.target.closest('[role="dialog"], [role="alertdialog"]'))) return;
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
         event.preventDefault();
         searchFocusRequestedRef.current = true;
         setSearchFocusRequest((request) => request + 1);
-        const compactNow = typeof window.matchMedia === "function" && window.matchMedia("(max-width: 900px)").matches;
-        if (view !== "workspace") {
-          if (window.location.pathname !== viewPaths.workspace) window.history.pushState({}, "", viewPaths.workspace);
-          setView("workspace");
-        }
-        if (compactNow && !libraryOpen) {
-          setLibraryOpen(true);
-        } else if (!compactNow && libraryCollapsed) {
-          setLibraryCollapsed(false);
-          try {
-            window.localStorage.setItem(libraryCollapsedKey, "false");
-          } catch {
-            // The library still opens for this session.
-          }
+        if (view !== "library") {
+          window.history.pushState({}, "", viewPaths.library);
+          setTypeFilter("all");
+          setStatusFilter("all");
+          setQuery("");
+          setView("library");
         }
       } else if (!event.metaKey && !event.ctrlKey && !event.altKey && event.key.toLowerCase() === "n" && !(event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLSelectElement)) {
         event.preventDefault();
-        // Mirrors the sidebar button this shortcut is labelled on: always ask.
+        // Keep creation available from every page.
         setCreateOpen(true);
       }
     }
     document.addEventListener("keydown", shortcut);
     return () => document.removeEventListener("keydown", shortcut);
-  }, [createOpen, deleteOpen, libraryCollapsed, libraryOpen, view]);
+  }, [createOpen, deleteOpen, view]);
 
   const counts = useMemo(() => allSummaries.reduce<Record<ContentType, number>>((result, item) => {
     result[item.type] += 1;
@@ -563,9 +446,17 @@ export default function Home() {
     : calendarError;
 
   function navigate(next: View) {
+    if (next === "topics" || next === "library") { setTypeFilter("all"); setStatusFilter("all"); setQuery(""); }
     if (window.location.pathname !== viewPaths[next]) window.history.pushState({}, "", viewPaths[next]);
     setView(next);
-    setLibraryOpen(false);
+  }
+
+  function openContent(id: string) {
+    setActionError("");
+    setSelectedId(id);
+    const path = `/content?id=${encodeURIComponent(id)}`;
+    if (window.location.pathname + window.location.search !== path) window.history.pushState({}, "", path);
+    setView("workspace");
   }
 
   async function submitPasswordSignIn(event: React.FormEvent) {
@@ -612,27 +503,6 @@ export default function Home() {
     // Hiding the type currently being filtered would leave the library filtered
     // by something no longer reachable from the menu.
     if (isOn && typeFilter === type) setTypeFilter("all");
-  }
-
-  function toggleSidebar() {
-    const next = !sidebarCollapsed;
-    setSidebarCollapsed(next);
-    try {
-      window.localStorage.setItem(sidebarCollapsedKey, String(next));
-    } catch {
-      // Collapse still applies for this session.
-    }
-  }
-
-  function toggleLibrary() {
-    libraryToggleRequestedRef.current = true;
-    const next = !libraryCollapsed;
-    setLibraryCollapsed(next);
-    try {
-      window.localStorage.setItem(libraryCollapsedKey, String(next));
-    } catch {
-      // Collapse still applies for this session.
-    }
   }
 
   function setThemeChoice(next: Theme) {
@@ -746,11 +616,9 @@ export default function Home() {
         setQuery("");
         setTypeFilter(retainedType);
         setStatusFilter("all");
-        setSelectedId(topicId || result.item_ids[0]);
-        navigate("workspace");
+        openContent(topicId || result.item_ids[0]);
         setCreateOpen(false);
-        setLibraryOpen(false);
-      }
+          }
       const refresh = refreshLibraryRef.current(clearedFilters);
       const refreshSequence = requestSequence.current;
       try {
@@ -870,6 +738,7 @@ export default function Home() {
   }
 
   function startCreate() {
+    if (view === "topics") { void createItem("topic"); return; }
     if (typeFilter !== "all") void createItem(typeFilter);
     else setCreateOpen(true);
   }
@@ -912,15 +781,11 @@ export default function Home() {
         setSummaries((items) => items.filter((item) => item.id !== document.id));
         const deletedSelection = selectedIdRef.current === document.id;
         if (deletedSelection) {
-          const activeFilters = activeFiltersRef.current;
-          const immediateReplacementId = !activeFilters.query && activeFilters.type === "all" && activeFilters.status === "all" ? visibleRemaining[0]?.id : undefined;
-          selectedIdRef.current = immediateReplacementId ?? "";
-          setSelectedId(immediateReplacementId ?? "");
-          if (!immediateReplacementId) {
-            pendingDeletedSelectionRef.current = true;
-            setSelected(undefined);
-            setConflict(undefined);
-          }
+          selectedIdRef.current = "";
+          setSelectedId("");
+          setSelected(undefined);
+          setConflict(undefined);
+          if (viewFromPath(window.location.pathname) === "workspace") navigate(document.type === "topic" ? "topics" : "library");
         }
         pendingLifecycleRef.current = undefined;
         setPendingLifecycle(undefined);
@@ -929,13 +794,6 @@ export default function Home() {
         try {
           await refresh;
           if (refreshSequence !== requestSequence.current || lifecycleSynchronizationRef.current !== synchronizationGeneration) return;
-          if (deletedSelection && !selectedIdRef.current) {
-            const replacementId = summariesRef.current[0]?.id;
-            if (replacementId) {
-              selectedIdRef.current = replacementId;
-              setSelectedId(replacementId);
-            }
-          }
         } catch (error) {
           if (refreshSequence !== requestSequence.current || lifecycleSynchronizationRef.current !== synchronizationGeneration) return;
           if (isSessionRecoveryError(error)) {
@@ -991,16 +849,16 @@ export default function Home() {
     <h1>ContentFlow</h1>
     <p>Sign in to open your content workspace.</p>
     <form className="sign-in-form" onSubmit={(event) => void submitPasswordSignIn(event)}>
-      <label>Email<input type="email" autoComplete="username" required value={signInEmail} onChange={(event) => setSignInEmail(event.target.value)} /></label>
-      <label>Password<input type="password" autoComplete="current-password" required value={signInPassword} onChange={(event) => setSignInPassword(event.target.value)} /></label>
+      <label>Email<Input type="email" autoComplete="username" required value={signInEmail} onChange={(event) => setSignInEmail(event.target.value)} /></label>
+      <label>Password<Input type="password" autoComplete="current-password" required value={signInPassword} onChange={(event) => setSignInPassword(event.target.value)} /></label>
       {signInError && <p className="inline-error" role="alert">{signInError}</p>}
-      <button className="primary-button" type="submit" disabled={signInPending}>{signInPending ? "Signing in…" : "Sign in"}</button>
+      <Button className="primary-button" type="submit" disabled={signInPending}>{signInPending ? "Signing in…" : "Sign in"}</Button>
     </form>
     <div className="sign-in-divider"><span>or</span></div>
     <a className="secondary-button" href="/api/v1/auth/login">Sign in with Google</a>
   </main>;
-  if (authState === "error") return <main className="centered-state"><AlertTriangle /><h1>ContentFlow is unavailable</h1><p>{loadError}</p><button className="primary-button" onClick={() => window.location.reload()}>Try again</button></main>;
-  if (sessionExpired) return <main className="centered-state"><AlertTriangle /><h1>Your session expired</h1><p>{pendingSessionLifecycle ? `Your ${pendingSessionLifecycle.action} action for “${displayTitle(pendingSessionLifecycle.document)}” is waiting. Sign in in a new tab, then return here to retry it.` : "Your unsaved changes are still queued. Sign in in a new tab, then return here to continue saving."}</p><a className="primary-button" href="/api/v1/auth/login" target="_blank" rel="noreferrer">Open sign in</a><button className="secondary-button" disabled={reauthChecking} onClick={() => void resumeExpiredSession()}>{reauthChecking ? "Checking…" : "I’ve signed in"}</button>{reauthError && <p className="inline-error" role="alert">{reauthError}</p>}</main>;
+  if (authState === "error") return <main className="centered-state"><AlertTriangle /><h1>ContentFlow is unavailable</h1><p>{loadError}</p><Button className="primary-button" onClick={() => window.location.reload()}>Try again</Button></main>;
+  if (sessionExpired) return <main className="centered-state"><AlertTriangle /><h1>Your session expired</h1><p>{pendingSessionLifecycle ? `Your ${pendingSessionLifecycle.action} action for “${displayTitle(pendingSessionLifecycle.document)}” is waiting. Sign in in a new tab, then return here to retry it.` : "Your unsaved changes are still queued. Sign in in a new tab, then return here to continue saving."}</p><a className="primary-button" href="/api/v1/auth/login" target="_blank" rel="noreferrer">Open sign in</a><Button className="secondary-button" disabled={reauthChecking} onClick={() => void resumeExpiredSession()}>{reauthChecking ? "Checking…" : "I’ve signed in"}</Button>{reauthError && <p className="inline-error" role="alert">{reauthError}</p>}</main>;
 
   const createLabel = typeFilter === "all" ? "New content" : `New ${typeMeta[typeFilter].label}`;
   const currentSaveState = selected ? saveStates[selected.id] ?? "saved" : "saved";
@@ -1012,60 +870,51 @@ export default function Home() {
   const editorLocked = selectedSchedulePending || Boolean(selectedPendingLifecycle);
   const lifecycleDisabled = currentSaveState !== "saved" || Boolean(pendingLifecycle) || selectedSchedulePending;
 
-  return <main className={`app-shell ${sidebarCollapsed ? "sidebar-is-collapsed" : ""} ${libraryCollapsed ? "library-is-collapsed" : ""}`}>
-    <aside className="sidebar" aria-label="Main navigation">
-      <div className="brand-row"><div className="brand-mark"><Zap size={17} fill="currentColor" /></div><span className="brand-name">ContentFlow</span><button className="icon-button sidebar-collapse" onClick={toggleSidebar} aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"} aria-expanded={!sidebarCollapsed}>{sidebarCollapsed ? <PanelLeftOpen size={17} /> : <PanelLeftClose size={17} />}</button></div>
-      <button className="new-content-button" onClick={() => setCreateOpen(true)} title={sidebarCollapsed ? "New content" : undefined}><Plus size={18} /><span>New content</span><span className="key-hint">N</span></button>
-      <nav className="primary-nav"><button className={`nav-item ${view === "workspace" && typeFilter === "topic" ? "active" : ""}`} onClick={() => { setTypeFilter("topic"); navigate("workspace"); }}><Lightbulb size={18} /><span>Topic groups</span><span className="nav-count">{allSummaries.filter((item) => item.type === "topic").length}</span></button><button className={`nav-item ${view === "workspace" && typeFilter === "all" ? "active" : ""}`} onClick={() => { setTypeFilter("all"); navigate("workspace"); }} title={sidebarCollapsed ? "All content" : undefined}><Inbox size={18} /><span>All content</span><span className="nav-count">{allSummaries.length}</span></button><button className={`nav-item ${view === "weekly" ? "active" : ""}`} onClick={() => navigate("weekly")} title={sidebarCollapsed ? "Weekly" : undefined}><LayoutGrid size={18} /><span>Weekly</span></button><button className={`nav-item ${view === "calendar" ? "active" : ""}`} onClick={() => navigate("calendar")} title={sidebarCollapsed ? "Calendar" : undefined}><CalendarDays size={18} /><span>Calendar</span></button></nav>
-      <div className="nav-section"><p className="nav-label">Content types</p>{enabledTypes.map((type) => <button key={type} className={`nav-item ${typeFilter === type ? "active" : ""}`} onClick={() => { setTypeFilter(type); navigate("workspace"); }} title={sidebarCollapsed ? typeMeta[type].label : undefined}><span className="nav-type-icon" style={{ color: typeMeta[type].color }}><TypeIcon type={type} /></span><span>{typeMeta[type].label}</span><span className="nav-count">{counts[type]}</span></button>)}</div>
-      <div className="sidebar-bottom"><button className={`nav-item ${view === "settings" ? "active" : ""}`} onClick={() => navigate("settings")} title={sidebarCollapsed ? "Settings" : undefined}><SettingsIcon size={18} /><span>Settings</span></button><div className="profile-row"><div className="avatar">OL</div><div><strong>Owain Lewis</strong><span>Personal workspace</span></div><MoreHorizontal size={17} /></div></div>
-    </aside>
+  const visibleItems = summaries.filter((item) => view === "topics" ? item.type === "topic" : item.type !== "topic");
+  const listTitle = view === "topics" ? "Topics" : "Library";
+  return <main className="app-shell app-redesign">
+    <header className="app-topbar">
+      <Button className="app-brand" onClick={() => navigate("topics")} aria-label="ContentFlow home"><div className="brand-mark"><Zap size={17} fill="currentColor" /></div><span className="brand-name">ContentFlow</span></Button>
+      <nav className="app-nav" aria-label="Main navigation">{([["weekly", "Week"], ["topics", "Topics"], ["library", "Library"], ["settings", "Settings"]] as const).map(([page, label]) => <Button key={page} className={view === page ? "active" : ""} aria-current={view === page ? "page" : undefined} onClick={() => navigate(page)}>{label}</Button>)}</nav>
+      <div className="app-topbar-actions"><Button className="icon-button" onClick={toggleTheme} aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}>{theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}</Button><Button className="primary-button" onClick={() => { setCreateTopicId(""); setCreateOpen(true); }}><Plus size={16} />New content</Button></div>
+    </header>
 
-    <nav className="mobile-view-nav" aria-label="Mobile navigation">
-      <button className={view === "workspace" ? "active" : ""} aria-current={view === "workspace" ? "page" : undefined} aria-label="Open all content" onClick={() => { setTypeFilter("all"); navigate("workspace"); }}><Inbox size={18} /><span>Content</span></button>
-      <button className={view === "weekly" ? "active" : ""} aria-current={view === "weekly" ? "page" : undefined} aria-label="Open weekly view" onClick={() => navigate("weekly")}><LayoutGrid size={18} /><span>Weekly</span></button>
-      <button className={view === "calendar" ? "active" : ""} aria-current={view === "calendar" ? "page" : undefined} aria-label="Open calendar view" onClick={() => navigate("calendar")}><CalendarDays size={18} /><span>Calendar</span></button>
-      <button className={view === "settings" ? "active" : ""} aria-current={view === "settings" ? "page" : undefined} aria-label="Open settings view" onClick={() => navigate("settings")}><SettingsIcon size={18} /><span>Settings</span></button>
-    </nav>
+    {(view === "topics" || view === "library") && <section className="content-list-page" aria-label={view === "topics" ? "Topic groups" : "Content library"}>
+      <header className="content-list-heading"><div><p className="eyebrow">Your workspace</p><h1>{listTitle}</h1><p>{view === "topics" ? "One idea. Every version, together." : "Find your posts, scripts, and videos."}</p></div><Button className="primary-button" disabled={createPending} onClick={startCreate}><Plus size={16} />{view === "topics" ? "New topic" : "New piece"}</Button></header>
+      <div className="content-list-filters">{view === "library" && <label className="search-box"><Search size={17} /><Input ref={searchRef} value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search content" aria-label="Search content titles" /><span className="key-hint">⌘ K</span></label>}
+      {view === "library" && <Select aria-label="Filter by platform" value={typeFilter} onChange={(event) => setTypeFilter(event.target.value as ContentType | "all")}><option value="all">All platforms</option>{enabledTypes.map((type) => <option value={type} key={type}>{typeMeta[type].label}</option>)}</Select>}
+      <Select aria-label="Filter by status" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as ContentStatus | "all")}><option value="all">All statuses</option>{contentStatuses.map((status) => <option value={status} key={status}>{statusLabels[status]}</option>)}</Select></div>
+      {filterError && <p className="inline-error" role="alert">{filterError}</p>}
+      {actionError && <p className="inline-error" role="alert">{actionError}</p>}
+      <div className="library-summary"><span>{visibleItems.length} {view === "topics" ? "topics" : "pieces"}</span><span>Last edited</span></div>
+      <div className="content-list-grid">{visibleItems.map((item) => <Button className="content-card" key={item.id} onClick={() => openContent(item.id)}><span className="card-icon" style={{ color: typeMeta[item.type].color }}><TypeIcon type={item.type} size={20} /></span><span className="card-copy"><strong>{displayTitle(item)}</strong><span className="card-meta"><span className={`status-dot ${item.status}`} />{statusLabels[item.status]} · {formatRelativeTime(item.updated_at)}</span>{item.type === "topic" ? <span className="topic-piece-count">{allSummaries.filter((piece) => piece.topic_id === item.id).length} related pieces</span> : <span>{typeMeta[item.type].label}{item.format ? ` · ${item.format}` : ""}{item.topic_id ? ` · ${displayTitle(allSummaries.find((topic) => topic.id === item.topic_id) ?? item)}` : " · Standalone"}</span>}</span><span className="card-arrow">›</span></Button>)}</div>
+      {!visibleItems.length && <div className="empty-state"><SquarePen size={28} /><h2>{query || statusFilter !== "all" || typeFilter !== "all" ? "No matches" : view === "topics" ? "Start with a topic" : "Your library is empty"}</h2><p>{view === "topics" ? "Bring an idea and its platform versions into one place." : "Create a standalone piece or add one to a topic."}</p><Button onClick={startCreate}>{view === "topics" ? "Create a topic" : "Create a piece"}</Button></div>}
+    </section>}
 
-    {view === "workspace" && <>
-    <section id="content-library" ref={libraryPanelRef} className={`library-panel ${libraryOpen ? "open" : ""}`} aria-label="Content library" aria-hidden={isCompact ? !libraryOpen : libraryCollapsed || undefined} inert={isCompact ? !libraryOpen : libraryCollapsed}>
-      <div className="library-header"><button className="icon-button mobile-close" onClick={() => setLibraryOpen(false)} aria-label="Close library"><ArrowLeft size={19} /></button><div><p className="eyebrow">Workspace</p><h1>{typeFilter === "all" ? "All content" : typeMeta[typeFilter].label}</h1></div><button ref={libraryCollapseButtonRef} className="icon-button library-collapse" onClick={toggleLibrary} aria-label="Collapse content library" aria-controls="content-library" aria-expanded="true"><PanelLeftClose size={18} /></button><button className="icon-button compact-new" onClick={startCreate} aria-label={createLabel}><Plus size={19} /></button></div>
-      <label className="search-box"><Search size={17} /><input ref={searchRef} value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search titles" aria-label="Search content titles" /><span className="key-hint">⌘ K</span></label>
-      <div className="filter-row" aria-label="Filter by status"><button className={statusFilter === "all" ? "active" : ""} onClick={() => setStatusFilter("all")}>All</button>{contentStatuses.map((status) => <button key={status} className={statusFilter === status ? "active" : ""} onClick={() => setStatusFilter(status)}>{statusLabels[status]}</button>)}</div>
-      {filterError && <div className="inline-error" role="alert">{filterError}</div>}
-      <div className="library-summary"><span>{summaries.length} {summaries.length === 1 ? "item" : "items"}</span><span>Last edited <ChevronDown size={14} /></span></div>
-      <div className="content-list">
-        {summaries.map((item) => { return <button className={`content-card ${selectedId === item.id ? "selected" : ""}`} aria-current={selectedId === item.id ? "true" : undefined} key={item.id} onClick={() => { setActionError(""); setSelectedId(item.id); setLibraryOpen(false); }}><span className="card-icon" style={{ color: typeMeta[item.type].color }}><TypeIcon type={item.type} size={17} /></span><span className="card-copy"><strong className={item.working_title.trim() ? "" : "card-untitled"}>{displayTitle(item)}</strong><span className="card-meta"><span className={`status-dot ${item.status}`} />{statusLabels[item.status]}<span className="meta-separator">·</span>{formatRelativeTime(item.updated_at)}</span></span><span className="card-arrow">›</span></button>; })}
-        {!summaries.length && <div className="empty-state"><Search size={22} /><strong>{allSummaries.length ? "No content found" : "Your workspace is empty"}</strong><span>{allSummaries.length ? "Try another title or clear your filters." : "Create your first piece of content."}</span>{allSummaries.length ? <button onClick={() => { setQuery(""); setStatusFilter("all"); setTypeFilter("all"); }}>Clear filters</button> : <button onClick={startCreate}>{createLabel}</button>}</div>}
-      </div>
-    </section>
-
-    <section className="editor-panel" aria-label="Content editor" aria-hidden={isCompact && libraryOpen ? true : undefined} inert={isCompact && libraryOpen ? true : undefined}>
-      <header className="mobile-app-header"><button ref={mobileLibraryButtonRef} className="icon-button" onClick={() => setLibraryOpen(true)} aria-label="Open content library"><Menu size={20} /></button><div className="brand-mark"><Zap size={15} fill="currentColor" /></div><strong>ContentFlow</strong><button className="icon-button mobile-theme-toggle" onClick={toggleTheme} aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}>{theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}</button><button className="icon-button" onClick={startCreate} aria-label={createLabel}><Plus size={20} /></button></header>
+    {view === "workspace" && <section className="editor-panel focus-workspace" aria-label="Content editor">
+      <div className="workspace-back"><Button className="text-button" onClick={() => selected?.topic_id ? openContent(selected.topic_id) : navigate(selected?.type === "topic" ? "topics" : "library")}><ArrowLeft size={16} />{selected?.topic_id ? "Back to topic" : selected?.type === "topic" ? "Back to topics" : "Back to library"}</Button></div>
       {selected ? <>
-        <div className="editor-toolbar"><div className="editor-context">{libraryCollapsed && !isCompact && <button ref={libraryExpandButtonRef} className="icon-button editor-library-toggle" onClick={toggleLibrary} aria-label="Expand content library" aria-controls="content-library" aria-expanded="false"><PanelLeftOpen size={18} /></button>}<span className="type-pill" style={{ color: typeMeta[selected.type].color }}><TypeIcon type={selected.type} />{typeMeta[selected.type].label}</span><span className="toolbar-divider" /><label className="status-select"><span className={`status-dot ${selected.status}`} /><select aria-label="Content status" value={selected.status} disabled={editorLocked} onChange={(event) => updateSelected((current) => ({ ...current, status: event.target.value as ContentStatus }))}>{contentStatuses.map((status) => <option value={status} key={status}>{statusLabels[status]}</option>)}</select><ChevronDown size={14} /></label></div><div className="editor-actions">{selectedSchedulePending ? <span className="saved-state saving" role="status"><LoaderCircle className="spin" size={14} />Updating schedule…</span> : <span className={`saved-state ${currentSaveState}`} aria-live="polite">{currentSaveState === "saving" || currentSaveState === "retrying" ? <LoaderCircle className="spin" size={14} /> : currentSaveState === "conflict" || currentSaveState === "error" ? <AlertTriangle size={14} /> : <Check size={14} />}{saveLabel(currentSaveState)}</span>}</div></div>
-        {foreignPendingLifecycle && <div className="inline-error" role="alert">Review the {foreignPendingLifecycle.action} conflict for “{foreignPendingLifecycleTitle ?? "another item"}” before continuing. <button onClick={() => { setActionError(""); setSelectedId(foreignPendingLifecycle.id); setLibraryOpen(false); }}>Review item</button></div>}
+        <div className="editor-toolbar"><div className="editor-context"><span className="type-pill" style={{ color: typeMeta[selected.type].color }}><TypeIcon type={selected.type} />{typeMeta[selected.type].label}</span><span className="toolbar-divider" /><label className="status-select"><span className={`status-dot ${selected.status}`} /><Select aria-label="Content status" value={selected.status} disabled={editorLocked} onChange={(event) => updateSelected((current) => ({ ...current, status: event.target.value as ContentStatus }))}>{contentStatuses.map((status) => <option value={status} key={status}>{statusLabels[status]}</option>)}</Select><ChevronDown size={14} /></label></div><div className="editor-actions">{selectedSchedulePending ? <span className="saved-state saving" role="status"><LoaderCircle className="spin" size={14} />Updating schedule…</span> : <span className={`saved-state ${currentSaveState}`} aria-live="polite">{currentSaveState === "saving" || currentSaveState === "retrying" ? <LoaderCircle className="spin" size={14} /> : currentSaveState === "conflict" || currentSaveState === "error" ? <AlertTriangle size={14} /> : <Check size={14} />}{saveLabel(currentSaveState)}</span>}</div></div>
+        {foreignPendingLifecycle && <div className="inline-error" role="alert">Review the {foreignPendingLifecycle.action} conflict for “{foreignPendingLifecycleTitle ?? "another item"}” before continuing. <Button onClick={() => { setActionError(""); openContent(foreignPendingLifecycle.id); }}>Review item</Button></div>}
         {actionError && <div className="inline-error" role="alert">{actionError}</div>}
-        {currentSaveState === "error" && <div className="inline-error" role="alert">Check the fields below. Your edits have not been saved. <button onClick={() => autosaveManager?.enqueue(selected)}>Retry save</button></div>}
+        {currentSaveState === "error" && <div className="inline-error" role="alert">Check the fields below. Your edits have not been saved. <Button onClick={() => autosaveManager?.enqueue(selected)}>Retry save</Button></div>}
         <div className="editor-scroll"><article className={`editor-document ${selected.type === "topic" ? "topic-document" : ""}`}>
-          <div className="document-heading" inert={editorLocked}>{selected.topic_id && <button className="topic-back" onClick={() => setSelectedId(selected.topic_id!)}><ArrowLeft size={14} />{allSummaries.find((item) => item.id === selected.topic_id)?.working_title || "Open topic group"}</button>}<label className="document-field document-field-large"><span>{selected.type === "topic" ? "Topic" : "Working title"}</span><input aria-label="Working title" value={selected.working_title} placeholder={selected.type === "topic" ? "What is the idea?" : "Name this piece"} onChange={(event) => updateSelected((current) => ({ ...current, working_title: event.target.value }))} /></label><div className="document-meta"><span><Clock3 size={14} /> Edited {formatRelativeTime(selected.updated_at)}</span><span>{documentWordCount(selected).toLocaleString()} words</span></div></div>
-          {conflict && <section className="conflict-panel" aria-labelledby="conflict-title"><div className="conflict-title"><AlertTriangle size={18} /><div><h2 id="conflict-title">This item changed elsewhere</h2><p>{selectedPendingLifecycle ? `Review the current server version before you retry or cancel ${selectedPendingLifecycle.action}.` : "Compare the saved server version with your unsaved local work. Nothing was overwritten."}</p></div></div><div className="conflict-columns"><div><h3>Server version</h3><pre>{JSON.stringify(editableSnapshot(conflict.server), null, 2)}</pre></div><div><h3>{selectedPendingLifecycle ? "Previous version" : "Your unsaved version"}</h3><pre>{JSON.stringify(editableSnapshot(conflict.local), null, 2)}</pre></div></div><div className="conflict-actions">{selectedPendingLifecycle ? <><button onClick={() => resolveLifecycleConflict(false)}>Cancel action</button><button className="primary-button" onClick={() => resolveLifecycleConflict(true)}>Retry {selectedPendingLifecycle.action}</button></> : <><button onClick={() => resolveSelectedConflict("server")}>Use server version</button><button className="primary-button" onClick={() => resolveSelectedConflict("local")}>Save my version</button></>}</div></section>}
-          <div className="editor-content" inert={editorLocked}><PieceEditor detail={selected} topics={allSummaries.filter((item) => item.type === "topic")} onChange={(detail) => updateSelected(() => detail)} showMetadata={false} /></div>
-          {selected.type === "topic" && <TopicPieces key={selected.id} topicId={selected.id} items={allSummaries.filter((item) => item.topic_id === selected.id).sort((a, b) => a.created_at.localeCompare(b.created_at) || a.id.localeCompare(b.id))} topics={allSummaries.filter((item) => item.type === "topic")} enabledTypes={enabledTypes} documents={documents} states={saveStates} manager={autosaveManager} blockedIds={new Set([...schedulePendingIds, ...(pendingLifecycle ? [pendingLifecycle.id] : [])])} onChange={updateDocument} onLoaded={receiveDocument} onSessionExpired={expireSession} onOpen={setSelectedId} onCreate={(type, format, topicId) => createItem(type, undefined, topicId, format)} createPending={createPending} />}
+          <div className="document-heading" inert={editorLocked}>{selected.topic_id && <Button className="topic-back" onClick={() => openContent(selected.topic_id!)}><ArrowLeft size={14} />{allSummaries.find((item) => item.id === selected.topic_id)?.working_title || "Open topic group"}</Button>}<label className="document-field document-field-large"><span>{selected.type === "topic" ? "Topic" : "Working title"}</span><Input aria-label="Working title" value={selected.working_title} placeholder={selected.type === "topic" ? "What is the idea?" : "Name this piece"} onChange={(event) => updateSelected((current) => ({ ...current, working_title: event.target.value }))} /></label></div>
+          {conflict && <section className="conflict-panel" aria-labelledby="conflict-title"><div className="conflict-title"><AlertTriangle size={18} /><div><h2 id="conflict-title">This item changed elsewhere</h2><p>{selectedPendingLifecycle ? `Review the current server version before you retry or cancel ${selectedPendingLifecycle.action}.` : "Compare the saved server version with your unsaved local work. Nothing was overwritten."}</p></div></div><div className="conflict-columns"><div><h3>Server version</h3><pre>{JSON.stringify(editableSnapshot(conflict.server), null, 2)}</pre></div><div><h3>{selectedPendingLifecycle ? "Previous version" : "Your unsaved version"}</h3><pre>{JSON.stringify(editableSnapshot(conflict.local), null, 2)}</pre></div></div><div className="conflict-actions">{selectedPendingLifecycle ? <><Button onClick={() => resolveLifecycleConflict(false)}>Cancel action</Button><Button className="primary-button" onClick={() => resolveLifecycleConflict(true)}>Retry {selectedPendingLifecycle.action}</Button></> : <><Button onClick={() => resolveSelectedConflict("server")}>Use server version</Button><Button className="primary-button" onClick={() => resolveSelectedConflict("local")}>Save my version</Button></>}</div></section>}
+          <div className="editor-content" inert={editorLocked}><PieceEditor disabled={editorLocked} key={selected.id} csrfToken={csrfToken ?? ""} onSessionExpired={expireSession} detail={selected} topics={allSummaries.filter((item) => item.type === "topic")} onChange={(detail) => updateSelected(() => detail)} showMetadata={false} /></div>
+          {selected.type === "topic" && <TopicPieces csrfToken={csrfToken ?? ""} key={selected.id} topicId={selected.id} items={allSummaries.filter((item) => item.topic_id === selected.id).sort((a, b) => a.created_at.localeCompare(b.created_at) || a.id.localeCompare(b.id))} topics={allSummaries.filter((item) => item.type === "topic")} enabledTypes={enabledTypes} documents={documents} states={saveStates} manager={autosaveManager} blockedIds={new Set([...schedulePendingIds, ...(pendingLifecycle ? [pendingLifecycle.id] : [])])} onChange={updateDocument} onLoaded={receiveDocument} onSessionExpired={expireSession} onOpen={openContent} onCreate={(type, format, topicId) => createItem(type, undefined, topicId, format)} createPending={createPending} />}
         </article></div>
-        <footer className="editor-footer"><span>{typeMeta[selected.type].description}</span><button className="delete-button" disabled={lifecycleDisabled} onClick={() => setDeleteOpen(true)}><Trash2 size={15} /> Delete</button></footer>
-      </> : <div className="editor-empty">{libraryCollapsed && !isCompact && <button ref={libraryExpandButtonRef} className="icon-button editor-empty-library-toggle" onClick={toggleLibrary} aria-label="Expand content library" aria-controls="content-library" aria-expanded="false"><PanelLeftOpen size={18} /></button>}{detailLoading ? <><LoaderCircle className="spin" /><p>Loading selected content…</p></> : detailError ? <><AlertTriangle /><h1>Could not open this item</h1><p role="alert">{detailError}</p><button className="primary-button" onClick={() => setDetailReload((value) => value + 1)}>Retry loading item</button></> : <><SquarePen size={28} /><h1>{allSummaries.length ? "Choose an item" : "Start writing"}</h1><p>{allSummaries.length ? "Select content from your library." : "Pick a format to create your first piece."}</p>{actionError && <p className="inline-error" role="alert">{actionError}</p>}<button className="primary-button" onClick={startCreate}><Plus size={16} /> {createLabel}</button></>}</div>}
-    </section>
-    </>}
+        <footer className="editor-footer"><span>{typeMeta[selected.type].description}</span><Button className="delete-button" disabled={lifecycleDisabled} onClick={() => setDeleteOpen(true)}><Trash2 size={15} /> Delete</Button></footer>
+      </> : <div className="editor-empty">{detailLoading ? <><LoaderCircle className="spin" /><p>Loading selected content…</p></> : detailError ? <><AlertTriangle /><h1>Could not open this item</h1><p role="alert">{detailError}</p><Button className="primary-button" onClick={() => setDetailReload((value) => value + 1)}>Retry loading item</Button></> : <><SquarePen size={28} /><h1>{allSummaries.length ? "Choose an item" : "Start writing"}</h1><p>{allSummaries.length ? "Select content from your library." : "Pick a format to create your first piece."}</p>{actionError && <p className="inline-error" role="alert">{actionError}</p>}<Button className="primary-button" onClick={startCreate}><Plus size={16} /> {createLabel}</Button></>}</div>}
+    </section>}
 
-    {view === "calendar" && <Calendar items={allSummaries.filter((item) => item.type !== "topic")} onOpen={(id) => { setSelectedId(id); navigate("workspace"); }} onSchedule={(id, day) => void rescheduleItem(id, day)} blockedIds={scheduleBlockedIds} pendingIds={schedulePendingIds} error={scheduleError} />}
+    {view === "calendar" && <Calendar items={allSummaries.filter((item) => item.type !== "topic")} onOpen={openContent} onSchedule={(id, day) => void rescheduleItem(id, day)} blockedIds={scheduleBlockedIds} pendingIds={schedulePendingIds} error={scheduleError} />}
 
-    {view === "weekly" && <WeeklyMatrix items={allSummaries.filter((item) => item.type !== "topic")} topics={allSummaries.filter((item) => item.type === "topic")} enabledTypes={enabledTypes} onOpen={(id) => { setSelectedId(id); navigate("workspace"); }} onSchedule={(id, day) => void rescheduleItem(id, day)} onCreate={(type, day, title, attemptId) => createItem(type, { day, title, attemptId })} createPending={createPending} createError={weeklyCreateError} completedAttemptId={completedWeeklyAttemptId} frozenPlan={frozenWeeklyPlan} blockedIds={scheduleBlockedIds} pendingIds={schedulePendingIds} error={scheduleError} />}
+    {view === "weekly" && <WeeklyMatrix items={allSummaries.filter((item) => item.type !== "topic")} topics={allSummaries.filter((item) => item.type === "topic")} enabledTypes={enabledTypes} onOpen={openContent} onSchedule={(id, day) => void rescheduleItem(id, day)} onCreate={(type, day, title, attemptId) => createItem(type, { day, title, attemptId })} createPending={createPending} createError={weeklyCreateError} completedAttemptId={completedWeeklyAttemptId} frozenPlan={frozenWeeklyPlan} blockedIds={scheduleBlockedIds} pendingIds={schedulePendingIds} error={scheduleError} />}
 
     {view === "settings" && <Settings theme={theme} onThemeChange={setThemeChoice} enabledTypes={enabledTypes} onToggleType={toggleType} counts={counts} workspaceId={workspaceId} />}
 
-    {createOpen && <div className="modal-backdrop"><section ref={createModalRef} className="modal-card" role="dialog" aria-modal="true" aria-labelledby="create-title"><div className="modal-header"><div><p className="eyebrow">New content</p><h2 id="create-title">What are you creating?</h2><p>Choose a format. You can change its status as the work develops.</p></div><button className="icon-button" onClick={() => setCreateOpen(false)} aria-label="Close create dialog"><X size={19} /></button></div><label className="resource-field"><span>Topic group</span><select aria-label="Create in topic group" value={createTopicId} onChange={(event) => setCreateTopicId(event.target.value)}><option value="">Standalone piece</option>{allSummaries.filter((item) => item.type === "topic").map((topic) => <option key={topic.id} value={topic.id}>{displayTitle(topic)}</option>)}</select></label><button className="secondary-button" disabled={createPending} onClick={() => void createItem("topic")}>New topic group</button><div className="create-grid" aria-busy={createPending}>{enabledTypes.map((type) => <button key={type} disabled={createPending} onClick={() => void createItem(type, undefined, createTopicId)}><span className="create-icon" style={{ color: typeMeta[type].color }}><TypeIcon type={type} size={19} /></span><span><strong>{typeMeta[type].label}</strong><small>{typeMeta[type].description}</small></span><span className="create-arrow">›</span></button>)}</div>{createPending && <p aria-live="polite">Creating…</p>}{actionError && <p className="inline-error" role="alert">{actionError}</p>}</section></div>}
-    {deleteOpen && selected && <div className="modal-backdrop"><section ref={deleteModalRef} className="modal-card confirm-card" role="alertdialog" aria-modal="true" aria-labelledby="delete-title" aria-describedby="delete-description"><div className="modal-header"><div><p className="eyebrow">Permanent deletion</p><h2 id="delete-title">Delete “{displayTitle(selected)}”?</h2><p id="delete-description">This removes the item immediately and cannot be undone.</p></div></div><div className="confirm-actions"><button onClick={() => setDeleteOpen(false)}>Cancel</button><button className="danger-button" onClick={() => void confirmDelete()}><Trash2 size={15} /> Delete permanently</button></div></section></div>}
+    {createOpen && <div className="modal-backdrop"><section ref={createModalRef} className="modal-card" role="dialog" aria-modal="true" aria-labelledby="create-title"><div className="modal-header"><div><p className="eyebrow">New content</p><h2 id="create-title">What are you creating?</h2><p>Choose a format. You can change its status as the work develops.</p></div><Button className="icon-button" onClick={() => setCreateOpen(false)} aria-label="Close create dialog"><X size={19} /></Button></div><label className="resource-field"><span>Topic group</span><Select aria-label="Create in topic group" value={createTopicId} onChange={(event) => setCreateTopicId(event.target.value)}><option value="">Standalone piece</option>{allSummaries.filter((item) => item.type === "topic").map((topic) => <option key={topic.id} value={topic.id}>{displayTitle(topic)}</option>)}</Select></label><Button className="secondary-button" disabled={createPending} onClick={() => void createItem("topic")}>New topic group</Button><div className="create-grid" aria-busy={createPending}>{enabledTypes.map((type) => <Button key={type} disabled={createPending} onClick={() => void createItem(type, undefined, createTopicId)}><span className="create-icon" style={{ color: typeMeta[type].color }}><TypeIcon type={type} size={19} /></span><span><strong>{typeMeta[type].label}</strong><small>{typeMeta[type].description}</small></span><span className="create-arrow">›</span></Button>)}</div>{createPending && <p aria-live="polite">Creating…</p>}{actionError && <p className="inline-error" role="alert">{actionError}</p>}</section></div>}
+    {deleteOpen && selected && <div className="modal-backdrop"><section ref={deleteModalRef} className="modal-card confirm-card" role="alertdialog" aria-modal="true" aria-labelledby="delete-title" aria-describedby="delete-description"><div className="modal-header"><div><p className="eyebrow">Permanent deletion</p><h2 id="delete-title">Delete “{displayTitle(selected)}”?</h2><p id="delete-description">This removes the item immediately and cannot be undone.</p></div></div><div className="confirm-actions"><Button onClick={() => setDeleteOpen(false)}>Cancel</Button><Button className="danger-button" onClick={() => void confirmDelete()}><Trash2 size={15} /> Delete permanently</Button></div></section></div>}
   </main>;
 }

@@ -1,3 +1,4 @@
+import { Button, Input } from "./ui";
 import { CalendarDays, ChevronLeft, ChevronRight } from "lucide-react";
 import { useMemo, useState, type DragEvent as ReactDragEvent } from "react";
 import type { ContentSummary } from "./api";
@@ -80,11 +81,11 @@ export default function Calendar({ items, onOpen, onSchedule, blockedIds = new S
         }}
         onDragEnd={() => { setDragging(undefined); setDragOver(undefined); }}
       >
-        <button className="calendar-chip-open" disabled={schedulePending} onClick={() => onOpen(item.id)} title={`${displayTitle(item)} — open`} aria-label={`${displayTitle(item)}${inTray ? ", unscheduled" : ""}`}>
+        <Button className="calendar-chip-open" disabled={schedulePending} onClick={() => onOpen(item.id)} title={`${displayTitle(item)} — open`} aria-label={`${displayTitle(item)}${inTray ? ", unscheduled" : ""}`}>
           <span style={{ color: typeMeta[item.type].color }}><TypeIcon type={item.type} size={13} /></span>
           <span className="calendar-chip-title">{displayTitle(item)}</span>
-        </button>
-        <input
+        </Button>
+        <Input
           className="calendar-chip-date"
           type="date"
           value={item.scheduled_at ? dayKey(new Date(item.scheduled_at)) : ""}
@@ -104,10 +105,10 @@ export default function Calendar({ items, onOpen, onSchedule, blockedIds = new S
           <h1>Calendar</h1>
         </div>
         <div className="calendar-controls">
-          <button className="icon-button" aria-label="Previous month" onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() - 1, 1))}><ChevronLeft size={18} /></button>
+          <Button className="icon-button" aria-label="Previous month" onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() - 1, 1))}><ChevronLeft size={18} /></Button>
           <strong aria-live="polite">{monthLabel}</strong>
-          <button className="icon-button" aria-label="Next month" onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() + 1, 1))}><ChevronRight size={18} /></button>
-          <button className="secondary-button" onClick={() => { const today = new Date(); setMonth(new Date(today.getFullYear(), today.getMonth(), 1)); }}>Today</button>
+          <Button className="icon-button" aria-label="Next month" onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth() + 1, 1))}><ChevronRight size={18} /></Button>
+          <Button className="secondary-button" onClick={() => { const today = new Date(); setMonth(new Date(today.getFullYear(), today.getMonth(), 1)); }}>Today</Button>
         </div>
       </header>
 

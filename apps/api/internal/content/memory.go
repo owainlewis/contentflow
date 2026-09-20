@@ -9,13 +9,14 @@ import (
 )
 
 type MemoryStore struct {
-	mu       sync.Mutex
-	items    map[string]Item
-	receipts map[string]Receipt
+	thumbnails map[string]Thumbnail
+	mu         sync.Mutex
+	items      map[string]Item
+	receipts   map[string]Receipt
 }
 
 func NewMemoryStore() *MemoryStore {
-	return &MemoryStore{items: make(map[string]Item), receipts: make(map[string]Receipt)}
+	return &MemoryStore{thumbnails: make(map[string]Thumbnail), items: make(map[string]Item), receipts: make(map[string]Receipt)}
 }
 
 func memoryKey(workspaceID, id string) string { return workspaceID + "\x00" + id }
@@ -122,6 +123,7 @@ func (s *MemoryStore) Delete(_ context.Context, workspaceID, id string, revision
 		}
 	}
 	delete(s.items, key)
+	delete(s.thumbnails, key)
 	s.receipts[memoryKey(receipt.WorkspaceID, receipt.OperationID)] = cloneReceipt(receipt)
 	return cloneResult(receipt.MutationResult), nil
 }

@@ -1,3 +1,4 @@
+import { Button, Input, Select } from "./ui";
 import { CalendarDays, ChevronLeft, ChevronRight, Plus } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type DragEvent as ReactDragEvent } from "react";
 import { newOperationId, type ContentSummary, type ContentType } from "./api";
@@ -47,6 +48,8 @@ export default function WeeklyMatrix({ items, topics = [], enabledTypes, onOpen,
   const suppressOpen = useRef(false);
   const composerInput = useRef<HTMLInputElement>(null);
   const days = useMemo(() => datesForWeek(weekStart), [weekStart]);
+  const currentWeek = mondayOf(new Date());
+  const nextWeek = new Date(currentWeek.getFullYear(), currentWeek.getMonth(), currentWeek.getDate() + 7);
   const today = dayKey(new Date());
   const label = weekLabel(days[0], days[6]);
   const restoredComposer = frozenPlan ? { cell: `${frozenPlan.type}:${frozenPlan.day}`, title: frozenPlan.title, attemptId: frozenPlan.attemptId } : undefined;
@@ -101,7 +104,7 @@ export default function WeeklyMatrix({ items, topics = [], enabledTypes, onOpen,
   function composerCell(type: ContentType, date: Date, cellKey: string, hasEntries: boolean) {
     if (activeComposer?.cell !== cellKey) {
       return (
-        <button
+        <Button
           className={`weekly-add ${hasEntries ? "" : "weekly-add-empty"}`}
           disabled={Boolean(frozenPlan)}
           onClick={() => setComposer({ cell: cellKey, title: "", attemptId: newOperationId() })}
@@ -109,12 +112,12 @@ export default function WeeklyMatrix({ items, topics = [], enabledTypes, onOpen,
         >
           <Plus size={14} />
           <span>Add</span>
-        </button>
+        </Button>
       );
     }
     return (
       <form className="weekly-composer" onSubmit={(event) => { event.preventDefault(); void submitComposer(type, date); }}>
-        <input
+        <Input
           ref={composerInput}
           aria-label={`New ${typeMeta[type].label} title for ${fullDate.format(date)}`}
           placeholder="Working title"
@@ -125,8 +128,8 @@ export default function WeeklyMatrix({ items, topics = [], enabledTypes, onOpen,
           onKeyDown={(event) => { if (event.key === "Escape" && !composerFrozen) { event.preventDefault(); setComposer(undefined); } }}
         />
         <div className="weekly-composer-actions">
-          <button type="submit" className="weekly-composer-save" disabled={createPending || !activeComposer.title.trim()}>{createPending ? "Adding…" : composerFrozen ? "Retry" : "Add"}</button>
-          <button type="button" disabled={composerFrozen} onClick={() => setComposer(undefined)}>Cancel</button>
+          <Button type="submit" className="weekly-composer-save" disabled={createPending || !activeComposer.title.trim()}>{createPending ? "Adding…" : composerFrozen ? "Retry" : "Add"}</Button>
+          <Button type="button" disabled={composerFrozen} onClick={() => setComposer(undefined)}>Cancel</Button>
         </div>
       </form>
     );
@@ -156,13 +159,13 @@ export default function WeeklyMatrix({ items, topics = [], enabledTypes, onOpen,
           window.setTimeout(() => { suppressOpen.current = false; }, 0);
         }}
       >
-        <button className="weekly-card-open" disabled={schedulePending} onClick={() => { if (!suppressOpen.current) onOpen(item.id); }} aria-label={`Open ${displayTitle(item)}`}>
+        <Button className="weekly-card-open" disabled={schedulePending} onClick={() => { if (!suppressOpen.current) onOpen(item.id); }} aria-label={`Open ${displayTitle(item)}`}>
           <strong>{displayTitle(item)}</strong>
           <span>{item.format ? `${item.format} · ` : ""}{statusLabels[item.status]}</span>{item.topic_id && <small className="weekly-topic">{topics.find((topic) => topic.id === item.topic_id)?.working_title || "Topic group"}</small>}
-        </button>
+        </Button>
         <label className="weekly-card-move">
           <span className="visually-hidden">Move {displayTitle(item)}</span>
-          <select
+          <Select
             aria-label={`Move ${displayTitle(item)}`}
             disabled={scheduleBlocked}
             value={item.scheduled_at ? dayKey(new Date(item.scheduled_at)) : ""}
@@ -170,7 +173,7 @@ export default function WeeklyMatrix({ items, topics = [], enabledTypes, onOpen,
           >
             <option value="">Unscheduled</option>
             {days.map((date) => <option value={dayKey(date)} key={dayKey(date)}>{fullDate.format(date)}</option>)}
-          </select>
+          </Select>
         </label>
       </article>
     );
@@ -185,10 +188,10 @@ export default function WeeklyMatrix({ items, topics = [], enabledTypes, onOpen,
           <p className="weekly-summary">{scheduledThisWeek} {scheduledThisWeek === 1 ? "piece" : "pieces"} scheduled this week</p>
         </div>
         <div className="calendar-controls">
-          <button className="icon-button" aria-label="Previous week" onClick={() => moveWeek(-1)}><ChevronLeft size={18} /></button>
+          <Button className="icon-button" aria-label="Previous week" onClick={() => moveWeek(-1)}><ChevronLeft size={18} /></Button>
           <strong aria-live="polite">{label}</strong>
-          <button className="icon-button" aria-label="Next week" onClick={() => moveWeek(1)}><ChevronRight size={18} /></button>
-          <button className="secondary-button" onClick={() => setWeekStart(mondayOf(new Date()))}>This week</button>
+          <Button className="icon-button" aria-label="Following week" onClick={() => moveWeek(1)}><ChevronRight size={18} /></Button>
+          <div className="week-shortcuts" aria-label="Jump to week"><Button className="secondary-button" aria-pressed={dayKey(weekStart) === dayKey(currentWeek)} onClick={() => setWeekStart(mondayOf(new Date()))}>This week</Button><Button className="secondary-button" aria-pressed={dayKey(weekStart) === dayKey(nextWeek)} onClick={() => { const start = mondayOf(new Date()); setWeekStart(new Date(start.getFullYear(), start.getMonth(), start.getDate() + 7)); }}>Next week</Button></div>
         </div>
       </header>
 

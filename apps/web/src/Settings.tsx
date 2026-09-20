@@ -1,3 +1,4 @@
+import { Button, Input } from "./ui";
 import { CreditCard, Moon, Palette, Shapes, Sun, UserRound } from "lucide-react";
 import { useState } from "react";
 import { contentTypes, type ContentType } from "./api";
@@ -34,10 +35,10 @@ export default function Settings({ theme, onThemeChange, enabledTypes, onToggleT
           {sections.map((entry) => {
             const Icon = entry.icon;
             return (
-              <button key={entry.id} className={section === entry.id ? "active" : ""} aria-current={section === entry.id ? "page" : undefined} onClick={() => setSection(entry.id)}>
+              <Button key={entry.id} className={section === entry.id ? "active" : ""} aria-current={section === entry.id ? "page" : undefined} onClick={() => setSection(entry.id)}>
                 <Icon size={16} />
                 <span>{entry.label}</span>
-              </button>
+              </Button>
             );
           })}
         </nav>
@@ -48,8 +49,8 @@ export default function Settings({ theme, onThemeChange, enabledTypes, onToggleT
               <h2 id="appearance-heading">Appearance</h2>
               <p className="settings-hint">Applies to this browser only.</p>
               <div className="theme-choice" role="group" aria-label="Theme">
-                <button className={theme === "light" ? "active" : ""} aria-pressed={theme === "light"} onClick={() => onThemeChange("light")}><Sun size={15} /> Light</button>
-                <button className={theme === "dark" ? "active" : ""} aria-pressed={theme === "dark"} onClick={() => onThemeChange("dark")}><Moon size={15} /> Dark</button>
+                <Button className={theme === "light" ? "active" : ""} aria-pressed={theme === "light"} onClick={() => onThemeChange("light")}><Sun size={15} /> Light</Button>
+                <Button className={theme === "dark" ? "active" : ""} aria-pressed={theme === "dark"} onClick={() => onThemeChange("dark")}><Moon size={15} /> Dark</Button>
               </div>
             </section>
           )}
@@ -65,7 +66,7 @@ export default function Settings({ theme, onThemeChange, enabledTypes, onToggleT
                   return (
                     <li key={type}>
                       <label className={on ? "" : "off"}>
-                        <input type="checkbox" checked={on} disabled={isLast} onChange={() => onToggleType(type)} aria-label={`Show ${typeMeta[type].label}`} />
+                        <Input type="checkbox" checked={on} disabled={isLast} onChange={() => onToggleType(type)} aria-label={`Show ${typeMeta[type].label}`} />
                         <span className="type-toggle-icon" style={{ color: typeMeta[type].color }}><TypeIcon type={type} /></span>
                         <span className="type-toggle-copy"><strong>{typeMeta[type].label}</strong><small>{typeMeta[type].description}</small></span>
                         <span className="type-toggle-count">{counts[type]} {counts[type] === 1 ? "item" : "items"}</span>

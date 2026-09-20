@@ -22,6 +22,9 @@ func (h *HTTPHandler) Register(router chi.Router) {
 	router.Post("/api/v1/content/batches", h.batchCreate)
 	router.Get("/api/v1/content/{id}", h.get)
 	router.Get("/api/v1/content/{id}/transcript", h.transcript)
+	router.Get("/api/v1/content/{id}/thumbnail", h.thumbnail)
+	router.Put("/api/v1/content/{id}/thumbnail", h.thumbnail)
+	router.Delete("/api/v1/content/{id}/thumbnail", h.thumbnail)
 	router.Put("/api/v1/content/{id}", h.replace)
 	router.Delete("/api/v1/content/{id}", h.delete)
 }
