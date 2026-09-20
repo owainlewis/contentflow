@@ -32,17 +32,19 @@ export default function PieceEditor({ detail, topics, onChange, showMetadata = t
   const content = detail.content;
   const textField = (label: string, field: string, value: string, rows = 5) => <label className="resource-field"><span>{label}</span><AutoTextarea aria-label={label} minRows={rows} value={value} onChange={(event) => patch({ content: { ...content, [field]: event.target.value } })} /></label>;
   const editorDialog = (title: string, fields: ReactNode, trigger = title) => <Dialog title={title} trigger={<Button disabled={disabled}>{trigger}</Button>}><fieldset className="piece-dialog-fields" disabled={disabled}>{fields}</fieldset></Dialog>;
-  if (detail.type === "topic" && "source" in content) return <div className="resource-editor piece-topic-source"><ResourceLink disabled={disabled} label="Source document" value={content.source_url} onChange={(source_url) => patch({ content: { ...content, source_url } })} />{editorDialog("Topic notes", textField("Topic notes", "source", content.source, 5))}</div>;
+  if (detail.type === "topic" && "source" in content) return <div className="resource-editor piece-topic-source"><ResourceLink disabled={disabled} label="Source document" value={content.source_url} onChange={(source_url) => patch({ content: { ...content, source_url } })} />{textField("Topic notes", "source", content.source, 4)}</div>;
   const youtube = detail.type === "youtube" ? content as YouTubeContent : undefined;
   return <div className="resource-editor piece-editor">
-    {youtube ? <Tabs key={detail.id} defaultValue="video" items={[
+    <div className="piece-main">{youtube ? <Tabs key={detail.id} defaultValue="video" items={[
       { value: "video", label: "Video", content: <div className="piece-tab-body">
         <div className="piece-youtube-package">
-          <label className="resource-field"><span>YouTube title</span><Input aria-label="YouTube title" value={youtube.publishing_title} onChange={(event) => patch({ content: { ...youtube, publishing_title: event.target.value } })} /></label>
+          <div className="piece-youtube-copy">
+            <label className="resource-field"><span>YouTube title</span><Input aria-label="YouTube title" value={youtube.publishing_title} onChange={(event) => patch({ content: { ...youtube, publishing_title: event.target.value } })} /></label>
+            {textField("YouTube description", "description", youtube.description)}
+            <ResourceLink disabled={disabled} label="YouTube script document" value={detail.document_url ?? ""} onChange={(document_url) => patch({ document_url })} />
+          </div>
           <ThumbnailUpload key={detail.id} id={detail.id} csrfToken={csrfToken} onSessionExpired={onSessionExpired} />
         </div>
-        <ResourceLink disabled={disabled} label="YouTube script document" value={detail.document_url ?? ""} onChange={(document_url) => patch({ document_url })} />
-        {textField("YouTube description", "description", youtube.description)}
       </div> },
       ...(youtube.sections.length > 0 ? [{ value: "script", label: "Script", content: <div className="piece-tab-body">{youtube.sections.map((section, index) => <label className="resource-field" key={section.clientKey}><span>{section.title}</span><AutoTextarea aria-label={`${section.title} script`} minRows={3} value={section.body} onChange={(event) => patch({ content: { ...youtube, sections: youtube.sections.map((item, position) => position === index ? { ...item, body: event.target.value } : item) } })} /></label>)}</div> }] : []),
       { value: "transcript", label: "Transcript", content: <div className="piece-tab-body">{textField("YouTube transcript: what was actually said", "transcript", youtube.transcript)}</div> },
@@ -53,10 +55,11 @@ export default function PieceEditor({ detail, topics, onChange, showMetadata = t
       {"body" in content && textField(detail.type === "linkedin" ? "LinkedIn post" : detail.type === "x" ? "X post" : detail.type === "email" ? "Email body" : "Article body", "body", content.body, 8)}
       {"script" in content && textField(detail.type === "instagram" ? "Instagram script" : "TikTok script", "script", content.script)}
       {detail.type === "instagram" && "script" in content && textField("Instagram caption", "caption", content.caption ?? "")}
-      <ResourceLink disabled={disabled} label="External document" value={detail.document_url ?? ""} onChange={(document_url) => patch({ document_url })} />
-    </>}
+    </>}</div>
+    <aside className="piece-rail" aria-label="Links and details">
+    {!youtube && <ResourceLink disabled={disabled} label="External document" value={detail.document_url ?? ""} onChange={(document_url) => patch({ document_url })} />}
     <ResourceLink disabled={disabled} label="Frame.io / media link" value={detail.video_url ?? ""} onChange={(video_url) => patch({ video_url })} />
-    <div className="piece-settings"><span className="piece-settings-summary">{detail.format ? detail.format.charAt(0).toUpperCase() + detail.format.slice(1) : "Piece details"} · {statusLabels[detail.status]} · {detail.scheduled_at ? dayKey(new Date(detail.scheduled_at)) : "Unscheduled"}</span>
+    <div className="piece-settings"><span className="piece-settings-summary">{detail.format ? detail.format.charAt(0).toUpperCase() + detail.format.slice(1) : "Piece details"} · {statusLabels[detail.status]} · {detail.scheduled_at ? new Date(detail.scheduled_at).toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" }) : "Unscheduled"}</span>
       {editorDialog("Piece details", <>
       {showMetadata && <label className="resource-field"><span>Working title</span><Input aria-label="Working title" value={detail.working_title} onChange={(event) => patch({ working_title: event.target.value })} /></label>}
       <div className="piece-metadata">
@@ -67,5 +70,6 @@ export default function PieceEditor({ detail, topics, onChange, showMetadata = t
       <label className="resource-field"><span>Move to another topic</span><Select aria-label="Topic group" value={detail.topic_id ?? ""} onChange={(event) => patch({ topic_id: event.target.value })}><option value="">Standalone piece</option>{topics.map((topic) => <option key={topic.id} value={topic.id}>{topic.working_title || "Untitled topic"}</option>)}</Select></label>
       </>, "Edit details")}
     </div>
+    </aside>
   </div>;
 }

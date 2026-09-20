@@ -2,12 +2,14 @@ import { Button, Input, Select } from "./ui";
 import {
   AlertTriangle,
   ArrowLeft,
+  CalendarDays,
   Check,
   ChevronDown,
   LoaderCircle,
   Moon,
   Plus,
   Search,
+  Settings as SettingsIcon,
   SquarePen,
   Sun,
   Trash2,
@@ -107,6 +109,12 @@ function formatRelativeTime(value: string) {
   return days === 1 ? "yesterday" : `${days} days ago`;
 }
 
+function formatLabel(format: string) {
+  return format.charAt(0).toUpperCase() + format.slice(1);
+}
+
+const shortDate = new Intl.DateTimeFormat(undefined, { weekday: "short", day: "numeric", month: "short" });
+
 function editableSnapshot(detail: ContentDetail) {
   return { working_title: detail.working_title, status: detail.status, topic_id: detail.topic_id, format: detail.format, document_url: detail.document_url, video_url: detail.video_url, scheduled_at: detail.scheduled_at, content: detail.content };
 }
@@ -150,6 +158,8 @@ export default function Home() {
   const [detailLoading, setDetailLoading] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [view, setView] = useState<View>(() => viewFromPath(window.location.pathname));
+  // Remembers the planning view an item was opened from, so Back returns there.
+  const [openedFrom, setOpenedFrom] = useState<View>();
   const [calendarError, setCalendarError] = useState("");
   const [weeklyCreateError, setWeeklyCreateError] = useState("");
   const [completedWeeklyAttemptId, setCompletedWeeklyAttemptId] = useState("");
@@ -185,6 +195,7 @@ export default function Home() {
   const refreshLibraryRef = useRef<(filters?: LibraryFilters) => Promise<void>>(async () => undefined);
   const requestSequence = useRef(0);
   const sessionGenerationRef = useRef(0);
+  const goBackRef = useRef<() => void>(() => undefined);
   const activeFiltersRef = useRef<LibraryFilters>({ query: "", type: "all", status: "all" });
   const [scheduleLock] = useState(() => new ScheduleLock());
 
@@ -421,6 +432,9 @@ export default function Home() {
           setQuery("");
           setView("library");
         }
+      } else if (event.key === "Escape" && view === "workspace" && !(event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLSelectElement)) {
+        event.preventDefault();
+        goBackRef.current();
       } else if (!event.metaKey && !event.ctrlKey && !event.altKey && event.key.toLowerCase() === "n" && !(event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement || event.target instanceof HTMLSelectElement)) {
         event.preventDefault();
         // Keep creation available from every page.
@@ -448,16 +462,25 @@ export default function Home() {
   function navigate(next: View) {
     if (next === "topics" || next === "library") { setTypeFilter("all"); setStatusFilter("all"); setQuery(""); }
     if (window.location.pathname !== viewPaths[next]) window.history.pushState({}, "", viewPaths[next]);
+    setOpenedFrom(undefined);
     setView(next);
   }
 
   function openContent(id: string) {
     setActionError("");
     setSelectedId(id);
+    if (view !== "workspace") setOpenedFrom(view === "weekly" ? "weekly" : undefined);
     const path = `/content?id=${encodeURIComponent(id)}`;
     if (window.location.pathname + window.location.search !== path) window.history.pushState({}, "", path);
     setView("workspace");
   }
+
+  function goBack() {
+    if (openedFrom === "weekly") navigate("weekly");
+    else if (selected?.topic_id) openContent(selected.topic_id);
+    else navigate(selected?.type === "topic" ? "topics" : "library");
+  }
+  useLayoutEffect(() => { goBackRef.current = goBack; });
 
   async function submitPasswordSignIn(event: React.FormEvent) {
     event.preventDefault();
@@ -875,36 +898,34 @@ export default function Home() {
   return <main className="app-shell app-redesign">
     <header className="app-topbar">
       <Button className="app-brand" onClick={() => navigate("topics")} aria-label="ContentFlow home"><div className="brand-mark"><Zap size={17} fill="currentColor" /></div><span className="brand-name">ContentFlow</span></Button>
-      <nav className="app-nav" aria-label="Main navigation">{([["weekly", "Week"], ["topics", "Topics"], ["library", "Library"], ["settings", "Settings"]] as const).map(([page, label]) => <Button key={page} className={view === page ? "active" : ""} aria-current={view === page ? "page" : undefined} onClick={() => navigate(page)}>{label}</Button>)}</nav>
-      <div className="app-topbar-actions"><Button className="icon-button" onClick={toggleTheme} aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}>{theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}</Button><Button className="primary-button" onClick={() => { setCreateTopicId(""); setCreateOpen(true); }}><Plus size={16} />New content</Button></div>
+      <nav className="app-nav" aria-label="Main navigation">{([["weekly", "Week"], ["topics", "Topics"], ["library", "Library"]] as const).map(([page, label]) => <Button key={page} className={view === page ? "active" : ""} aria-current={view === page ? "page" : undefined} onClick={() => navigate(page)}>{label}</Button>)}</nav>
+      <div className="app-topbar-actions"><Button className={`icon-button ${view === "settings" ? "active" : ""}`} aria-current={view === "settings" ? "page" : undefined} aria-label="Settings" title="Settings" onClick={() => navigate("settings")}><SettingsIcon size={18} /></Button><Button className="icon-button" onClick={toggleTheme} aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}>{theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}</Button><Button className="primary-button" onClick={() => { setCreateTopicId(""); setCreateOpen(true); }}><Plus size={16} />New content</Button></div>
     </header>
 
     {(view === "topics" || view === "library") && <section className="content-list-page" aria-label={view === "topics" ? "Topic groups" : "Content library"}>
-      <header className="content-list-heading"><div><p className="eyebrow">Your workspace</p><h1>{listTitle}</h1><p>{view === "topics" ? "One idea. Every version, together." : "Find your posts, scripts, and videos."}</p></div><Button className="primary-button" disabled={createPending} onClick={startCreate}><Plus size={16} />{view === "topics" ? "New topic" : "New piece"}</Button></header>
+      <header className="content-list-heading"><h1>{listTitle}</h1><span className="list-count">{visibleItems.length} {view === "topics" ? "topics" : "pieces"}</span>
       <div className="content-list-filters">{view === "library" && <label className="search-box"><Search size={17} /><Input ref={searchRef} value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search content" aria-label="Search content titles" /><span className="key-hint">⌘ K</span></label>}
       {view === "library" && <Select aria-label="Filter by platform" value={typeFilter} onChange={(event) => setTypeFilter(event.target.value as ContentType | "all")}><option value="all">All platforms</option>{enabledTypes.map((type) => <option value={type} key={type}>{typeMeta[type].label}</option>)}</Select>}
-      <Select aria-label="Filter by status" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as ContentStatus | "all")}><option value="all">All statuses</option>{contentStatuses.map((status) => <option value={status} key={status}>{statusLabels[status]}</option>)}</Select></div>
+      <Select aria-label="Filter by status" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as ContentStatus | "all")}><option value="all">All statuses</option>{contentStatuses.map((status) => <option value={status} key={status}>{statusLabels[status]}</option>)}</Select></div></header>
       {filterError && <p className="inline-error" role="alert">{filterError}</p>}
       {actionError && <p className="inline-error" role="alert">{actionError}</p>}
-      <div className="library-summary"><span>{visibleItems.length} {view === "topics" ? "topics" : "pieces"}</span><span>Last edited</span></div>
-      <div className="content-list-grid">{visibleItems.map((item) => <Button className="content-card" key={item.id} onClick={() => openContent(item.id)}><span className="card-icon" style={{ color: typeMeta[item.type].color }}><TypeIcon type={item.type} size={20} /></span><span className="card-copy"><strong>{displayTitle(item)}</strong><span className="card-meta"><span className={`status-dot ${item.status}`} />{statusLabels[item.status]} · {formatRelativeTime(item.updated_at)}</span>{item.type === "topic" ? <span className="topic-piece-count">{allSummaries.filter((piece) => piece.topic_id === item.id).length} related pieces</span> : <span>{typeMeta[item.type].label}{item.format ? ` · ${item.format}` : ""}{item.topic_id ? ` · ${displayTitle(allSummaries.find((topic) => topic.id === item.topic_id) ?? item)}` : " · Standalone"}</span>}</span><span className="card-arrow">›</span></Button>)}</div>
+      <div className="content-list-grid">{visibleItems.map((item) => <Button className="content-card content-row" key={item.id} onClick={() => openContent(item.id)}><span className="card-icon" style={{ color: typeMeta[item.type].color }}><TypeIcon type={item.type} size={17} /></span><strong className="row-title">{displayTitle(item)}</strong><span className="row-context">{item.type === "topic" ? <span className="topic-piece-count">{allSummaries.filter((piece) => piece.topic_id === item.id).length} related pieces</span> : <>{typeMeta[item.type].label}{item.format ? ` · ${formatLabel(item.format)}` : ""}{item.topic_id ? ` · ${displayTitle(allSummaries.find((topic) => topic.id === item.topic_id) ?? item)}` : ""}</>}</span><span className="row-status"><span className={`status-dot ${item.status}`} />{statusLabels[item.status]}</span>{item.type !== "topic" && <span className={`row-date ${item.scheduled_at ? "" : "unscheduled"}`}><CalendarDays size={13} />{item.scheduled_at ? shortDate.format(new Date(item.scheduled_at)) : "No date"}</span>}<span className="row-edited">{formatRelativeTime(item.updated_at)}</span><span className="card-arrow">›</span></Button>)}</div>
       {!visibleItems.length && <div className="empty-state"><SquarePen size={28} /><h2>{query || statusFilter !== "all" || typeFilter !== "all" ? "No matches" : view === "topics" ? "Start with a topic" : "Your library is empty"}</h2><p>{view === "topics" ? "Bring an idea and its platform versions into one place." : "Create a standalone piece or add one to a topic."}</p><Button onClick={startCreate}>{view === "topics" ? "Create a topic" : "Create a piece"}</Button></div>}
     </section>}
 
     {view === "workspace" && <section className="editor-panel focus-workspace" aria-label="Content editor">
-      <div className="workspace-back"><Button className="text-button" onClick={() => selected?.topic_id ? openContent(selected.topic_id) : navigate(selected?.type === "topic" ? "topics" : "library")}><ArrowLeft size={16} />{selected?.topic_id ? "Back to topic" : selected?.type === "topic" ? "Back to topics" : "Back to library"}</Button></div>
+      {!selected && <div className="workspace-back"><Button className="text-button" onClick={goBack}><ArrowLeft size={16} />{openedFrom === "weekly" ? "Back to week" : "Back to library"}</Button></div>}
       {selected ? <>
-        <div className="editor-toolbar"><div className="editor-context"><span className="type-pill" style={{ color: typeMeta[selected.type].color }}><TypeIcon type={selected.type} />{typeMeta[selected.type].label}</span><span className="toolbar-divider" /><label className="status-select"><span className={`status-dot ${selected.status}`} /><Select aria-label="Content status" value={selected.status} disabled={editorLocked} onChange={(event) => updateSelected((current) => ({ ...current, status: event.target.value as ContentStatus }))}>{contentStatuses.map((status) => <option value={status} key={status}>{statusLabels[status]}</option>)}</Select><ChevronDown size={14} /></label></div><div className="editor-actions">{selectedSchedulePending ? <span className="saved-state saving" role="status"><LoaderCircle className="spin" size={14} />Updating schedule…</span> : <span className={`saved-state ${currentSaveState}`} aria-live="polite">{currentSaveState === "saving" || currentSaveState === "retrying" ? <LoaderCircle className="spin" size={14} /> : currentSaveState === "conflict" || currentSaveState === "error" ? <AlertTriangle size={14} /> : <Check size={14} />}{saveLabel(currentSaveState)}</span>}</div></div>
+        <div className="editor-toolbar"><div className="editor-context"><Button className="text-button toolbar-back" onClick={goBack}><ArrowLeft size={16} />{openedFrom === "weekly" ? "Back to week" : selected?.topic_id ? "Back to topic" : selected?.type === "topic" ? "Back to topics" : "Back to library"}</Button><span className="toolbar-divider" /><span className="type-pill" style={{ color: typeMeta[selected.type].color }}><TypeIcon type={selected.type} />{typeMeta[selected.type].label}</span><span className="toolbar-divider" /><label className="status-select"><span className={`status-dot ${selected.status}`} /><Select aria-label="Content status" value={selected.status} disabled={editorLocked} onChange={(event) => updateSelected((current) => ({ ...current, status: event.target.value as ContentStatus }))}>{contentStatuses.map((status) => <option value={status} key={status}>{statusLabels[status]}</option>)}</Select><ChevronDown size={14} /></label>{selected.type !== "topic" && <><span className="toolbar-divider" /><label className={`schedule-chip ${selected.scheduled_at ? "" : "unscheduled"}`}><CalendarDays size={14} /><span>{selected.scheduled_at ? shortDate.format(new Date(selected.scheduled_at)) : "Add date"}</span><Input className="schedule-chip-input" type="date" aria-label="Scheduled date" disabled={editorLocked} onClick={(event) => { try { event.currentTarget.showPicker(); } catch { /* The native control still opens on its own. */ } }} value={selected.scheduled_at ? dayKey(new Date(selected.scheduled_at)) : ""} onChange={(event) => updateSelected((current) => ({ ...current, scheduled_at: event.target.value ? scheduledAtFor(event.target.value) : undefined }))} /></label></>}</div><div className="editor-actions">{selectedSchedulePending ? <span className="saved-state saving" role="status"><LoaderCircle className="spin" size={14} />Updating schedule…</span> : <span className={`saved-state ${currentSaveState}`} aria-live="polite">{currentSaveState === "saving" || currentSaveState === "retrying" ? <LoaderCircle className="spin" size={14} /> : currentSaveState === "conflict" || currentSaveState === "error" ? <AlertTriangle size={14} /> : <Check size={14} />}{saveLabel(currentSaveState)}</span>}<Button className="delete-button" disabled={lifecycleDisabled} onClick={() => setDeleteOpen(true)}><Trash2 size={15} /> Delete</Button></div></div>
         {foreignPendingLifecycle && <div className="inline-error" role="alert">Review the {foreignPendingLifecycle.action} conflict for “{foreignPendingLifecycleTitle ?? "another item"}” before continuing. <Button onClick={() => { setActionError(""); openContent(foreignPendingLifecycle.id); }}>Review item</Button></div>}
         {actionError && <div className="inline-error" role="alert">{actionError}</div>}
         {currentSaveState === "error" && <div className="inline-error" role="alert">Check the fields below. Your edits have not been saved. <Button onClick={() => autosaveManager?.enqueue(selected)}>Retry save</Button></div>}
         <div className="editor-scroll"><article className={`editor-document ${selected.type === "topic" ? "topic-document" : ""}`}>
-          <div className="document-heading" inert={editorLocked}>{selected.topic_id && <Button className="topic-back" onClick={() => openContent(selected.topic_id!)}><ArrowLeft size={14} />{allSummaries.find((item) => item.id === selected.topic_id)?.working_title || "Open topic group"}</Button>}<label className="document-field document-field-large"><span>{selected.type === "topic" ? "Topic" : "Working title"}</span><Input aria-label="Working title" value={selected.working_title} placeholder={selected.type === "topic" ? "What is the idea?" : "Name this piece"} onChange={(event) => updateSelected((current) => ({ ...current, working_title: event.target.value }))} /></label></div>
+          <div className="document-heading" inert={editorLocked}>{selected.topic_id && <Button className="topic-back" onClick={() => openContent(selected.topic_id!)}><ArrowLeft size={14} />{allSummaries.find((item) => item.id === selected.topic_id)?.working_title || "Open topic group"}</Button>}<label className="document-field document-field-large"><span className="visually-hidden">{selected.type === "topic" ? "Topic" : "Working title"}</span><Input aria-label="Working title" value={selected.working_title} placeholder={selected.type === "topic" ? "What is the idea?" : "Name this piece"} onChange={(event) => updateSelected((current) => ({ ...current, working_title: event.target.value }))} /></label></div>
           {conflict && <section className="conflict-panel" aria-labelledby="conflict-title"><div className="conflict-title"><AlertTriangle size={18} /><div><h2 id="conflict-title">This item changed elsewhere</h2><p>{selectedPendingLifecycle ? `Review the current server version before you retry or cancel ${selectedPendingLifecycle.action}.` : "Compare the saved server version with your unsaved local work. Nothing was overwritten."}</p></div></div><div className="conflict-columns"><div><h3>Server version</h3><pre>{JSON.stringify(editableSnapshot(conflict.server), null, 2)}</pre></div><div><h3>{selectedPendingLifecycle ? "Previous version" : "Your unsaved version"}</h3><pre>{JSON.stringify(editableSnapshot(conflict.local), null, 2)}</pre></div></div><div className="conflict-actions">{selectedPendingLifecycle ? <><Button onClick={() => resolveLifecycleConflict(false)}>Cancel action</Button><Button className="primary-button" onClick={() => resolveLifecycleConflict(true)}>Retry {selectedPendingLifecycle.action}</Button></> : <><Button onClick={() => resolveSelectedConflict("server")}>Use server version</Button><Button className="primary-button" onClick={() => resolveSelectedConflict("local")}>Save my version</Button></>}</div></section>}
           <div className="editor-content" inert={editorLocked}><PieceEditor disabled={editorLocked} key={selected.id} csrfToken={csrfToken ?? ""} onSessionExpired={expireSession} detail={selected} topics={allSummaries.filter((item) => item.type === "topic")} onChange={(detail) => updateSelected(() => detail)} showMetadata={false} /></div>
           {selected.type === "topic" && <TopicPieces csrfToken={csrfToken ?? ""} key={selected.id} topicId={selected.id} items={allSummaries.filter((item) => item.topic_id === selected.id).sort((a, b) => a.created_at.localeCompare(b.created_at) || a.id.localeCompare(b.id))} topics={allSummaries.filter((item) => item.type === "topic")} enabledTypes={enabledTypes} documents={documents} states={saveStates} manager={autosaveManager} blockedIds={new Set([...schedulePendingIds, ...(pendingLifecycle ? [pendingLifecycle.id] : [])])} onChange={updateDocument} onLoaded={receiveDocument} onSessionExpired={expireSession} onOpen={openContent} onCreate={(type, format, topicId) => createItem(type, undefined, topicId, format)} createPending={createPending} />}
         </article></div>
-        <footer className="editor-footer"><span>{typeMeta[selected.type].description}</span><Button className="delete-button" disabled={lifecycleDisabled} onClick={() => setDeleteOpen(true)}><Trash2 size={15} /> Delete</Button></footer>
       </> : <div className="editor-empty">{detailLoading ? <><LoaderCircle className="spin" /><p>Loading selected content…</p></> : detailError ? <><AlertTriangle /><h1>Could not open this item</h1><p role="alert">{detailError}</p><Button className="primary-button" onClick={() => setDetailReload((value) => value + 1)}>Retry loading item</Button></> : <><SquarePen size={28} /><h1>{allSummaries.length ? "Choose an item" : "Start writing"}</h1><p>{allSummaries.length ? "Select content from your library." : "Pick a format to create your first piece."}</p>{actionError && <p className="inline-error" role="alert">{actionError}</p>}<Button className="primary-button" onClick={startCreate}><Plus size={16} /> {createLabel}</Button></>}</div>}
     </section>}
 

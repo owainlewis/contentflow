@@ -37,15 +37,13 @@ describe("focused piece editor", () => {
     expect(change.mock.lastCall?.[0].scheduled_at.startsWith("2026-09-25")).toBe(true);
   });
 
-  it("keeps document actions compact and topic notes available on demand", async () => {
-    const user = userEvent.setup();
+  it("keeps document actions compact and topic notes on the page", () => {
     const detail = { ...piece("topic"), content: { source: "Core idea", source_url: "https://docs.google.com/document/d/example" } };
     const change = vi.fn();
     const { container } = render(<PieceEditor detail={detail} topics={[]} onChange={change} />);
     expect(screen.getByRole("link", { name: "Open Source document" }).getAttribute("href")).toBe(detail.content.source_url);
-    expect(screen.queryByLabelText("Topic notes")).toBeNull();
+    expect(screen.queryByRole("dialog")).toBeNull();
     expect(container.querySelector("details")).toBeNull();
-    await user.click(screen.getByRole("button", { name: "Topic notes" }));
     fireEvent.change(screen.getByRole("textbox", { name: "Topic notes" }), { target: { value: "Updated idea" } });
     expect(change).toHaveBeenLastCalledWith(expect.objectContaining({ content: { ...detail.content, source: "Updated idea" } }));
   });

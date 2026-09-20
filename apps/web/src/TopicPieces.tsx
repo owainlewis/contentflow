@@ -52,7 +52,7 @@ export default function TopicPieces(props: Props) {
   const alongside = props.items.find((item) => item.id === alongsideId && item.id !== primary?.id);
   return <section className="topic-production" aria-label="Related content">
     <div className="production-controls">
-      <div className="piece-tabs" aria-label="Choose a piece">{props.items.map((item) => <Button key={item.id} type="button" aria-pressed={primary?.id === item.id} onClick={() => { setPrimaryId(item.id); if (alongsideId === item.id) setAlongsideId(""); }}><TypeIcon type={item.type} /><span>{typeMeta[item.type].label}{item.format ? ` · ${item.format}` : ""}</span></Button>)}</div>
+      <div className="piece-tabs" aria-label="Choose a piece">{props.items.map((item) => <Button key={item.id} type="button" aria-pressed={primary?.id === item.id} onClick={() => { setPrimaryId(item.id); if (alongsideId === item.id) setAlongsideId(""); }}><TypeIcon type={item.type} /><span>{typeMeta[item.type].label}{item.format ? ` · ${item.format.charAt(0).toUpperCase()}${item.format.slice(1)}` : ""}</span></Button>)}</div>
       <Button className="secondary-button" aria-expanded={adding} onClick={() => setAdding(!adding)}>{adding ? "Cancel" : "Add piece"}</Button>
     </div>
     {adding && <form className="topic-add" onSubmit={(event) => { event.preventDefault(); void props.onCreate(type, format || formats[type]?.[0] || "", props.topicId).then((created) => { if (created) setAdding(false); }); }}>
