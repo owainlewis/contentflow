@@ -342,9 +342,7 @@ describe("persistent ContentFlow workspace", () => {
     await user.click(screen.getByRole("button", { name: "Add Source document" }));
     fireEvent.change(screen.getByRole("textbox", { name: "Source document" }), { target: { value: "https://docs.google.com/document/d/source" } });
     await user.keyboard("{Escape}");
-    await user.click(screen.getByRole("button", { name: "Topic notes" }));
     fireEvent.change(screen.getByRole("textbox", { name: "Topic notes" }), { target: { value: "Start from the practical example." } });
-    await user.keyboard("{Escape}");
     await waitFor(() => expect([...api.items.values()].find((item) => item.type === "topic")?.working_title).toBe("One idea, many versions"), { timeout: 2500 });
     const topic = [...api.items.values()].find((item) => item.type === "topic")!;
 
@@ -1744,7 +1742,7 @@ describe("persistent ContentFlow workspace", () => {
     await screen.findByDisplayValue("LinkedIn one");
 
     await user.click(screen.getByRole("button", { name: "Week" }));
-    expect(await screen.findByRole("heading", { name: "Weekly matrix" })).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "Week" })).toBeTruthy();
     expect(window.location.pathname).toBe("/weekly");
 
     goTo("/calendar");
@@ -1880,7 +1878,7 @@ describe("persistent ContentFlow workspace", () => {
     window.history.pushState({}, "", "/weekly");
     renderWorkspace(api);
 
-    expect(await screen.findByRole("heading", { name: "Weekly matrix" })).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "Week" })).toBeTruthy();
   });
 
   it("places scheduled content in the correct platform and weekday cells", async () => {
@@ -1903,7 +1901,7 @@ describe("persistent ContentFlow workspace", () => {
     const instagramCell = screen.getByLabelText(`Instagram on ${tuesday.toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long", year: "numeric" })}`);
     expect(within(youtubeCell).getByRole("button", { name: "Open YouTube one" })).toBeTruthy();
     expect(within(instagramCell).getByRole("button", { name: "Open Instagram one" })).toBeTruthy();
-    expect(screen.getByText("2 pieces scheduled this week")).toBeTruthy();
+    expect(screen.getByText("2 pieces scheduled")).toBeTruthy();
     expect(within(youtubeCell).getByText("Topic one")).toBeTruthy();
     expect(screen.queryByRole("row", { name: /^Topic/ })).toBeNull();
   });
@@ -1925,7 +1923,7 @@ describe("persistent ContentFlow workspace", () => {
     await user.click(screen.getByLabelText("Show TikTok"));
     await user.click(screen.getByRole("button", { name: "Week" }));
 
-    expect(await screen.findByText("1 piece scheduled this week")).toBeTruthy();
+    expect(await screen.findByText("1 piece scheduled")).toBeTruthy();
     expect(screen.queryByRole("row", { name: /^TikTok/ })).toBeNull();
   });
 
@@ -1960,7 +1958,7 @@ describe("persistent ContentFlow workspace", () => {
     expect(new Date(created.scheduled_at!).toDateString()).toBe(wednesday.toDateString());
     expect(await screen.findByRole("button", { name: "Open Launch teaser" })).toBeTruthy();
     expect(window.location.pathname).toBe("/weekly");
-    expect(screen.getByRole("heading", { name: "Weekly matrix" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Week" })).toBeTruthy();
     expect(screen.queryByLabelText(`New LinkedIn title for ${fullDate.format(wednesday)}`)).toBeNull();
 
     goTo("/calendar");
@@ -2085,7 +2083,28 @@ describe("persistent ContentFlow workspace", () => {
     const scheduled = (JSON.parse(api.replaceBodies[0]) as { scheduled_at?: string }).scheduled_at;
     expect(new Date(scheduled!).toDateString()).toBe(tuesday.toDateString());
     expect(window.location.pathname).toBe("/weekly");
-    expect(screen.getByRole("heading", { name: "Weekly matrix" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Week" })).toBeTruthy();
+  });
+
+  it("returns to the week after opening a piece from it, and sets its date from the toolbar", async () => {
+    const monday = new Date();
+    monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
+    monday.setHours(9, 0, 0, 0);
+    const api = new FakeAPI([{ ...detail("linkedin"), scheduled_at: monday.toISOString() }]);
+    vi.stubGlobal("fetch", api.fetch);
+    const user = userEvent.setup();
+    renderWorkspace(api);
+    await screen.findByDisplayValue("LinkedIn one");
+    await user.click(screen.getByRole("button", { name: "Week" }));
+    await user.click(screen.getByRole("button", { name: "Open LinkedIn one" }));
+    await screen.findByDisplayValue("LinkedIn one");
+
+    fireEvent.change(screen.getByLabelText("Scheduled date"), { target: { value: "2031-02-03" } });
+    await waitFor(() => expect(api.replaceBodies.length).toBe(1), { timeout: 2500 });
+    expect(new Date((JSON.parse(api.replaceBodies[0]) as { scheduled_at: string }).scheduled_at).getFullYear()).toBe(2031);
+
+    await user.click(screen.getByRole("button", { name: "Back to week" }));
+    expect(window.location.pathname).toBe("/weekly");
   });
 
   it("keeps the selected editor revision and schedule current after a weekly move", async () => {
