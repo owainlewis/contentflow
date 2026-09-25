@@ -30,7 +30,8 @@ function ResourceLink({ label, value, onChange, disabled = false }: { label: str
 export default function PieceEditor({ detail, topics, onChange, showMetadata = true, csrfToken = "", onSessionExpired, disabled = false }: { detail: ContentDetail; topics: ContentSummary[]; onChange: (detail: ContentDetail) => void; showMetadata?: boolean; csrfToken?: string; onSessionExpired?: () => void; disabled?: boolean }) {
   const patch = (value: Partial<ContentDetail>) => onChange({ ...detail, ...value });
   const content = detail.content;
-  const textField = (label: string, field: string, value: string, rows = 5) => <label className="resource-field"><span>{label}</span><AutoTextarea aria-label={label} minRows={rows} value={value} onChange={(event) => patch({ content: { ...content, [field]: event.target.value } })} /></label>;
+  // The primary field is the piece's main writing surface and gets the tallest floor.
+  const textField = (label: string, field: string, value: string, rows = 5, primary = false) => <label className={primary ? "resource-field piece-primary-field" : "resource-field"}><span>{label}</span><AutoTextarea aria-label={label} minRows={rows} value={value} onChange={(event) => patch({ content: { ...content, [field]: event.target.value } })} /></label>;
   const editorDialog = (title: string, fields: ReactNode, trigger = title) => <Dialog title={title} trigger={<Button disabled={disabled}>{trigger}</Button>}><fieldset className="piece-dialog-fields" disabled={disabled}>{fields}</fieldset></Dialog>;
   if (detail.type === "topic" && "source" in content) return <div className="resource-editor piece-topic-source"><ResourceLink disabled={disabled} label="Source document" value={content.source_url} onChange={(source_url) => patch({ content: { ...content, source_url } })} />{textField("Topic notes", "source", content.source, 4)}</div>;
   const youtube = detail.type === "youtube" ? content as YouTubeContent : undefined;
@@ -52,8 +53,8 @@ export default function PieceEditor({ detail, topics, onChange, showMetadata = t
     ]} /> : <>
       {"subject" in content && textField("Email subject", "subject", content.subject, 1)}
       {"headline" in content && <>{textField("Substack headline", "headline", content.headline, 1)}{textField("Substack sub-headline", "subheadline", content.subheadline, 1)}</>}
-      {"body" in content && textField(detail.type === "linkedin" ? "LinkedIn post" : detail.type === "x" ? "X post" : detail.type === "email" ? "Email body" : "Article body", "body", content.body, 8)}
-      {"script" in content && textField(detail.type === "instagram" ? "Instagram script" : "TikTok script", "script", content.script)}
+      {"body" in content && textField(detail.type === "linkedin" ? "LinkedIn post" : detail.type === "x" ? "X post" : detail.type === "email" ? "Email body" : "Article body", "body", content.body, 8, true)}
+      {"script" in content && textField(detail.type === "instagram" ? "Instagram script" : "TikTok script", "script", content.script, 8, true)}
       {detail.type === "instagram" && "script" in content && textField("Instagram caption", "caption", content.caption ?? "")}
     </>}</div>
     <aside className="piece-rail" aria-label="Links and details">

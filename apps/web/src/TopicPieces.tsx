@@ -52,8 +52,8 @@ export default function TopicPieces(props: Props) {
   const alongside = props.items.find((item) => item.id === alongsideId && item.id !== primary?.id);
   return <section className="topic-production" aria-label="Related content">
     <div className="production-controls">
-      <div className="piece-tabs" aria-label="Choose a piece">{props.items.map((item) => <Button key={item.id} type="button" aria-pressed={primary?.id === item.id} onClick={() => { setPrimaryId(item.id); if (alongsideId === item.id) setAlongsideId(""); }}><TypeIcon type={item.type} /><span>{typeMeta[item.type].label}{item.format ? ` · ${item.format.charAt(0).toUpperCase()}${item.format.slice(1)}` : ""}</span></Button>)}</div>
-      <Button className="secondary-button" aria-expanded={adding} onClick={() => setAdding(!adding)}>{adding ? "Cancel" : "Add piece"}</Button>
+      {props.items.length ? <div className="piece-tabs" aria-label="Choose a piece">{props.items.map((item) => <Button key={item.id} type="button" aria-pressed={primary?.id === item.id} onClick={() => { setPrimaryId(item.id); if (alongsideId === item.id) setAlongsideId(""); }}><TypeIcon type={item.type} /><span>{typeMeta[item.type].label}{item.format ? ` · ${item.format.charAt(0).toUpperCase()}${item.format.slice(1)}` : ""}</span></Button>)}</div> : <p className="topic-empty">Add a Reel, post or video to start shaping this idea.</p>}
+      <Button className={props.items.length || adding ? "secondary-button" : "primary-button"} aria-expanded={adding} onClick={() => setAdding(!adding)}>{adding ? "Cancel" : "Add piece"}</Button>
     </div>
     {adding && <form className="topic-add" onSubmit={(event) => { event.preventDefault(); void props.onCreate(type, format || formats[type]?.[0] || "", props.topicId).then((created) => { if (created) setAdding(false); }); }}>
       <label>Platform<Select aria-label="New piece platform" value={type} disabled={props.createPending} onChange={(event) => { setType(event.target.value as ContentType); setFormat(""); }}>{props.enabledTypes.map((platform) => <option key={platform} value={platform}>{typeMeta[platform].label}</option>)}</Select></label>
@@ -61,7 +61,6 @@ export default function TopicPieces(props: Props) {
       <Button type="submit" className="primary-button" disabled={props.createPending}>{props.createPending ? "Adding…" : "Add related piece"}</Button>
     </form>}
     {props.items.length > 1 && <label className="alongside-control">Open alongside<Select aria-label="Open alongside" value={alongside?.id ?? ""} onChange={(event) => setAlongsideId(event.target.value)}><option value="">Just this piece</option>{props.items.filter((item) => item.id !== primary?.id).map((item) => <option key={item.id} value={item.id}>{typeMeta[item.type].label} · {item.format || displayTitle(item)}</option>)}</Select></label>}
-    {!props.items.length && <p className="topic-empty">Add a Reel, post or video to start shaping this idea.</p>}
     <div className={`topic-pieces${alongside ? " comparing" : ""}`}>{primary && <RelatedPiece key={primary.id} {...props} item={primary} />}{alongside && <RelatedPiece key={alongside.id} {...props} item={alongside} />}</div>
   </section>;
 }
