@@ -213,7 +213,6 @@ export default function WeeklyMatrix({ items, topics = [], enabledTypes, onOpen,
     <section className="page weekly-page" aria-label="Weekly content matrix">
       <header className="page-header weekly-header">
         <div>
-
           <h1>Week</h1>
           <p className="weekly-summary"><span>{scheduledThisWeek.length} {scheduledThisWeek.length === 1 ? "piece" : "pieces"} scheduled</span>{contentStatuses.map((status) => {
             const count = scheduledThisWeek.filter((item) => item.status === status).length;
@@ -246,7 +245,7 @@ export default function WeeklyMatrix({ items, topics = [], enabledTypes, onOpen,
         <table className="weekly-matrix" aria-label={`Content scheduled for ${label}`}>
           <thead>
             <tr>
-              <th scope="col" className="weekly-corner"><CalendarDays size={15} /> Platform</th>
+              <th scope="col" className="weekly-corner">Platform</th>
               {days.map((date) => {
                 const key = dayKey(date);
                 return <th scope="col" key={key} className={key === today ? "today" : ""}><span>{dayName.format(date)}</span><strong>{date.getDate()}</strong></th>;
