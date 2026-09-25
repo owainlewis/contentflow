@@ -196,24 +196,15 @@ button, select { cursor: pointer; }
 .editor-toolbar {
   position: relative;
   z-index: 1;
-  height: 68px;
   flex: 0 0 auto;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 18px;
-  padding: 0 27px;
   border-bottom: 1px solid var(--line);
   background: color-mix(in srgb, var(--editor) 96%, transparent);
 }
-.editor-context, .editor-actions { display: flex; align-items: center; min-width: 0; }
-.editor-context { gap: 18px; }
-.type-pill { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; white-space: nowrap; }
+.type-pill { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; }
 .status-select { position: relative; display: flex; align-items: center; gap: 6px; color: var(--text-soft); }
-.status-select select { appearance: none; padding: 6px 19px 6px 0; border: 0; outline: 0; color: inherit; background: transparent; font-size: 12.5px; }
+.status-select select { field-sizing: content; appearance: none; padding: 6px 19px 6px 0; border: 0; outline: 0; color: inherit; background: transparent; font-size: 12.5px; }
 .status-select > svg { position: absolute; right: 0; pointer-events: none; }
-.editor-actions { gap: 8px; }
-.saved-state { display: flex; align-items: center; gap: 5px; margin-right: 6px; color: var(--text-muted); font-size: var(--font-label); transition: color .2s; }
+.saved-state { display: flex; align-items: center; gap: 5px; color: var(--text-muted); font-size: var(--font-label); transition: color .2s; }
 .saved-state.pulse { color: var(--accent); }
 .primary-button {
   display: flex;
@@ -232,7 +223,7 @@ button, select { cursor: pointer; }
 .editor-scroll { flex: 1; overflow: auto; scrollbar-width: thin; scrollbar-color: #303641 transparent; }
 
 .editor-content { display: contents; }
-.document-heading { padding: 0 2px 38px; border-bottom: 1px solid var(--line); }
+.document-heading { margin-bottom: 16px; }
 .document-title-copy h1 {
   max-width: 760px;
   margin: 8px 0 0;
@@ -371,18 +362,11 @@ button, select { cursor: pointer; }
 @keyframes modal-in { from { opacity: 0; transform: translateY(8px) scale(.985); } }
 
 
-@media (max-width: 900px) {
-
-  .editor-toolbar { height: 54px; padding: 0 14px; }
-}
-
 @media (max-width: 600px) {
 
   .title-input { font-size: 30px; }
-  .document-title-copy h1, .document-field-large input { font-size: 30px; }
+  .document-title-copy h1 { font-size: 30px; }
   .document-field-subtitle input { font-size: 17px; }
-  .editor-actions .icon-button { display: none; }
-  .type-pill { font-size: var(--font-label); }
   .create-grid, .conflict-columns { grid-template-columns: 1fr; }
   .modal-backdrop { padding: 12px; align-items: end; }
   .modal-card { max-height: calc(100vh - 24px); overflow: auto; border-radius: 15px 15px 10px 10px; }
@@ -531,7 +515,6 @@ textarea.auto-textarea { resize: none; overflow-y: hidden; }
 .piece-metadata { display: flex; flex-wrap: wrap; gap: 12px; }
 .piece-metadata > label { flex: 1 1 120px; }
 .topic-document { max-width: 1500px; }
-.topic-document .document-heading { margin-bottom: 28px; }
 .topic-production { margin-top: 44px; padding-top: 28px; border-top: 1px solid var(--line); }
 .topic-production h2 { font-size: 1.35rem; margin: 0 0 8px; }
 .topic-production-header p, .topic-empty { color: var(--text-soft); margin: 0; font-size: var(--font-ui); }
@@ -586,19 +569,14 @@ textarea.auto-textarea { resize: none; overflow-y: hidden; }
 .content-list-grid .card-copy strong { font-size: 17px; }
 .focus-workspace { flex: 1; height: auto; overflow: visible; }
 .editor-scroll { overflow: visible; }
-.editor-toolbar { height: 52px; padding: 0 32px; }
-.editor-document { width: min(1120px, calc(100% - 80px)); margin: 0 auto; padding: 32px 0 72px; }
-.document-heading { padding: 0 0 18px; margin-bottom: 20px; border: 0; }
 .title-input { font-size: clamp(26px, 2.5vw, 34px); line-height: 1.3; }
 .document-meta { margin-top: 8px; }
 .editor-footer { background: transparent; }
 .resource-editor { gap: 18px; }
 .resource-field textarea { background: transparent; border-color: var(--line); padding: 16px; }
-.piece-editor > .resource-field textarea { min-height: 150px; }
 .piece-resource-link { display: flex; flex-wrap: wrap; align-items: baseline; gap: 16px; font-size: var(--font-ui); }
 .piece-resource-link a { display: inline-flex; align-items: center; gap: 7px; color: var(--text-soft); text-decoration: none; }
 .piece-resource-link a:hover { text-decoration: underline; }
-.piece-settings { padding-top: 18px; border-top: 1px solid var(--line); }
 .piece-youtube-package { display: grid; grid-template-columns: minmax(0, 1fr) minmax(200px, 340px); gap: 24px; align-items: start; }
 .thumbnail-upload { display: grid; gap: 8px; min-width: 0; }
 .thumbnail-label { color: var(--text-soft); font-size: var(--font-ui); }
@@ -620,8 +598,6 @@ textarea.auto-textarea { resize: none; overflow-y: hidden; }
 .topic-pieces { display: grid; grid-template-columns: minmax(0, 1fr); gap: 32px; align-items: start; }
 .topic-pieces.comparing { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .topic-pieces.comparing .piece-youtube-package { grid-template-columns: minmax(0, 1fr); }
-.topic-piece { border: 0; padding-top: 16px; }
-.topic-piece header { margin-bottom: 20px; }
 .production-controls .topic-empty { padding: 0; }
 button:focus-visible, summary:focus-visible, a:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 @media (max-width: 760px) {
@@ -633,15 +609,12 @@ button:focus-visible, summary:focus-visible, a:focus-visible, select:focus-visib
   .new-content-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; }
   .page { padding: 24px 16px 40px; }
   .editor-panel { height: auto; }
-  .editor-document { width: calc(100% - 32px); padding-top: 24px; }
-  .editor-toolbar { padding: 0 16px; }
   .topic-pieces.comparing, .piece-youtube-package { grid-template-columns: minmax(0, 1fr); }
   .production-controls { align-items: flex-start; }
   .piece-tabs button { padding: 8px; }
   .alongside-control { justify-content: flex-start; flex-wrap: wrap; }
   .content-list-page .page-header { align-items: flex-start; }
   .content-list-page .page-header h1 { font-size: 24px; }
-  .saved-state { display: flex; }
 }
 
 .content-list-page { padding: 42px 32px 64px; }
@@ -653,14 +626,12 @@ button:focus-visible, summary:focus-visible, a:focus-visible, select:focus-visib
 .topic-piece-count, .card-copy > span:last-child { color: var(--muted); font-size: 12px; }
 .workspace-back { padding: 12px 32px 0; }
 .workspace-back button { display: flex; align-items: center; gap: 8px; text-decoration: none; }
-.document-field-large input { font-size: clamp(26px, 2.5vw, 34px); }
 @media (max-width: 760px) { .content-list-page { padding: 24px 16px; } .workspace-back { padding-left: 16px; } .content-list-heading { align-items: flex-start; } }
 .thumbnail-actions button { padding: 6px 9px; border: 1px solid var(--line); border-radius: 5px; color: var(--text-soft); background: var(--surface); font-size: 12px; }
 .thumbnail-actions button:hover:not(:disabled) { border-color: var(--line-strong); color: var(--ink); }
 .thumbnail-actions button:disabled { opacity: .5; cursor: wait; }
 .piece-topic-source { display: flex; align-items: baseline; flex-wrap: wrap; gap: 12px 24px; }
 .eyebrow { margin: 0; color: var(--text-muted); font-size: var(--font-label); font-weight: 650; letter-spacing: .08em; text-transform: uppercase; }
-.editor-document:not(.topic-document) .document-field-large input { font-size: 20px; letter-spacing: -.02em; line-height: 1.4; }
 
 .week-shortcuts { display: flex; gap: 2px; padding: 2px; border: 1px solid var(--line); border-radius: 7px; }
 .week-shortcuts .secondary-button { padding: 5px 10px; border-color: transparent; color: var(--text-muted); background: transparent; font-size: 13px; }
@@ -745,45 +716,14 @@ button:focus-visible, summary:focus-visible, a:focus-visible, select:focus-visib
 .piece-topic-source { align-items: start; }
 .piece-topic-source > .resource-field { flex: 1 1 100%; order: -1; }
 .piece-youtube-copy { display: grid; gap: 18px; min-width: 0; }
-.editor-document:not(.topic-document) .document-field-large input { font-size: 26px; letter-spacing: -.025em; line-height: 1.3; }
 
 /* Tight chrome: one toolbar row, a writing column that fills the screen, and a side rail. */
-.editor-toolbar { height: 48px; padding: 0 24px; }
-.toolbar-back { display: flex; align-items: center; gap: 7px; text-decoration: none; white-space: nowrap; }
+.toolbar-back { display: flex; align-items: center; gap: 7px; text-decoration: none; }
 .toolbar-back:hover { color: var(--ink); }
-.editor-actions .delete-button { margin-left: 6px; }
-.editor-document { width: min(1180px, calc(100% - 48px)); padding: 20px 0 32px; }
-.document-heading { padding: 0; margin-bottom: 14px; }
-.topic-document .document-heading { margin-bottom: 14px; }
 .document-field { gap: 0; }
-.piece-editor { grid-template-columns: minmax(0, 1fr) 248px; gap: 28px; align-items: start; }
-.piece-main { display: grid; gap: 16px; min-width: 0; }
-.piece-main > .resource-field:last-child textarea { min-height: calc(100dvh - 250px); }
-.piece-main .ui-tab-list { margin-bottom: 16px; }
-.piece-rail { position: sticky; top: 16px; display: grid; gap: 12px; padding: 4px 0 0 20px; border-left: 1px solid var(--line-soft); }
-.piece-rail .piece-resource-link { flex-direction: column; align-items: stretch; gap: 8px; }
-.piece-rail .piece-resource-link button, .piece-rail .piece-settings > button { width: 100%; margin: 0; }
-.piece-rail .piece-settings { flex-direction: column; align-items: stretch; gap: 8px; padding-top: 12px; border-top: 1px solid var(--line-soft); }
-.topic-pieces .piece-main > .resource-field:last-child textarea { min-height: 220px; }
-.topic-pieces.comparing .piece-editor { grid-template-columns: minmax(0, 1fr); }
-.topic-pieces.comparing .piece-rail { position: static; padding: 16px 0 0; border-left: 0; border-top: 1px solid var(--line-soft); }
 .topic-production { margin-top: 32px; }
-.topic-piece { padding-top: 8px; }
+.topic-piece { border: 0; padding-top: 8px; }
 .topic-piece header { margin-bottom: 12px; }
-@media (max-width: 900px) {
-  .piece-editor { grid-template-columns: minmax(0, 1fr); }
-  .piece-rail { position: static; padding: 16px 0 0; border-left: 0; border-top: 1px solid var(--line-soft); }
-  .piece-main > .resource-field:last-child textarea { min-height: 50dvh; }
-  .toolbar-back { font-size: 0; gap: 0; }
-}
-@media (max-width: 600px) {
-  .editor-toolbar { padding: 0 16px; }
-  .editor-context { gap: 10px; }
-  .editor-actions .delete-button { margin-left: 0; font-size: 0; gap: 0; }
-  /* Only the quiet "Saved" state shrinks to its icon; problems keep their words. */
-  .saved-state.saved { margin-right: 0; font-size: 0; gap: 0; }
-}
-.schedule-chip { white-space: nowrap; }
 
 /* List pages: title, count and filters share one row. */
 .content-list-page { padding: 24px 32px 48px; }
@@ -796,5 +736,39 @@ button:focus-visible, summary:focus-visible, a:focus-visible, select:focus-visib
 .page-header { margin-bottom: 16px; }
 .page-header h1 { margin: 0; font-size: 24px; }
 .weekly-summary { margin-top: 4px; }
-.piece-youtube-copy textarea { min-height: calc(100dvh - 440px); }
-.topic-pieces .piece-youtube-copy textarea { min-height: 160px; }
+
+/* Editor layout. The toolbar is one wrapping row: context controls flow on
+   the left, and the save state and Delete stay together on the right. Anything
+   that does not fit moves to a new line instead of being clipped. The document is one centred
+   column; the links and details rail sits beside the writing on wide screens
+   and below it on narrow ones, in the same order as the DOM. */
+.editor-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 16px; min-height: 48px; padding: 6px 24px; }
+.editor-context { display: contents; }
+.editor-actions { display: flex; flex: 0 0 auto; align-items: center; gap: 12px; margin-left: auto; }
+.toolbar-back, .type-pill, .status-select, .schedule-chip, .saved-state, .editor-actions .delete-button { flex: 0 0 auto; min-height: 32px; white-space: nowrap; }
+.editor-document { width: min(1180px, calc(100% - 48px)); margin: 0 auto; padding: 24px 0 48px; }
+.editor-document .document-field-large input { font-size: clamp(22px, 1.4rem + .6vw, 28px); letter-spacing: -.025em; line-height: 1.3; }
+.topic-document .document-field-large input { font-size: clamp(22px, 1.1rem + 1.6vw, 34px); }
+.piece-editor { grid-template-columns: minmax(0, 1fr) 240px; gap: 32px; align-items: start; }
+.piece-main { display: grid; gap: 16px; min-width: 0; }
+.piece-main .ui-tab-list { gap: 20px; margin-bottom: 16px; }
+.piece-main .ui-tab { padding: 9px 0; }
+/* Writing fields grow with their text; only the main body gets a generous floor. */
+.piece-primary-field textarea { min-height: clamp(12rem, 40dvh, 28rem); }
+.topic-pieces .piece-primary-field textarea { min-height: 12rem; }
+.piece-rail { position: sticky; top: 16px; display: grid; gap: 16px; padding-left: 24px; border-left: 1px solid var(--line-soft); }
+.piece-rail .piece-resource-link { flex-direction: column; align-items: stretch; gap: 8px; }
+.piece-rail .piece-resource-link button, .piece-rail .piece-settings > button { width: 100%; margin: 0; }
+.piece-rail .piece-settings { flex-direction: column; align-items: stretch; gap: 8px; }
+.topic-pieces.comparing .piece-editor { grid-template-columns: minmax(0, 1fr); }
+.topic-pieces.comparing .piece-rail { position: static; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); padding: 16px 0 0; border-left: 0; border-top: 1px solid var(--line-soft); }
+@media (max-width: 900px) {
+  .piece-editor { grid-template-columns: minmax(0, 1fr); gap: 24px; }
+  .piece-rail { position: static; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); align-items: end; padding: 16px 0 0; border-left: 0; border-top: 1px solid var(--line-soft); }
+}
+@media (max-width: 600px) {
+  .editor-toolbar { gap: 4px 12px; padding: 6px 16px; }
+  /* The arrow alone reads as Back; its label stays the accessible name. */
+  .toolbar-back { font-size: 0; gap: 0; }
+  .editor-document { width: calc(100% - 32px); padding-top: 16px; }
+}
